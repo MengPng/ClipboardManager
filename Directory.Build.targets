@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <Product>本地剪切板管理工具</Product>
+    <Company>ClipboardManager</Company>
+    <VersionPrefix>0.4.4</VersionPrefix>
+    <InformationalVersion>0.4.4-phase4</InformationalVersion>
+  </PropertyGroup>
+</Project>

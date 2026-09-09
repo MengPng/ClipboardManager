@@ -1,0 +1,11 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">0.4.4</PackageVersion>
+    <OutputName>ClipboardManager-$(PackageVersion)-win-x64</OutputName>
+    <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
+    <PublishDir>$(MSBuildThisFileDirectory)..\artifacts\publish\msi-single</PublishDir>
+    <DefineConstants>PublishDir=$(PublishDir);PackageVersion=$(PackageVersion);SourceDir=$(MSBuildThisFileDirectory)..</DefineConstants>
+    <SuppressIces>ICE91</SuppressIces>
+  </PropertyGroup>
+</Project>

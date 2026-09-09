@@ -1,0 +1,23 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="本地剪切板管理工具" Manufacturer="ClipboardManager" Version="$(var.PackageVersion)" UpgradeCode="41A1BD8E-6C3E-4CBE-9B67-0A854F74CD6D" Scope="perUser">
+    <Icon Id="AppIcon" SourceFile="$(var.SourceDir)\src\ClipboardManager.Windows\Assets\AppIcon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <MajorUpgrade DowngradeErrorMessage="已安装更高版本。" />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="ClipboardManager.App">
+        <Component Id="MainExecutable" Guid="154994B0-A6FC-4CC7-A564-1662B668E574">
+          <File Id="ClipboardManagerExe" Source="$(var.PublishDir)\ClipboardManager.exe">
+            <Shortcut Id="ApplicationStartMenuShortcut" Directory="ProgramMenuFolder" Name="本地剪切板管理工具" WorkingDirectory="INSTALLFOLDER" Advertise="no" Icon="AppIcon" />
+          </File>
+          <RegistryValue Root="HKCU" Key="Software\ClipboardManager" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+          <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <Feature Id="MainFeature" Title="本地剪切板管理工具" Level="1">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+  </Package>
+</Wix>

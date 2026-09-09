@@ -1,0 +1,10 @@
+<Application x:Class="ClipboardManager.Windows.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FFF8FAFC" />
+        <SolidColorBrush x:Key="PanelBorderBrush" Color="#FFE2E8F0" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#FF0F766E" />
+    </Application.Resources>
+</Application>
