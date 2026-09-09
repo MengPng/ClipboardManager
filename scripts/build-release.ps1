@@ -1,9 +1,13 @@
-param([string]$Version = "0.6.0")
+param(
+    [string]$Version = "0.6.0",
+    [switch]$IncludeMsi
+)
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $releaseDir = Join-Path $root "artifacts/release/$Version"
 $portableDir = Join-Path $releaseDir "ClipboardManager-$Version-win-x64"
 $zipPath = Join-Path $releaseDir "ClipboardManager-$Version-win-x64-portable.zip"
+$exePath = Join-Path $releaseDir "ClipboardManager-$Version-win-x64.exe"
 
 if (Test-Path $releaseDir) { Remove-Item $releaseDir -Recurse -Force }
 New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
@@ -27,17 +31,20 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $portableDir "release-manifest.json") -Encoding UTF8
 Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
-
-& (Join-Path $PSScriptRoot "build-msi.ps1") -PackageVersion $Version
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-$builtMsi = Get-ChildItem (Join-Path $root "installer/bin") -Filter "ClipboardManager-$Version-win-x64.msi" -Recurse | Select-Object -First 1
-if (-not $builtMsi) { throw "未找到版本 $Version 的 MSI。" }
-$msiTarget = Join-Path $releaseDir $builtMsi.Name
-Copy-Item $builtMsi.FullName $msiTarget -Force
+Copy-Item (Join-Path $portableDir "ClipboardManager.exe") $exePath -Force
 
 $checksums = @(
+    "$(Get-FileHash $exePath -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $exePath -Leaf)"
     "$(Get-FileHash $zipPath -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $zipPath -Leaf)"
-    "$(Get-FileHash $msiTarget -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $msiTarget -Leaf)"
 )
+if ($IncludeMsi) {
+    & (Join-Path $PSScriptRoot "build-msi.ps1") -PackageVersion $Version
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $builtMsi = Get-ChildItem (Join-Path $root "installer/bin") -Filter "ClipboardManager-$Version-win-x64.msi" -Recurse | Select-Object -First 1
+    if (-not $builtMsi) { throw "未找到版本 $Version 的 MSI。" }
+    $msiTarget = Join-Path $releaseDir $builtMsi.Name
+    Copy-Item $builtMsi.FullName $msiTarget -Force
+    $checksums += "$(Get-FileHash $msiTarget -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $msiTarget -Leaf)"
+}
 $checksums | Set-Content (Join-Path $releaseDir "SHA256SUMS.txt") -Encoding ascii
 Write-Output "Release created: $releaseDir"

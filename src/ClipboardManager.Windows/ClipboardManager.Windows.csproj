@@ -20,6 +20,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\AppIcon.ico" />
+    <EmbeddedResource Include="$(MaintenanceHelperPath)" LogicalName="ClipboardManager.Embedded.Maintenance.exe" Condition="'$(MaintenanceHelperPath)' != '' and Exists('$(MaintenanceHelperPath)')" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ClipboardManager.Domain\ClipboardManager.Domain.csproj" />

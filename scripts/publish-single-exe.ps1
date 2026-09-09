@@ -17,21 +17,6 @@ if (Test-Path $maintenancePublish) {
     Remove-Item $maintenancePublish -Recurse -Force
 }
 
-Write-Output "正在发布 Windows x64 单文件自包含可执行程序..."
-dotnet publish $proj `
-    --configuration $Configuration `
-    --runtime win-x64 `
-    --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:NuGetAudit=false `
-    -p:Version=$Version `
-    -p:UseSharedCompilation=false `
-    --output $tempPublish
-
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
-
 Write-Output "正在发布备份恢复助手..."
 dotnet publish $maintenanceProj `
     --configuration $Configuration `
@@ -42,6 +27,27 @@ dotnet publish $maintenanceProj `
     -p:Version=$Version `
     -p:UseSharedCompilation=false `
     --output $maintenancePublish
+
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+$maintenanceExe = Join-Path $maintenancePublish "ClipboardManager.Maintenance.exe"
+if (-not (Test-Path $maintenanceExe)) {
+    throw "单文件发布未生成 ClipboardManager.Maintenance.exe"
+}
+
+Write-Output "正在发布内置恢复能力的 Windows x64 单文件程序..."
+dotnet publish $proj `
+    --configuration $Configuration `
+    --runtime win-x64 `
+    --self-contained true `
+    -p:PublishSingleFile=true `
+    -p:NuGetAudit=false `
+    -p:Version=$Version `
+    -p:UseSharedCompilation=false `
+    -p:MaintenanceHelperPath=$maintenanceExe `
+    --output $tempPublish
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
@@ -59,10 +65,6 @@ if (-not (Test-Path $destDir)) {
 }
 
 Copy-Item $sourceExe $destFile -Force
-$maintenanceExe = Join-Path $maintenancePublish "ClipboardManager.Maintenance.exe"
-if (-not (Test-Path $maintenanceExe)) {
-    throw "单文件发布未生成 ClipboardManager.Maintenance.exe"
-}
 $maintenanceDest = Join-Path $destDir "ClipboardManager.Maintenance.exe"
 Copy-Item $maintenanceExe $maintenanceDest -Force
 $hash = (Get-FileHash $destFile -Algorithm SHA256).Hash

@@ -39,7 +39,7 @@ jobs:
           dotnet test ClipboardManager.sln --configuration Release --no-build -p:NuGetAudit=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build portable ZIP and MSI
+      - name: Build complete single EXE and portable ZIP
         shell: pwsh
         run: ./scripts/build-release.ps1 -Version "${{ steps.version.outputs.value }}"
 
@@ -48,8 +48,8 @@ jobs:
         with:
           name: ClipboardManager-${{ steps.version.outputs.value }}-win-x64
           path: |
+            artifacts/release/${{ steps.version.outputs.value }}/*.exe
             artifacts/release/${{ steps.version.outputs.value }}/*.zip
-            artifacts/release/${{ steps.version.outputs.value }}/*.msi
             artifacts/release/${{ steps.version.outputs.value }}/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -60,8 +60,8 @@ jobs:
         run: |
           $releaseDir = "artifacts/release/${{ steps.version.outputs.value }}"
           gh release create "${{ github.ref_name }}" `
+            "$releaseDir/ClipboardManager-${{ steps.version.outputs.value }}-win-x64.exe" `
             "$releaseDir/ClipboardManager-${{ steps.version.outputs.value }}-win-x64-portable.zip" `
-            "$releaseDir/ClipboardManager-${{ steps.version.outputs.value }}-win-x64.msi" `
             "$releaseDir/SHA256SUMS.txt" `
             --title "ClipboardManager ${{ steps.version.outputs.value }}" `
             --generate-notes `

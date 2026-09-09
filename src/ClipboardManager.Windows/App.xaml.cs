@@ -11,6 +11,8 @@ using Serilog;
 using Serilog.Events;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Windows;
 
 namespace ClipboardManager.Windows;
@@ -153,12 +155,7 @@ public partial class App : System.Windows.Application
     {
         var executable = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executable)) throw new InvalidOperationException("无法确定当前程序路径。");
-        var helper = Path.Combine(AppContext.BaseDirectory, "ClipboardManager.Maintenance.exe");
-        if (!File.Exists(helper))
-        {
-            System.Windows.MessageBox.Show("恢复助手不存在，请重新下载完整发布包。", "无法恢复备份", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
+        var helper = EnsureMaintenanceHelper();
         var start = new ProcessStartInfo(helper) { UseShellExecute = true };
         start.ArgumentList.Add("restore");
         start.ArgumentList.Add(Path.GetFullPath(backupPath));
@@ -167,6 +164,41 @@ public partial class App : System.Windows.Application
         Process.Start(start);
         mainWindow.AllowClose();
         Shutdown();
+    }
+
+    private static string EnsureMaintenanceHelper()
+    {
+        const string resourceName = "ClipboardManager.Embedded.Maintenance.exe";
+        var assembly = Assembly.GetExecutingAssembly();
+        using var resource = assembly.GetManifestResourceStream(resourceName);
+        if (resource is null)
+        {
+            var developmentHelper = Path.Combine(AppContext.BaseDirectory, "ClipboardManager.Maintenance.exe");
+            if (File.Exists(developmentHelper)) return developmentHelper;
+            throw new InvalidOperationException("当前程序未包含备份恢复组件，请使用正式单文件版本。");
+        }
+
+        var helperDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ClipboardManager", "runtime");
+        Directory.CreateDirectory(helperDirectory);
+        var helperPath = Path.Combine(helperDirectory, "ClipboardManager.Maintenance.exe");
+
+        using var memory = new MemoryStream();
+        resource.CopyTo(memory);
+        var embeddedBytes = memory.ToArray();
+        if (File.Exists(helperPath))
+        {
+            using var existing = File.OpenRead(helperPath);
+            var existingHash = SHA256.HashData(existing);
+            var embeddedHash = SHA256.HashData(embeddedBytes);
+            if (existingHash.AsSpan().SequenceEqual(embeddedHash)) return helperPath;
+        }
+
+        var temporaryPath = helperPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        File.WriteAllBytes(temporaryPath, embeddedBytes);
+        File.Move(temporaryPath, helperPath, true);
+        return helperPath;
     }
 
     private static async Task WaitForRestartParentAsync(IReadOnlyList<string> arguments)
