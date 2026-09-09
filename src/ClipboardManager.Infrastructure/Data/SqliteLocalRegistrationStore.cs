@@ -9,9 +9,10 @@ public sealed class SqliteLocalRegistrationStore(SqliteConnectionFactory connect
     public async Task EnsureRegisteredAsync(
         IdentitySession identity,
         DeviceIdentity device,
-        Workspace workspace,
+        IReadOnlyList<Workspace> workspaces,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(workspaces);
         await using var connection = connectionFactory.Create();
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -42,17 +43,23 @@ public sealed class SqliteLocalRegistrationStore(SqliteConnectionFactory connect
             ("$createdAt", device.CreatedAt.ToUniversalTime().ToString("O")),
             ("$now", DateTimeOffset.UtcNow.ToString("O")));
 
-        await ExecuteAsync(connection, (SqliteTransaction)transaction, """
-            INSERT INTO workspaces (id, workspace_type, name, owner_id, created_at, updated_at)
-            VALUES ($id, $type, $name, $ownerId, $createdAt, $updatedAt)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at;
-            """, cancellationToken,
-            ("$id", workspace.Id.ToString("D")),
-            ("$type", (int)workspace.Type),
-            ("$name", workspace.Name),
-            ("$ownerId", identity.IdentityId.ToString("D")),
-            ("$createdAt", workspace.CreatedAt.ToUniversalTime().ToString("O")),
-            ("$updatedAt", DateTimeOffset.UtcNow.ToString("O")));
+        // Every workspace the app can address needs a row here: collection_folders and
+        // collection_items both carry a foreign key to workspaces(id), and foreign keys
+        // are enforced on every connection.
+        foreach (var workspace in workspaces)
+        {
+            await ExecuteAsync(connection, (SqliteTransaction)transaction, """
+                INSERT INTO workspaces (id, workspace_type, name, owner_id, created_at, updated_at)
+                VALUES ($id, $type, $name, $ownerId, $createdAt, $updatedAt)
+                ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at;
+                """, cancellationToken,
+                ("$id", workspace.Id.ToString("D")),
+                ("$type", (int)workspace.Type),
+                ("$name", workspace.Name),
+                ("$ownerId", identity.IdentityId.ToString("D")),
+                ("$createdAt", workspace.CreatedAt.ToUniversalTime().ToString("O")),
+                ("$updatedAt", DateTimeOffset.UtcNow.ToString("O")));
+        }
 
         await transaction.CommitAsync(cancellationToken);
     }

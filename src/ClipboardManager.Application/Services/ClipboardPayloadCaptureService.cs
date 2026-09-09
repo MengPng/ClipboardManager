@@ -46,7 +46,10 @@ public sealed class ClipboardPayloadCaptureService(
             var manifest = JsonSerializer.Serialize(normalized);
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', normalized)))).ToLowerInvariant();
             if (selfWriteGuard.TryConsume(ClipboardPayloadType.Files, hash)) return new CaptureResult(CaptureDisposition.IgnoredSelfWrite);
-            item = NewItem(workspace.Id, identity?.IdentityId, device.DeviceId, ClipboardItemType.Files, hash, source, now, Encoding.UTF8.GetByteCount(manifest)) with
+            var itemType = ClipboardFileClassifier.IsSingleImageFile(normalized)
+                ? ClipboardItemType.ImageFile
+                : ClipboardItemType.Files;
+            item = NewItem(workspace.Id, identity?.IdentityId, device.DeviceId, itemType, hash, source, now, Encoding.UTF8.GetByteCount(manifest)) with
             { FileManifest = manifest, PreviewText = normalized.Length == 1 ? Path.GetFileName(normalized[0]) : $"{normalized.Length} 个文件" };
         }
         else return new CaptureResult(CaptureDisposition.IgnoredEmpty);

@@ -13,6 +13,7 @@ public sealed class TrayIconService : IDisposable
         Action showWindow,
         Action toggleCapture,
         Func<bool> isCapturePaused,
+        Action restartApplication,
         Action exitApplication)
     {
         if (_notifyIcon is not null)
@@ -32,6 +33,7 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(_pauseItem);
         menu.Opening += (_, _) => UpdatePauseText();
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("重启", null, (_, _) => restartApplication());
         menu.Items.Add("退出", null, (_, _) => exitApplication());
 
         _notifyIcon = new NotifyIcon

@@ -25,7 +25,7 @@ internal sealed class FolderSelectionDialog : Window
         MinHeight = 240;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false;
-        Background = System.Windows.Media.Brushes.White;
+        if (TryFindResource("DialogWindowStyle") is Style dialogStyle) Style = dialogStyle;
 
         var grid = new Grid { Margin = new Thickness(14) };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -34,7 +34,7 @@ internal sealed class FolderSelectionDialog : Window
 
         var prompt = new TextBlock
         {
-            Text = "请选择目标文件夹：",
+            Text = "请选择目标空间和文件夹：",
             FontWeight = FontWeights.SemiBold,
             FontSize = 13,
             Margin = new Thickness(0, 0, 0, 8)
@@ -44,7 +44,9 @@ internal sealed class FolderSelectionDialog : Window
         _folderListBox = new ListBox
         {
             ItemsSource = folders,
-            DisplayMemberPath = "Name",
+            // Space-qualified, because the list mixes 个人配置 and 团队配置 folders and
+            // the choice of space has to be visible before it is made.
+            DisplayMemberPath = nameof(FolderViewModel.QualifiedName),
             Margin = new Thickness(0, 0, 0, 12),
             FontSize = 13
         };

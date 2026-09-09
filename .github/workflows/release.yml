@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Validate version tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must use vMAJOR.MINOR.PATCH." }
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore ClipboardManager.sln -p:NuGetAudit=false
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          dotnet build ClipboardManager.sln --configuration Release --no-restore -p:NuGetAudit=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test ClipboardManager.sln --configuration Release --no-build -p:NuGetAudit=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build portable ZIP and MSI
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -Version "${{ steps.version.outputs.value }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipboardManager-${{ steps.version.outputs.value }}-win-x64
+          path: |
+            artifacts/release/${{ steps.version.outputs.value }}/*.zip
+            artifacts/release/${{ steps.version.outputs.value }}/*.msi
+            artifacts/release/${{ steps.version.outputs.value }}/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releaseDir = "artifacts/release/${{ steps.version.outputs.value }}"
+          gh release create "${{ github.ref_name }}" `
+            "$releaseDir/ClipboardManager-${{ steps.version.outputs.value }}-win-x64-portable.zip" `
+            "$releaseDir/ClipboardManager-${{ steps.version.outputs.value }}-win-x64.msi" `
+            "$releaseDir/SHA256SUMS.txt" `
+            --title "ClipboardManager ${{ steps.version.outputs.value }}" `
+            --generate-notes `
+            --verify-tag

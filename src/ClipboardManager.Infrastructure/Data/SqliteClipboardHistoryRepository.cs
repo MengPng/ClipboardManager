@@ -34,8 +34,17 @@ public sealed class SqliteClipboardHistoryRepository(SqliteConnectionFactory con
         command.Parameters.AddWithValue("$workspaceId", query.WorkspaceId.ToString("D"));
         if (query.ItemType is not null)
         {
-            filters.Add("item_type = $itemType");
-            command.Parameters.AddWithValue("$itemType", (int)query.ItemType.Value);
+            if (query.ItemType == ClipboardItemType.Image)
+            {
+                filters.Add("item_type IN ($imageType, $imageFileType)");
+                command.Parameters.AddWithValue("$imageType", (int)ClipboardItemType.Image);
+                command.Parameters.AddWithValue("$imageFileType", (int)ClipboardItemType.ImageFile);
+            }
+            else
+            {
+                filters.Add("item_type = $itemType");
+                command.Parameters.AddWithValue("$itemType", (int)query.ItemType.Value);
+            }
         }
 
         if (query.FavoritesOnly)

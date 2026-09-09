@@ -9,7 +9,7 @@ public sealed class SqliteDatabaseInitializer(
     ILogger<SqliteDatabaseInitializer> logger,
     DatabaseSafetyBackup? safetyBackup = null) : IDatabaseInitializer
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -43,6 +43,13 @@ public sealed class SqliteDatabaseInitializer(
         {
             await ApplyVersion2Async(connection, cancellationToken);
             await ExecuteAsync(connection, "PRAGMA user_version=2;", cancellationToken);
+            version = 2;
+        }
+
+        if (version < 3)
+        {
+            await ApplyVersion3Async(connection, cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA user_version=3;", cancellationToken);
         }
 
         logger.LogInformation("Local database schema is at version {Version}.", CurrentVersion);
@@ -247,6 +254,40 @@ public sealed class SqliteDatabaseInitializer(
                 ON collection_folders(workspace_id,parent_folder_id,deleted_at,sort_key);
             CREATE INDEX IF NOT EXISTS ix_collection_items_order
                 ON collection_items(workspace_id,folder_id,deleted_at,sort_key);
+            COMMIT;
+            """;
+        await ExecuteAsync(connection, sql, cancellationToken);
+    }
+
+    private static async Task ApplyVersion3Async(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        // Existing single-image CF_HDROP records keep their file manifest and restore
+        // behavior; only the category discriminator changes.
+        const string sql = """
+            BEGIN;
+            UPDATE clipboard_items
+            SET item_type = 3
+            WHERE item_type = 2
+              AND json_valid(file_manifest) = 1
+              AND json_array_length(file_manifest) = 1
+              AND (
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.png' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.jpg' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.jpeg' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.jfif' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.gif' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.bmp' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.webp' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.tif' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.tiff' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.heic' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.heif' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.avif' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.ico' OR
+                lower(json_extract(file_manifest, '$[0]')) LIKE '%.svg'
+              );
             COMMIT;
             """;
         await ExecuteAsync(connection, sql, cancellationToken);

@@ -3,8 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-        <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FFF8FAFC" />
-        <SolidColorBrush x:Key="PanelBorderBrush" Color="#FFE2E8F0" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#FF0F766E" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Palette must precede Controls: the templates resolve its brushes
+                     with StaticResource, which is evaluated in load order. -->
+                <ResourceDictionary Source="Themes/Palette.xaml" />
+                <ResourceDictionary Source="Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

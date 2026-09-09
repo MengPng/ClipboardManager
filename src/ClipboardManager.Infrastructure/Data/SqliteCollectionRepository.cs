@@ -134,7 +134,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
         await RequireFolderAsync(connection, transaction, workspaceId, input.FolderId, cancellationToken);
-        await RequireSourceAsync(connection, transaction, workspaceId, input.SourceClipboardItemId, cancellationToken);
+        await RequireSourceAsync(connection, transaction, input.SourceWorkspaceId ?? workspaceId, input.SourceClipboardItemId, cancellationToken);
         var ordered = await ReadOrderAsync(connection, transaction, workspaceId, input.FolderId, cancellationToken);
         var key = await GetInsertionKeyAsync(connection, transaction, workspaceId, input.FolderId, ordered, ordered.Count, cancellationToken);
         var now = DateTimeOffset.UtcNow;
@@ -211,16 +211,20 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         return Convert.ToInt32(result) != 0;
     }
 
+    /// <summary>
+    /// Validates the provenance record against the workspace the HISTORY belongs to,
+    /// which is not necessarily the workspace receiving the snapshot.
+    /// </summary>
     private static async Task RequireSourceAsync(SqliteConnection connection, SqliteTransaction transaction,
-        Guid workspaceId, Guid? sourceId, CancellationToken cancellationToken)
+        Guid sourceWorkspaceId, Guid? sourceId, CancellationToken cancellationToken)
     {
         if (sourceId is null) return;
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT 1 FROM clipboard_items WHERE workspace_id=$workspace AND id=$id AND deleted_at IS NULL;";
-        AddIdentity(command, workspaceId, sourceId.Value);
+        AddIdentity(command, sourceWorkspaceId, sourceId.Value);
         if (await command.ExecuteScalarAsync(cancellationToken) is null)
-            throw new InvalidOperationException("来源历史不存在或不属于当前空间。");
+            throw new InvalidOperationException("来源历史不存在或不属于来源空间。");
     }
 
     private static async Task<List<(Guid Id, double Key)>> ReadOrderAsync(SqliteConnection connection,

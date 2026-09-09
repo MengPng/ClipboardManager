@@ -19,12 +19,14 @@ def main() -> int:
     shutil.copyfile(source, brand_logo)
 
     image = Image.open(source).convert("RGBA")
-    # The supplied artwork is square: the symbol occupies the upper region and
-    # the Chinese wordmark is below it. Keep only the symbol for small OS icons.
-    symbol = image.crop((315, 125, 940, 850))
+    # Brand masters are square: the symbol occupies the upper region and the
+    # Chinese wordmark is below it. Use proportions so regenerated masters at
+    # another resolution still produce a correctly framed OS icon.
+    width, height = image.size
+    symbol = image.crop((int(width * 0.10), int(height * 0.02), int(width * 0.90), int(height * 0.77)))
 
     pixels = []
-    for red, green, blue, _ in symbol.getdata():
+    for red, green, blue, _ in symbol.get_flattened_data():
         distance = 255 - min(red, green, blue)
         alpha = max(0, min(255, (distance - 3) * 18))
         pixels.append((red, green, blue, alpha))

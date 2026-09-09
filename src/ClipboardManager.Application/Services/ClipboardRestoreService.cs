@@ -23,7 +23,7 @@ public sealed class ClipboardRestoreService(
                 try { await systemClipboard.WriteImageAsync(item.ImagePath, cancellationToken); }
                 catch { selfWriteGuard.Clear(); throw; }
                 break;
-            case ClipboardItemType.Files when item.FileManifest is not null:
+            case ClipboardItemType.Files or ClipboardItemType.ImageFile when item.FileManifest is not null:
                 var files = JsonSerializer.Deserialize<string[]>(item.FileManifest) ?? [];
                 selfWriteGuard.Expect(ClipboardPayloadType.Files, item.ContentHash);
                 try { await systemClipboard.WriteFilesAsync(files, cancellationToken); }

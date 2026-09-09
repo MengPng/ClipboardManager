@@ -4,7 +4,10 @@ public enum ClipboardItemType
 {
     Text = 0,
     Image = 1,
-    Files = 2
+    Files = 2,
+    // A single image path captured through CF_HDROP. It is shown under 图片,
+    // but restored as a file drop so pasting still sends the original file.
+    ImageFile = 3
 }
 
 public enum ClipboardVisibility

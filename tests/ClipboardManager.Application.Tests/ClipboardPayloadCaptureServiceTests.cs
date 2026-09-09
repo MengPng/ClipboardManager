@@ -20,12 +20,14 @@ public sealed class ClipboardPayloadCaptureServiceTests
 
         var image = await service.CaptureAsync(new ClipboardPayload(ClipboardPayloadType.Image, ImageBytes: [1, 2, 3], ImageMimeType: "image/png"), new ClipboardSource("Test", "test"));
         var files = await service.CaptureAsync(new ClipboardPayload(ClipboardPayloadType.Files, Files: [Path.GetTempPath(), Path.GetTempPath()]), new ClipboardSource("Test", "test"));
+        var imageFile = await service.CaptureAsync(new ClipboardPayload(ClipboardPayloadType.Files, Files: [Path.Combine(Path.GetTempPath(), "photo.PNG")]), new ClipboardSource("Test", "test"));
 
         Assert.Equal(ClipboardItemType.Image, image.Item!.ItemType);
         Assert.Equal("managed.png", image.Item.ImagePath);
         Assert.Equal(ClipboardItemType.Files, files.Item!.ItemType);
+        Assert.Equal(ClipboardItemType.ImageFile, imageFile.Item!.ItemType);
         Assert.Contains(Path.GetFullPath(Path.GetTempPath()), System.Text.Json.JsonSerializer.Deserialize<string[]>(files.Item.FileManifest!)!);
-        Assert.Equal(2, repository.Items.Count);
+        Assert.Equal(3, repository.Items.Count);
     }
 
     [Fact]

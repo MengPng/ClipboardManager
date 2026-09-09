@@ -1,6 +1,7 @@
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Infrastructure.Data;
 using ClipboardManager.Infrastructure.Identity;
+using ClipboardManager.Infrastructure.Lan;
 using ClipboardManager.Infrastructure.Paths;
 using ClipboardManager.Infrastructure.Sync;
 using ClipboardManager.Infrastructure.Workspaces;
@@ -20,6 +21,8 @@ public static class DependencyInjection
         services.AddSingleton<DatabaseSafetyBackup>();
         services.AddSingleton<IDatabaseInitializer, SqliteDatabaseInitializer>();
         services.AddSingleton<IStorageMaintenanceService, StorageMaintenanceService>();
+        services.AddSingleton<IPersonalConfigTransferService, PersonalConfigTransferService>();
+        services.AddSingleton<ILanShareService, LocalSendLanShareService>();
         services.AddSingleton<IClipboardHistoryRepository, SqliteClipboardHistoryRepository>();
         services.AddSingleton<ICollectionRepository, SqliteCollectionRepository>();
         services.AddSingleton<IClipboardItemRepository>(provider => provider.GetRequiredService<IClipboardHistoryRepository>());

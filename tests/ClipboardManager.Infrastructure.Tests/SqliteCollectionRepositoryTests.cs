@@ -260,6 +260,37 @@ public sealed class SqliteCollectionRepositoryTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => repository.CreateItemAsync(workspace, new CreateCollectionItem(folder.Id, CollectionItemType.Text, TextContent: "copy", SourceClipboardItemId: source)));
     }
 
+    /// <summary>
+    /// Collecting a local history record into the second config space must keep the
+    /// provenance id while creating the snapshot in the target space, and must not touch
+    /// the history row. Provenance is still validated — against the source space.
+    /// </summary>
+    [Fact]
+    public async Task Snapshot_MayCrossWorkspacesWhenTheSourceSpaceIsNamed()
+    {
+        var (repository, workspace) = await CreateAsync();
+        var team = Guid.NewGuid();
+        await RegisterWorkspaceAsync(team);
+        var teamFolder = await repository.EnsureUncategorizedAsync(team);
+        var source = Guid.NewGuid();
+        await ExecuteSqlAsync($"INSERT INTO clipboard_items(id,workspace_id,device_id,item_type,content_hash,text_content,created_at,updated_at,captured_at) VALUES('{source}','{workspace}','{Guid.NewGuid()}',0,'hash','shared','2026-01-01','2026-01-01','2026-01-01');");
+
+        // Without the source space the record looks foreign to the target space.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.CreateItemAsync(team,
+            new CreateCollectionItem(teamFolder.Id, CollectionItemType.Text, TextContent: "shared", SourceClipboardItemId: source)));
+
+        var copy = await repository.CreateItemAsync(team, new CreateCollectionItem(teamFolder.Id,
+            CollectionItemType.Text, TextContent: "shared", SourceClipboardItemId: source, SourceWorkspaceId: workspace));
+        Assert.Equal(copy, Assert.Single(await Reopen().GetItemsAsync(team, teamFolder.Id)));
+        Assert.Equal(source, copy.SourceClipboardItemId);
+        Assert.Equal(team, copy.WorkspaceId);
+        // The history row keeps its own workspace and is not soft deleted.
+        Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM clipboard_items WHERE id='{source}' AND workspace_id='{workspace}' AND deleted_at IS NULL;"));
+        // A source that exists in neither space is still rejected.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.CreateItemAsync(team,
+            new CreateCollectionItem(teamFolder.Id, CollectionItemType.Text, TextContent: "bad", SourceClipboardItemId: Guid.NewGuid(), SourceWorkspaceId: workspace)));
+    }
+
     private SqliteCollectionRepository Reopen() => new(new SqliteConnectionFactory(new AppPaths(_root)));
     private async Task ExecuteSqlAsync(string sql)
     {

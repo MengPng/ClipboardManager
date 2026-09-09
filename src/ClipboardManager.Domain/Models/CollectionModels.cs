@@ -61,4 +61,8 @@ public sealed record CreateCollectionItem(
     string? FileManifest = null,
     string? ContentHash = null,
     long ContentSize = 0,
-    Guid? SourceClipboardItemId = null);
+    Guid? SourceClipboardItemId = null,
+    // The source history record may live in a different workspace than the snapshot,
+    // which is how an explicit share into a team space keeps its provenance without
+    // moving the original. Null means the source is expected in the target workspace.
+    Guid? SourceWorkspaceId = null);

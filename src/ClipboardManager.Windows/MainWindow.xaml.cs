@@ -1,4 +1,5 @@
 using ClipboardManager.Application.Services;
+using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
 using ClipboardManager.Windows.Services;
 using System.Collections.ObjectModel;
@@ -24,8 +25,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly CollectionService _collectionService;
     private readonly CollectionRestoreService _collectionRestoreService;
     private readonly AutomaticPasteService _automaticPasteService;
+    private readonly WindowDockingService _windowDockingService;
     private readonly ClipboardManager.Domain.Contracts.IAppSettingsStore _settingsStore;
     private readonly ClipboardManager.Domain.Contracts.IStorageMaintenanceService _storageMaintenance;
+    private readonly ClipboardManager.Domain.Contracts.IPersonalConfigTransferService _personalConfigTransfer;
+    private readonly ILanShareService _lanShareService;
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
     private bool _allowClose, _favoritesOnly, _pinnedOnly, _refreshingFolders, _isPinnedTopmost;
     private int _activeModalCount;
@@ -37,18 +41,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private object? _dragItem;
     private long _historyVersion, _collectionVersion, _foldersVersion;
     private CancellationTokenSource? _historySearch, _collectionSearch;
+    private bool _compactList;
+    private bool _lanSettingsLoaded;
+    private string _lanSessionPin = string.Empty;
+    private Guid _personalWorkspaceId;
+    private Guid? _teamWorkspaceId;
+    private string? _historySpaceName, _deviceName;
+    // Positions of the selected folder's items in its unfiltered order, used to decide
+    // whether 上移/下移 are at a boundary. Null while a search narrows the list.
+    private List<Guid>? _folderItemOrder;
+
+    private const string PersonalSpaceName = "个人配置";
+    private const string TeamSpaceName = "团队配置";
+
+    private static readonly Thickness RelaxedRowMargin = new(10, 9, 10, 9);
+    private static readonly Thickness CompactRowMargin = new(9, 4, 9, 4);
 
     public MainWindow(ClipboardHistoryService historyService, ClipboardRestoreService restoreService,
         ClipboardMonitorService monitorService, ClipboardCaptureService captureService,
         ClipboardPayloadCaptureService payloadCaptureService, CollectionService collectionService,
         CollectionRestoreService collectionRestoreService, AutomaticPasteService automaticPasteService,
+        WindowDockingService windowDockingService,
         ClipboardManager.Domain.Contracts.IAppSettingsStore settingsStore,
-        ClipboardManager.Domain.Contracts.IStorageMaintenanceService storageMaintenance)
+        ClipboardManager.Domain.Contracts.IStorageMaintenanceService storageMaintenance,
+        ClipboardManager.Domain.Contracts.IPersonalConfigTransferService personalConfigTransfer,
+        ILanShareService lanShareService)
     {
         _historyService = historyService; _restoreService = restoreService; _monitorService = monitorService;
         _captureService = captureService; _payloadCaptureService = payloadCaptureService;
         _collectionService = collectionService; _collectionRestoreService = collectionRestoreService;
-        _automaticPasteService = automaticPasteService; _settingsStore = settingsStore; _storageMaintenance = storageMaintenance;
+        _automaticPasteService = automaticPasteService; _windowDockingService = windowDockingService;
+        _settingsStore = settingsStore; _storageMaintenance = storageMaintenance;
+        _personalConfigTransfer = personalConfigTransfer;
+        _lanShareService = lanShareService;
         DataContext = this;
         InitializeComponent();
         var pauseMenu = new ContextMenu();
@@ -62,7 +87,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _searchTimer.Tick += async (_, _) =>
         {
             _searchTimer.Stop();
-            await RunActionAsync("刷新", () => MainTabs.SelectedIndex == 0 ? RefreshHistoryAsync() : RefreshCollectionItemsAsync());
+            await RunActionAsync("刷新", () => !IsCollectionTabActive ? RefreshHistoryAsync() : RefreshCollectionItemsAsync());
         };
         _captureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => await RunActionAsync("刷新历史", () => RefreshHistoryAsync()));
         _payloadCaptureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => await RunActionAsync("刷新历史", () => RefreshHistoryAsync()));
@@ -72,17 +97,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             try
             {
                 await Task.Delay(80);
-                if (_isPinnedTopmost || _activeModalCount > 0) return;
+                if (_isPinnedTopmost || _activeModalCount > 0 || _windowDockingService.ShouldRemainVisibleAfterDeactivation()) return;
                 if ((await _settingsStore.LoadAsync()).AutoHideWhenDeactivated && IsVisible &&
                     !OwnedWindows.Cast<Window>().Any(window => window.IsActive)) Hide();
             }
             catch { /* A settings read failure must not crash the desktop shell. */ }
         };
+        IsVisibleChanged += (_, _) => { if (!IsVisible) _windowDockingService.Undock(); };
         PreviewKeyDown += (_, e) =>
         {
             if (Keyboard.FocusedElement is TextBoxBase or PasswordBox ||
                 (e.Key is not (Key.Up or Key.Down)) || Keyboard.Modifiers != ModifierKeys.None) return;
-            var list = MainTabs.SelectedIndex == 0 ? HistoryList : CollectionList;
+            var list = !IsCollectionTabActive ? HistoryList : CollectionList;
             if (list.Items.Count == 0) return;
             list.SelectedIndex = Math.Clamp(list.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, list.Items.Count - 1);
             list.ScrollIntoView(list.SelectedItem);
@@ -95,7 +121,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ?? FindItem<FolderViewModel>(e.OriginalSource as DependencyObject);
 
             var historyHit = FindItem<HistoryItemViewModel>(e.OriginalSource as DependencyObject);
-            if (historyHit is not null && MainTabs.SelectedIndex == 0)
+            if (historyHit is not null && !IsCollectionTabActive)
             {
                 SelectedItem = historyHit;
                 _ = Dispatcher.InvokeAsync(async () =>
@@ -110,7 +136,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             var collectionHit = FindItem<CollectionItemViewModel>(e.OriginalSource as DependencyObject);
-            if (collectionHit is not null && MainTabs.SelectedIndex == 1)
+            if (collectionHit is not null && IsCollectionTabActive)
             {
                 SelectedCollectionItem = collectionHit;
                 _ = Dispatcher.InvokeAsync(async () =>
@@ -118,7 +144,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     var settings = await _settingsStore.LoadAsync();
                     if (settings.SingleClickToPaste)
                     {
-                        await RunActionAsync("单击使用收藏", () => UseCollectionSelectedAsync(true));
+                        await RunActionAsync("单击使用配置", () => UseCollectionSelectedAsync(true));
                     }
                 });
                 return;
@@ -129,18 +155,104 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public ObservableCollection<HistoryItemViewModel> Items { get; } = [];
     public ObservableCollection<FolderViewModel> Folders { get; } = [];
     public ObservableCollection<CollectionItemViewModel> CollectionItems { get; } = [];
+    public ObservableCollection<LanDeviceViewModel> LanDevices { get; } = [];
     public HistoryItemViewModel? SelectedItem { get => _selectedItem; set { _selectedItem = value; Changed(nameof(SelectedItem)); } }
     public FolderViewModel? SelectedFolder { get => _selectedFolder; set { _selectedFolder = value; Changed(nameof(SelectedFolder)); } }
     public CollectionItemViewModel? SelectedCollectionItem { get => _selectedCollectionItem; set { _selectedCollectionItem = value; Changed(nameof(SelectedCollectionItem)); } }
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    // Row metrics the item templates bind to. Keeping them here rather than swapping
+    // item templates means a density change re-measures the existing rows instead of
+    // rebuilding and re-decoding every visible thumbnail.
+    /// <summary>
+    /// Whether one of the config spaces is showing. Tested this way round on purpose: the
+    /// first refresh runs from <see cref="InitializeAsync"/>, before the window is shown
+    /// and therefore before the tab template is applied, when <c>SelectedIndex</c> is
+    /// still -1. Asking for "is history" there silently routed history results nowhere.
+    /// Index 1 is 个人配置 and index 2 is 团队配置, which share one config UI instance.
+    /// </summary>
+    private bool IsCollectionTabActive => MainTabs.SelectedIndex is 1 or 2;
+
+    /// <summary>
+    /// The workspace the config pane reads and writes. Only the third segment resolves to
+    /// the team space; every other index, including the -1 reported before the tab
+    /// template is applied, resolves to 个人配置 — which is also the workspace clipboard
+    /// capture stays pinned to.
+    /// </summary>
+    private Guid ActiveConfigWorkspaceId =>
+        MainTabs.SelectedIndex == 2 && _teamWorkspaceId is { } team ? team : _personalWorkspaceId;
+
+    private string SpaceName(Guid workspaceId) =>
+        _teamWorkspaceId == workspaceId ? TeamSpaceName : PersonalSpaceName;
+
+    public Thickness RowMargin => _compactList ? CompactRowMargin : RelaxedRowMargin;
+    public double ThumbnailSize => _compactList ? 32d : 46d;
+    public double PreviewMaxHeight => _compactList ? 34d : 58d;
+
     public async Task InitializeAsync(BootstrapContext context, CancellationToken cancellationToken = default)
     {
-        WorkspaceText.Text = $"Workspace：{context.Workspace.Name} · {context.Device.DeviceName}";
+        // 个人配置 is the local capture workspace, so the collection data that already
+        // exists keeps its home and needs no migration. 团队配置 is the separate
+        // local-only Team workspace; without one there is nothing honest to put behind
+        // the third segment, so it is hidden rather than aliased onto 个人配置.
+        _personalWorkspaceId = context.Workspace.Id;
+        _teamWorkspaceId = context.Workspaces.FirstOrDefault(x => x.Type == WorkspaceType.Team)?.Id;
+        if (_teamWorkspaceId is null) TeamSpaceTab.Visibility = Visibility.Collapsed;
+        _historySpaceName = context.Workspace.Name;
+        _deviceName = context.Device.DeviceName;
+        ApplySpaceLayout();
         UpdatePauseState(CapturePrivacyPolicy.IsPaused(context.Settings, DateTimeOffset.UtcNow));
         UpdatePinVisualState(context.Settings.AlwaysOnTop);
+        ApplyDensity(context.Settings.CompactList);
         await RefreshHistoryAsync(cancellationToken);
         await RefreshFoldersAsync(cancellationToken);
+        if (!context.Settings.AutoBackupChoiceCompleted)
+        {
+            var dialog = new AutoBackupSetupDialog(this);
+            var enabled = WithModal(() => dialog.ShowDialog()) == true;
+            var latest = await _settingsStore.LoadAsync(cancellationToken);
+            await _settingsStore.SaveAsync(latest with
+            {
+                AutoBackupChoiceCompleted = true,
+                AutoBackupIntervalHours = enabled ? dialog.SelectedHours : 0
+            }, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Shows the panel the selected segment names. Both panels stay in the visual tree so
+    /// a space switch re-queries rather than rebuilding the config UI and its thumbnails.
+    /// </summary>
+    private void ApplySpaceLayout()
+    {
+        var config = IsCollectionTabActive;
+        var lan = MainTabs.SelectedIndex == 3;
+        HistoryPanel.Visibility = !config && !lan ? Visibility.Visible : Visibility.Collapsed;
+        ConfigPanel.Visibility = config ? Visibility.Visible : Visibility.Collapsed;
+        LanSharePanel.Visibility = lan ? Visibility.Visible : Visibility.Collapsed;
+        ConfigSpaceNotice.Visibility = config && MainTabs.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+        PersonalTransferPanel.Visibility = config && MainTabs.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateWorkspaceText();
+    }
+
+    private void UpdateWorkspaceText()
+    {
+        if (_historySpaceName is null) return;
+        WorkspaceText.Text = MainTabs.SelectedIndex == 3
+            ? $"局域网共享 · LocalSend 协议 · {_deviceName}"
+            : $"历史空间：{_historySpaceName} · 当前配置空间：{SpaceName(ActiveConfigWorkspaceId)} · {_deviceName}";
+    }
+
+    /// <summary>
+    /// Requests the acrylic backdrop once the handle exists. The vibrancy brushes are
+    /// translucent, so when the backdrop is unavailable they would composite over an
+    /// unpainted composition target; an opaque fill replaces them in that case.
+    /// </summary>
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (!WindowBackdrop.TryApplyAcrylic(this))
+            RootSurface.Background = (System.Windows.Media.Brush)FindResource("WindowFallbackBrush");
     }
 
     public async Task RefreshHistoryAsync(CancellationToken cancellationToken = default)
@@ -157,7 +269,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (request.IsCancellationRequested || version != _historyVersion) return;
             Items.Clear(); foreach (var item in records) Items.Add(new HistoryItemViewModel(item));
             SelectedItem = Items.FirstOrDefault(x => x.Item.Id == selectedId) ?? Items.FirstOrDefault();
-            if (MainTabs.SelectedIndex == 0) CountText.Text = $"{Items.Count} 条历史";
+            if (!IsCollectionTabActive) CountText.Text = $"{Items.Count} 条历史";
             EmptyStateText.Text = string.IsNullOrWhiteSpace(search) ? (_monitorService.IsPaused ? "监听已暂停" : "还没有历史，复制内容试试") : "没有匹配的记录";
             EmptyStateText.Visibility = Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -169,11 +281,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task RefreshFoldersAsync(CancellationToken cancellationToken = default)
     {
         var version = ++_foldersVersion;
-        var result = await _collectionService.GetFoldersAsync(cancellationToken);
+        var workspaceId = ActiveConfigWorkspaceId;
+        var result = await _collectionService.GetFoldersAsync(workspaceId, cancellationToken);
         var folders = new List<FolderViewModel>();
         foreach (var folder in result.Folders)
-            folders.Add(new FolderViewModel(folder, (await _collectionService.GetItemsAsync(folder.Id, cancellationToken: cancellationToken)).Count));
-        if (version != _foldersVersion) return;
+            folders.Add(new FolderViewModel(folder, (await _collectionService.GetItemsAsync(workspaceId, folder.Id, cancellationToken: cancellationToken)).Count, SpaceName(workspaceId)));
+        // A space switch bumps the version and changes the active workspace, so folders
+        // loaded for the space the user just left must never replace the current list.
+        if (version != _foldersVersion || workspaceId != ActiveConfigWorkspaceId) return;
         var selectedId = SelectedFolder?.Folder.Id;
         _refreshingFolders = true;
         try
@@ -189,22 +304,38 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var version = ++_collectionVersion;
         _collectionSearch?.Cancel();
-        if (SelectedFolder is null) { CollectionItems.Clear(); SelectedCollectionItem = null; return; }
+        if (SelectedFolder is null) { CollectionItems.Clear(); SelectedCollectionItem = null; _folderItemOrder = null; UpdateCollectionEmptyState(null); return; }
         using var request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _collectionSearch = request;
+        var workspaceId = SelectedFolder.WorkspaceId;
         var folderId = SelectedFolder.Folder.Id;
         var selectedId = SelectedCollectionItem?.Item.Id;
+        var search = CollectionSearchBox.Text;
         try
         {
-            var records = await _collectionService.GetItemsAsync(folderId, CollectionSearchBox.Text, request.Token);
-            if (request.IsCancellationRequested || version != _collectionVersion || SelectedFolder?.Folder.Id != folderId) return;
+            var records = await _collectionService.GetItemsAsync(workspaceId, folderId, search, request.Token);
+            // The selected folder identifies both the folder and its space, so a switch to
+            // the other config space invalidates this result even at the same folder index.
+            if (request.IsCancellationRequested || version != _collectionVersion ||
+                SelectedFolder?.Folder.Id != folderId || SelectedFolder?.WorkspaceId != workspaceId) return;
             CollectionItems.Clear(); foreach (var item in records) CollectionItems.Add(new CollectionItemViewModel(item));
+            // Without a search this query already is the folder's full order, so it can be
+            // cached for the 上移/下移 boundary check. With one, the service resolves the
+            // index against the unfiltered folder itself and an edge move is a no-op.
+            _folderItemOrder = string.IsNullOrWhiteSpace(search) ? records.Select(x => x.Id).ToList() : null;
             SelectedCollectionItem = CollectionItems.FirstOrDefault(x => x.Item.Id == selectedId) ?? CollectionItems.FirstOrDefault();
-            if (MainTabs.SelectedIndex == 1) CountText.Text = $"{CollectionItems.Count} 条收藏";
+            if (IsCollectionTabActive) CountText.Text = $"{CollectionItems.Count} 项配置";
+            UpdateCollectionEmptyState(search);
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }
         catch (Exception) when (version != _collectionVersion) { }
         finally { if (ReferenceEquals(_collectionSearch, request)) _collectionSearch = null; }
+    }
+
+    private void UpdateCollectionEmptyState(string? search)
+    {
+        CollectionEmptyStateText.Text = string.IsNullOrWhiteSpace(search) ? "这个文件夹还没有内容" : "没有匹配的配置";
+        CollectionEmptyStateText.Visibility = CollectionItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public void RememberPasteTarget() => _automaticPasteService.RememberCurrentTarget();
@@ -215,19 +346,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     protected override async void OnKeyDown(System.Windows.Input.KeyEventArgs e)
     {
         if (e.Handled) { base.OnKeyDown(e); return; }
+        // Alt combinations arrive as Key.System with the pressed key in SystemKey, so
+        // Alt+Up/Down would never match a plain e.Key test.
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var editing = Keyboard.FocusedElement is TextBoxBase or PasswordBox;
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.F)
-        { (MainTabs.SelectedIndex == 0 ? SearchBox : CollectionSearchBox).Focus(); e.Handled = true; }
-        else if (e.Key == Key.Escape)
-        { var box = MainTabs.SelectedIndex == 0 ? SearchBox : CollectionSearchBox; if (!string.IsNullOrEmpty(box.Text)) box.Clear(); else Hide(); e.Handled = true; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.F)
+        { (!IsCollectionTabActive ? SearchBox : CollectionSearchBox).Focus(); e.Handled = true; }
+        else if (key == Key.Escape)
+        { var box = !IsCollectionTabActive ? SearchBox : CollectionSearchBox; if (!string.IsNullOrEmpty(box.Text)) box.Clear(); else Hide(); e.Handled = true; }
         else if (!editing)
         {
             Func<Task>? action = null;
-            if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.D && MainTabs.SelectedIndex == 0) action = () => CollectSelectedAsync();
-            else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.P && MainTabs.SelectedIndex == 0) action = TogglePinnedAsync;
-            else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Enter) action = MainTabs.SelectedIndex == 0 ? () => RestoreSelectedAsync(true) : () => UseCollectionSelectedAsync(true);
-            else if (Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Enter) action = MainTabs.SelectedIndex == 0 ? () => RestoreSelectedAsync(false) : () => UseCollectionSelectedAsync(false);
-            else if (Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Delete) action = MainTabs.SelectedIndex == 0 ? DeleteSelectedAsync : DeleteCollectionSelectedAsync;
+            if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.D && !IsCollectionTabActive) action = () => CollectSelectedAsync();
+            else if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.P && !IsCollectionTabActive) action = TogglePinnedAsync;
+            else if (Keyboard.Modifiers == ModifierKeys.Alt && key is Key.Up or Key.Down && IsCollectionTabActive)
+            { var offset = key == Key.Up ? -1 : 1; action = () => MoveCollectionSelectedAsync(offset); }
+            else if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.Enter) action = !IsCollectionTabActive ? () => RestoreSelectedAsync(true) : () => UseCollectionSelectedAsync(true);
+            else if (Keyboard.Modifiers == ModifierKeys.None && key == Key.Enter) action = !IsCollectionTabActive ? () => RestoreSelectedAsync(false) : () => UseCollectionSelectedAsync(false);
+            else if (Keyboard.Modifiers == ModifierKeys.None && key == Key.Delete) action = !IsCollectionTabActive ? DeleteSelectedAsync : DeleteCollectionSelectedAsync;
             if (action is not null) { e.Handled = true; await RunActionAsync("记录操作", action); }
         }
         base.OnKeyDown(e);
@@ -253,15 +389,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task FilterAsync(ClipboardItemType? type, bool favorite, bool pinned)
     {
         _itemType = type; _favoritesOnly = favorite; _pinnedOnly = pinned;
-        foreach (var b in new[] { AllFilterButton, TextFilterButton, ImageFilterButton, FileFilterButton, FavoriteFilterButton, PinnedFilterButton }) b.FontWeight = FontWeights.Normal;
-        (pinned ? PinnedFilterButton : favorite ? FavoriteFilterButton : type == ClipboardItemType.Text ? TextFilterButton : type == ClipboardItemType.Image ? ImageFilterButton : type == ClipboardItemType.Files ? FileFilterButton : AllFilterButton).FontWeight = FontWeights.Bold;
+        // The chips share a group, so checking one clears the rest. Assigning IsChecked
+        // does not raise Click, so this cannot re-enter the filter.
+        (pinned ? PinnedFilterButton : favorite ? FavoriteFilterButton : type == ClipboardItemType.Text ? TextFilterButton : type == ClipboardItemType.Image ? ImageFilterButton : type == ClipboardItemType.Files ? FileFilterButton : AllFilterButton).IsChecked = true;
         await RunActionAsync("筛选", () => RefreshHistoryAsync());
     }
-    private async void PauseButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("切换监听", async () => { await _monitorService.SetPausedAsync(!_monitorService.IsPaused); await RefreshHistoryAsync(); });
+    private async void PauseButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("切换监听", async () =>
+    {
+        // The toggle already flipped on click, so the real listener state is reasserted
+        // afterwards rather than leaving the icon claiming a pause that never happened.
+        try { await _monitorService.SetPausedAsync(!_monitorService.IsPaused); await RefreshHistoryAsync(); }
+        finally { UpdatePauseState(_monitorService.IsPaused); }
+    });
     private async void PinButton_Click(object sender, RoutedEventArgs e)
     {
-        _isPinnedTopmost = !_isPinnedTopmost;
-        UpdatePinVisualState(_isPinnedTopmost);
+        UpdatePinVisualState(PinButton.IsChecked == true);
         try
         {
             var settings = await _settingsStore.LoadAsync();
@@ -277,21 +419,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _isPinnedTopmost = pinned;
         Topmost = pinned;
-        if (pinned)
-        {
-            PinButton.Content = "📌 已常驻";
-            PinButton.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDC, 0xF8, 0xE6));
-            PinButton.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x15, 0x80, 0x3D));
-            PinButton.ToolTip = "当前状态：已常驻前台（窗口始终置顶且打开其他应用时不隐藏）。点击取消常驻。";
-        }
-        else
-        {
-            PinButton.Content = "📌 钉住";
-            PinButton.ClearValue(System.Windows.Controls.Control.BackgroundProperty);
-            PinButton.ClearValue(System.Windows.Controls.Control.BorderBrushProperty);
-            PinButton.ToolTip = "常驻前台：窗口始终置顶且打开其他应用时不隐藏。点击开启常驻。";
-        }
+        // Assigning IsChecked from here does not raise Click, so callers that already
+        // handled the click and callers restoring saved settings share this path.
+        PinButton.IsChecked = pinned;
+        PinButton.Content = pinned ? "\uE77A" : "\uE718";
+        PinButton.ToolTip = pinned
+            ? "当前状态：已常驻前台（窗口始终置顶且打开其他应用时不隐藏）。点击取消常驻。"
+            : "常驻前台：窗口始终置顶且打开其他应用时不隐藏。点击开启常驻。";
     }
+
+    private void ApplyDensity(bool compact)
+    {
+        if (_compactList == compact) return;
+        _compactList = compact;
+        Changed(nameof(RowMargin));
+        Changed(nameof(ThumbnailSize));
+        Changed(nameof(PreviewMaxHeight));
+    }
+
+    private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // The window has no system caption, so dragging is explicit. DragMove throws
+        // when the button is released between the event and the call.
+        if (e.ButtonState != MouseButtonState.Pressed) return;
+        try { DragMove(); }
+        catch (InvalidOperationException) { }
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e) => Hide();
 
     private T WithModal<T>(Func<T> action)
     {
@@ -302,15 +457,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsWindow(_settingsStore, _storageMaintenance) { Owner = this };
+        var dialog = new SettingsWindow(_settingsStore, _storageMaintenance, backupPath => RestoreBackupRequested?.Invoke(this, backupPath)) { Owner = this };
         if (WithModal(() => dialog.ShowDialog()) == true) await RunActionAsync("应用设置", async () =>
         {
             var settings = await _settingsStore.LoadAsync();
             UpdatePauseState(CapturePrivacyPolicy.IsPaused(settings, DateTimeOffset.UtcNow));
             UpdatePinVisualState(settings.AlwaysOnTop);
+            ApplyDensity(settings.CompactList);
             await RefreshHistoryAsync();
         });
     }
+    public event EventHandler<string>? RestoreBackupRequested;
     private void HistoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
     }
@@ -332,39 +489,131 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     private async Task DeleteSelectedAsync() { if (SelectedItem is null) return; await _historyService.DeleteAsync(SelectedItem.Item.Id); await RefreshHistoryAsync(); }
     private async Task TogglePinnedAsync() { if (SelectedItem is null) return; await _historyService.SetPinnedAsync(SelectedItem.Item.Id, !SelectedItem.Item.IsPinned); await RefreshHistoryAsync(); }
-    private async void CollectSelectedButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("收藏", () => CollectSelectedAsync(true));
+    private async void CollectSelectedButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("存入配置", () => CollectSelectedAsync(true));
     private async Task CollectSelectedAsync(bool chooseFolder = false)
     {
         var item = SelectedItem?.Item;
         if (item is null) return;
-        if (Folders.Count == 0) await RefreshFoldersAsync();
-        var folder = chooseFolder ? ChooseFolder() : Folders.FirstOrDefault(x => x.Folder.IsSystem);
-        if (folder is null) return;
-        await _collectionService.AddSnapshotAsync(folder.Folder.Id, item);
+        if (chooseFolder)
+        {
+            var folder = await ChooseFolderAsync();
+            if (folder is null) return;
+            await _collectionService.AddSnapshotAsync(folder.WorkspaceId, folder.Folder.Id, item);
+        }
+        else
+        {
+            // Ctrl+D offers no target, so it must resolve to 个人配置 的 未分类. Letting a
+            // keystroke default into 团队配置 would make sharing implicit.
+            await _collectionService.QuickCollectAsync(item);
+        }
         await RefreshFoldersAsync();
     }
-    private FolderViewModel? ChooseFolder()
+
+    /// <summary>
+    /// Offers folders from both config spaces, each labelled with its space, so putting a
+    /// record into 团队配置 is an unambiguous explicit choice rather than a side effect of
+    /// whichever view happened to be open.
+    /// </summary>
+    private async Task<FolderViewModel?> ChooseFolderAsync(CancellationToken cancellationToken = default)
     {
+        var choices = new List<FolderViewModel>();
+        foreach (var workspaceId in _teamWorkspaceId is { } team ? new[] { _personalWorkspaceId, team } : [_personalWorkspaceId])
+        {
+            var result = await _collectionService.GetFoldersAsync(workspaceId, cancellationToken);
+            foreach (var folder in result.Folders)
+                choices.Add(new FolderViewModel(folder,
+                    (await _collectionService.GetItemsAsync(workspaceId, folder.Id, cancellationToken: cancellationToken)).Count,
+                    SpaceName(workspaceId)));
+        }
         return WithModal(() =>
         {
-            var dialog = new FolderSelectionDialog(this, Folders.ToList());
+            var dialog = new FolderSelectionDialog(this, choices);
             return dialog.ShowDialog() == true ? dialog.SelectedFolder : null;
         });
     }
     private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    { if (!IsLoaded || !ReferenceEquals(e.OriginalSource, MainTabs)) return; await RunActionAsync("切换视图", () => MainTabs.SelectedIndex == 1 ? RefreshFoldersAsync() : RefreshHistoryAsync()); }
+    {
+        if (!ReferenceEquals(e.OriginalSource, MainTabs)) return;
+        ApplySpaceLayout();
+        if (!IsLoaded) return;
+        if (IsCollectionTabActive)
+        {
+            // Drop the previous space's selection before reloading: the selected folder is
+            // what scopes item queries, so keeping it would query the space just left.
+            _refreshingFolders = true;
+            try { SelectedFolder = null; SelectedCollectionItem = null; CollectionItems.Clear(); _folderItemOrder = null; }
+            finally { _refreshingFolders = false; }
+        }
+        if (MainTabs.SelectedIndex == 3) await RunActionAsync("发现局域网设备", async () =>
+        {
+            if (!_lanSettingsLoaded) await LoadLanSettingsAsync();
+            await RefreshLanDevicesAsync();
+        });
+        else await RunActionAsync("切换视图", () => IsCollectionTabActive ? RefreshFoldersAsync() : RefreshHistoryAsync());
+    }
+    private async void RefreshLanDevicesButton_Click(object sender, RoutedEventArgs e) =>
+        await RunActionAsync("发现局域网设备", RefreshLanDevicesAsync);
+
+    private async Task LoadLanSettingsAsync()
+    {
+        _ = await _settingsStore.LoadAsync();
+        _lanSettingsLoaded = true;
+    }
+
+    private async void OpenLanSettingsButton_Click(object sender, RoutedEventArgs e) =>
+        await RunActionAsync("局域网共享设置", async () =>
+        {
+            var dialog = new LanShareSettingsDialog(this, _settingsStore, _lanSessionPin);
+            if (WithModal(() => dialog.ShowDialog()) == true)
+            {
+                _lanSessionPin = dialog.SessionPin;
+                LanStatusText.Text = "共享设置已保存，正在重新发现设备…";
+                await RefreshLanDevicesAsync();
+            }
+        });
+
+    private async Task RefreshLanDevicesAsync()
+    {
+        LanStatusText.Text = "正在发现附近设备…";
+        var devices = await _lanShareService.DiscoverAsync();
+        LanDevices.Clear();
+        foreach (var device in devices) LanDevices.Add(new(device));
+        LanEmptyText.Visibility = LanDevices.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        LanStatusText.Text = LanDevices.Count == 0
+            ? "未发现设备；请确认双方在同一局域网、LocalSend 已打开且防火墙允许 UDP 53317"
+            : $"发现 {LanDevices.Count} 台设备；在历史记录右键选择“发送到局域网”";
+        CountText.Text = $"{LanDevices.Count} 台附近设备";
+    }
     private async void FolderList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     { if (IsLoaded && !_refreshingFolders) await RunActionAsync("读取文件夹", () => RefreshCollectionItemsAsync()); }
-    private async void NewFolderButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("新建文件夹", async () =>
+
+    private void FolderList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var hit = FindItem<FolderViewModel>(e.OriginalSource as DependencyObject);
+        if (hit is not null) SelectedFolder = hit;
+        var menu = new ContextMenu();
+        AddMenu(menu, "新建文件夹…", () => CreateFolderAsync());
+        menu.Items.Add(new Separator());
+        var rename = AddMenu(menu, "重命名…", () => RenameSelectedFolderAsync());
+        var delete = AddMenu(menu, "删除文件夹", () => DeleteSelectedFolderAsync());
+        var editable = SelectedFolder is { Folder.IsSystem: false };
+        rename.IsEnabled = editable;
+        delete.IsEnabled = editable;
+        FolderList.ContextMenu = menu;
+    }
+
+    private async void NewFolderButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("新建文件夹", CreateFolderAsync);
+    private async Task CreateFolderAsync()
     {
         string? name = WithModal(() =>
         {
             var dialog = new SingleInputDialog(this, "新建文件夹", "请输入文件夹名称：");
             return dialog.ShowDialog() == true ? dialog.Value : null;
         });
-        if (!string.IsNullOrWhiteSpace(name)) { await _collectionService.CreateFolderAsync(name); await RefreshFoldersAsync(); }
-    });
-    private async void RenameFolderButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("重命名", async () =>
+        if (!string.IsNullOrWhiteSpace(name)) { await _collectionService.CreateFolderAsync(ActiveConfigWorkspaceId, name); await RefreshFoldersAsync(); }
+    }
+    private async void RenameFolderButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("重命名", RenameSelectedFolderAsync);
+    private async Task RenameSelectedFolderAsync()
     {
         var folder = SelectedFolder; if (folder is null || folder.Folder.IsSystem) return;
         string? name = WithModal(() =>
@@ -372,42 +621,97 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var dialog = new SingleInputDialog(this, "重命名文件夹", "请输入新名称：", folder.Name);
             return dialog.ShowDialog() == true ? dialog.Value : null;
         });
-        if (!string.IsNullOrWhiteSpace(name)) { await _collectionService.RenameFolderAsync(folder.Folder.Id, name); await RefreshFoldersAsync(); }
-    });
-    private async void DeleteFolderButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("删除文件夹", async () =>
+        if (!string.IsNullOrWhiteSpace(name)) { await _collectionService.RenameFolderAsync(folder.WorkspaceId, folder.Folder.Id, name); await RefreshFoldersAsync(); }
+    }
+    private async void DeleteFolderButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("删除文件夹", DeleteSelectedFolderAsync);
+    private async Task DeleteSelectedFolderAsync()
     {
         var folder = SelectedFolder; if (folder is null || folder.Folder.IsSystem) return;
         var confirm = WithModal(() => System.Windows.MessageBox.Show(this, "删除文件夹后，其中内容将移动到“未分类”。继续吗？", "删除文件夹", MessageBoxButton.YesNo, MessageBoxImage.Question));
-        if (confirm == MessageBoxResult.Yes) { await _collectionService.DeleteFolderAsync(folder.Folder.Id); await RefreshFoldersAsync(); }
-    });
+        if (confirm == MessageBoxResult.Yes) { await _collectionService.DeleteFolderAsync(folder.WorkspaceId, folder.Folder.Id); await RefreshFoldersAsync(); }
+    }
 
     private void AddCollectionButton_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedFolder is null) return;
+        var workspaceId = SelectedFolder.WorkspaceId;
         var folderId = SelectedFolder.Folder.Id;
         var menu = new ContextMenu { PlacementTarget = sender as UIElement };
-        AddMenu(menu, "添加文本", () => EditContentAsync(folderId, CollectionItemType.Text));
-        AddMenu(menu, "添加链接", () => EditContentAsync(folderId, CollectionItemType.Link));
-        AddMenu(menu, "添加图片", async () => { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.gif" }; if (WithModal(() => dialog.ShowDialog(this)) == true) { await _collectionService.AddImageAsync(folderId, dialog.FileName); await RefreshFoldersAsync(); } });
-        AddMenu(menu, "添加文件", async () => { var dialog = new Microsoft.Win32.OpenFileDialog(); if (WithModal(() => dialog.ShowDialog(this)) == true) { await _collectionService.AddFileAsync(folderId, dialog.FileName); await RefreshFoldersAsync(); } });
+        AddMenu(menu, "添加文本", () => EditContentAsync(workspaceId, folderId, CollectionItemType.Text));
+        AddMenu(menu, "添加链接", () => EditContentAsync(workspaceId, folderId, CollectionItemType.Link));
+        AddMenu(menu, "添加图片", async () => { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.gif" }; if (WithModal(() => dialog.ShowDialog(this)) == true) { await _collectionService.AddImageAsync(workspaceId, folderId, dialog.FileName); await RefreshFoldersAsync(); } });
+        AddMenu(menu, "添加文件", async () => { var dialog = new Microsoft.Win32.OpenFileDialog(); if (WithModal(() => dialog.ShowDialog(this)) == true) { await _collectionService.AddFileAsync(workspaceId, folderId, dialog.FileName); await RefreshFoldersAsync(); } });
         menu.IsOpen = true;
     }
-    private async Task EditContentAsync(Guid folderId, CollectionItemType type, CollectionItem? item = null)
+
+    private async void ExportPersonalConfigButton_Click(object sender, RoutedEventArgs e) =>
+        await RunActionAsync("导出个人配置", async () =>
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "导出个人配置迁移包",
+                Filter = "个人配置迁移包 (*.clipconfig)|*.clipconfig",
+                FileName = $"ClipboardManager-个人配置-{DateTime.Now:yyyyMMdd-HHmm}.clipconfig",
+                AddExtension = true,
+                OverwritePrompt = true
+            };
+            if (WithModal(() => dialog.ShowDialog(this)) != true) return;
+            var result = await _personalConfigTransfer.ExportAsync(_personalWorkspaceId, dialog.FileName);
+            WithModal(() => System.Windows.MessageBox.Show(this,
+                $"导出完成。\n\n文件夹：{result.FolderCount}\n配置项：{result.ItemCount}\n已打包文件：{result.IncludedFileCount}\n大小：{FormatTransferSize(result.IncludedBytes)}" +
+                (result.MissingFileCount > 0 ? $"\n未找到文件：{result.MissingFileCount}（未写入迁移包）" : ""),
+                "个人配置导出", MessageBoxButton.OK,
+                result.MissingFileCount == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning));
+        });
+
+    private async void ImportPersonalConfigButton_Click(object sender, RoutedEventArgs e) =>
+        await RunActionAsync("导入个人配置", async () =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "导入个人配置迁移包",
+                Filter = "个人配置迁移包 (*.clipconfig)|*.clipconfig"
+            };
+            if (WithModal(() => dialog.ShowDialog(this)) != true) return;
+            var preview = await _personalConfigTransfer.InspectAsync(dialog.FileName);
+            var confirm = WithModal(() => System.Windows.MessageBox.Show(this,
+                $"将把迁移包合并到个人配置，不会覆盖团队配置或剪切板历史。\n\n文件夹：{preview.FolderCount}\n配置项：{preview.ItemCount}\n附件：{preview.IncludedFileCount}\n解压大小：{FormatTransferSize(preview.IncludedBytes)}" +
+                (preview.MissingFileCount > 0 ? $"\n导出时缺失：{preview.MissingFileCount}" : "") +
+                "\n\n导入前会自动备份当前数据。继续吗？",
+                "确认导入个人配置", MessageBoxButton.YesNo, MessageBoxImage.Question));
+            if (confirm != MessageBoxResult.Yes) return;
+            var result = await _personalConfigTransfer.ImportAsync(_personalWorkspaceId, dialog.FileName);
+            await RefreshFoldersAsync();
+            WithModal(() => System.Windows.MessageBox.Show(this,
+                $"导入完成。\n\n新建文件夹：{result.CreatedFolderCount}\n导入配置项：{result.ImportedItemCount}\n跳过项目：{result.SkippedItemCount}",
+                "个人配置导入", MessageBoxButton.OK, MessageBoxImage.Information));
+        });
+
+    private static string FormatTransferSize(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => $"{bytes / 1024d / 1024d / 1024d:0.##} GB",
+        >= 1024L * 1024 => $"{bytes / 1024d / 1024d:0.##} MB",
+        >= 1024 => $"{bytes / 1024d:0.##} KB",
+        _ => $"{bytes} B"
+    };
+    private async Task EditContentAsync(Guid workspaceId, Guid folderId, CollectionItemType type, CollectionItem? item = null)
     {
         var dialog = new CollectionContentDialog(this, type, item?.Title ?? "", item is null ? "" : type == CollectionItemType.Link ? item.Url ?? "" : item.TextContent ?? "",
             async (title, content) =>
             {
-                if (item is not null) await _collectionService.UpdateContentAsync(item, title, content);
-                else if (type == CollectionItemType.Link) await _collectionService.AddLinkAsync(folderId, title, content.Trim());
-                else await _collectionService.AddTextAsync(folderId, title, content);
+                if (item is not null) await _collectionService.UpdateContentAsync(workspaceId, item, title, content);
+                else if (type == CollectionItemType.Link) await _collectionService.AddLinkAsync(workspaceId, folderId, title, content.Trim());
+                else await _collectionService.AddTextAsync(workspaceId, folderId, title, content);
             }, item is not null);
         if (WithModal(() => dialog.ShowDialog()) == true) await RefreshFoldersAsync();
     }
-    private void AddMenu(ItemsControl menu, string title, Func<Task> action)
+    private MenuItem AddMenu(ItemsControl menu, string title, Func<Task> action, string? gesture = null, bool enabled = true)
     {
-        var item = new MenuItem { Header = title };
+        var item = new MenuItem { Header = title, IsEnabled = enabled };
+        if (gesture is not null) item.InputGestureText = gesture;
         item.Click += async (_, e) => { e.Handled = true; await RunActionAsync(title, action); };
         menu.Items.Add(item);
+        return item;
     }
     private void CollectionList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
@@ -418,17 +722,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var menu = new ContextMenu();
         AddMenu(menu, "复制到剪切板", async () => { await _collectionRestoreService.UseAsync(item); });
         if (item.ItemType is CollectionItemType.Text or CollectionItemType.Link)
-            AddMenu(menu, "编辑…", () => EditContentAsync(item.FolderId, item.ItemType, item));
+            AddMenu(menu, "编辑…", () => EditContentAsync(item.WorkspaceId, item.FolderId, item.ItemType, item));
         if (item.ItemType == CollectionItemType.Link)
             AddMenu(menu, "在浏览器打开", () => { _collectionRestoreService.OpenLink(item); return Task.CompletedTask; });
+        var position = _folderItemOrder?.IndexOf(item.Id) ?? -1;
+        AddMenu(menu, "上移", () => MoveCollectionSelectedAsync(-1), "Alt+↑", _folderItemOrder is null || position > 0);
+        AddMenu(menu, "下移", () => MoveCollectionSelectedAsync(1), "Alt+↓", _folderItemOrder is null || (position >= 0 && position < _folderItemOrder.Count - 1));
         var move = new MenuItem { Header = "移动到文件夹" };
         foreach (var folder in Folders.Where(f => f.Folder.Id != item.FolderId))
             AddMenu(move, folder.Name, () => MoveToFolderAsync(item, folder.Folder.Id));
         move.IsEnabled = move.Items.Count > 0; menu.Items.Add(move);
         if (item.ItemType == CollectionItemType.Image) AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.LocalPath));
         if (item.ItemType == CollectionItemType.File) AddFileMenus(menu, item.FileManifest, item.LocalPath);
-        AddMenu(menu, "删除收藏", async () => { await _collectionService.DeleteItemAsync(item.Id); await RefreshFoldersAsync(); });
+        AddMenu(menu, "删除配置项", async () => { await _collectionService.DeleteItemAsync(item.WorkspaceId, item.Id); await RefreshFoldersAsync(); });
         CollectionList.ContextMenu = menu;
+    }
+
+    /// <summary>
+    /// Moves the selected item one place towards the start (-1) or end (+1) of its folder.
+    /// The index is resolved by the service against the folder's full contents, never the
+    /// search-filtered list, and an edge move is a no-op.
+    /// </summary>
+    private async Task MoveCollectionSelectedAsync(int offset)
+    {
+        var item = SelectedCollectionItem?.Item;
+        var folder = SelectedFolder;
+        if (item is null || folder is null) return;
+        if (await _collectionService.MoveItemByOffsetAsync(folder.WorkspaceId, item.Id, folder.Folder.Id, offset))
+            await RefreshCollectionItemsAsync();
     }
     private void HistoryList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
@@ -437,10 +758,74 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var item = SelectedItem?.Item;
         if (item is null) { e.Handled = true; return; }
         var menu = new ContextMenu();
-        AddMenu(menu, "复制到剪切板", () => _restoreService.RestoreAsync(item));
+        AddMenu(menu, "复制到剪切板", () => _restoreService.RestoreAsync(item), "Enter");
+        menu.Items.Add(new Separator());
+        AddMenu(menu, "存入个人配置", async () =>
+        {
+            await _collectionService.CollectToUncategorizedAsync(_personalWorkspaceId, item);
+            await RefreshFoldersAsync();
+        }, "Ctrl+D");
+        if (_teamWorkspaceId is { } teamWorkspaceId)
+        {
+            AddMenu(menu, "存入团队配置（仅本机）", async () =>
+            {
+                await _collectionService.CollectToUncategorizedAsync(teamWorkspaceId, item);
+                await RefreshFoldersAsync();
+            });
+        }
+        AddMenu(menu, "选择配置文件夹…", async () =>
+        {
+            var folder = await ChooseFolderAsync();
+            if (folder is null) return;
+            await _collectionService.AddSnapshotAsync(folder.WorkspaceId, folder.Folder.Id, item);
+            await RefreshFoldersAsync();
+        });
+        AddMenu(menu, item.IsPinned ? "取消置顶" : "置顶", async () =>
+        {
+            await _historyService.SetPinnedAsync(item.Id, !item.IsPinned);
+            await RefreshHistoryAsync();
+        }, "Ctrl+P");
+        AddMenu(menu, "发送到局域网…", () => SendToLanAsync(item));
+        menu.Items.Add(new Separator());
         if (item.ItemType == ClipboardItemType.Image) AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.ImagePath));
+        if (item.ItemType == ClipboardItemType.ImageFile)
+        {
+            var imageFile = HistoryItemViewModel.ReadFiles(item).FirstOrDefault();
+            AddMenu(menu, "图片另存为…", () => SaveImageAsync(imageFile));
+            AddFileMenus(menu, item.FileManifest, null);
+        }
         if (item.ItemType == ClipboardItemType.Files) AddFileMenus(menu, item.FileManifest, null);
+        AddMenu(menu, "删除记录", async () =>
+        {
+            await _historyService.DeleteAsync(item.Id);
+            await RefreshHistoryAsync();
+        }, "Delete");
         HistoryList.ContextMenu = menu;
+    }
+
+    private async Task SendToLanAsync(ClipboardItem item)
+    {
+        var devices = await _lanShareService.DiscoverAsync();
+        if (devices.Count == 0)
+        {
+            System.Windows.MessageBox.Show(this, "未发现 LocalSend 设备。请确认双方位于同一局域网，并允许 UDP/TCP 53317。",
+                "局域网共享", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var dialog = new LanDeviceSelectionDialog(this, devices);
+        if (WithModal(() => dialog.ShowDialog()) != true || dialog.SelectedDevice is null) return;
+        var progress = new Progress<LanShareProgress>(value =>
+        {
+            var percent = value.TotalBytes <= 0 ? 0 : value.BytesSent * 100 / value.TotalBytes;
+            ListeningStatusText.Text = $"● {value.Stage} {percent}%";
+        });
+        try
+        {
+            var result = await _lanShareService.SendAsync(dialog.SelectedDevice, item, _lanSessionPin, progress);
+            System.Windows.MessageBox.Show(this, $"已向 {result.DeviceAlias} 发送 {result.FileCount} 项。",
+                "局域网共享", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        finally { UpdatePauseState(_monitorService.IsPaused); }
     }
     private void AddFileMenus(ItemsControl menu, string? manifest, string? localPath)
     {
@@ -485,12 +870,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     private async Task MoveToFolderAsync(CollectionItem item, Guid folderId)
     {
-        var all = await _collectionService.GetItemsAsync(folderId);
-        await _collectionService.MoveItemAsync(item.Id, folderId, all.Count);
+        var all = await _collectionService.GetItemsAsync(item.WorkspaceId, folderId);
+        await _collectionService.MoveItemAsync(item.WorkspaceId, item.Id, folderId, all.Count);
         await RefreshFoldersAsync();
     }
     private async void CollectionList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    { if (FindItem<CollectionItemViewModel>(e.OriginalSource as DependencyObject) is not null) await RunActionAsync("使用收藏", () => UseCollectionSelectedAsync(true)); }
+    { if (FindItem<CollectionItemViewModel>(e.OriginalSource as DependencyObject) is not null) await RunActionAsync("使用配置", () => UseCollectionSelectedAsync(true)); }
     private async Task UseCollectionSelectedAsync(bool automaticPaste)
     {
         if (SelectedCollectionItem is null) return;
@@ -500,7 +885,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (automaticPaste && !await _automaticPasteService.TryPasteAsync(this))
             System.Windows.MessageBox.Show("内容已复制到剪切板，但未能自动粘贴，请手动按 Ctrl+V。", "自动粘贴", MessageBoxButton.OK, MessageBoxImage.Information);
     }
-    private async Task DeleteCollectionSelectedAsync() { if (SelectedCollectionItem is null) return; await _collectionService.DeleteItemAsync(SelectedCollectionItem.Item.Id); await RefreshFoldersAsync(); }
+    private async Task DeleteCollectionSelectedAsync() { if (SelectedCollectionItem is null) return; await _collectionService.DeleteItemAsync(SelectedCollectionItem.Item.WorkspaceId, SelectedCollectionItem.Item.Id); await RefreshFoldersAsync(); }
 
     private async void FolderList_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     { if (e.LeftButton == MouseButtonState.Pressed && Moved(e) && _dragItem is FolderViewModel item) { _dragItem = null; await RunActionAsync("拖动文件夹", () => { DragDrop.DoDragDrop(FolderList, item, System.Windows.DragDropEffects.Move); return Task.CompletedTask; }); } }
@@ -508,25 +893,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var target = FindItem<FolderViewModel>(e.OriginalSource as DependencyObject);
         if (e.Data.GetData(typeof(CollectionItemViewModel)) is CollectionItemViewModel content && target is not null)
-        { e.Handled = true; await RunActionAsync("移动收藏", () => MoveToFolderAsync(content.Item, target.Folder.Id)); }
+        { e.Handled = true; await RunActionAsync("移动配置项", () => MoveToFolderAsync(content.Item, target.Folder.Id)); }
         else if (e.Data.GetData(typeof(FolderViewModel)) is FolderViewModel source)
-        { e.Handled = true; await RunActionAsync("文件夹排序", async () => { await _collectionService.ReorderFolderAsync(source.Folder.Id, target is null ? Folders.Count - 1 : Folders.IndexOf(target)); await RefreshFoldersAsync(); }); }
+        { e.Handled = true; await RunActionAsync("文件夹排序", async () => { await _collectionService.ReorderFolderAsync(source.WorkspaceId, source.Folder.Id, target is null ? Folders.Count - 1 : Folders.IndexOf(target)); await RefreshFoldersAsync(); }); }
     }
     private async void CollectionList_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
-    { if (e.LeftButton == MouseButtonState.Pressed && Moved(e) && _dragItem is CollectionItemViewModel item) { _dragItem = null; await RunActionAsync("拖动收藏", () => { DragDrop.DoDragDrop(CollectionList, item, System.Windows.DragDropEffects.Move); return Task.CompletedTask; }); } }
+    { if (e.LeftButton == MouseButtonState.Pressed && Moved(e) && _dragItem is CollectionItemViewModel item) { _dragItem = null; await RunActionAsync("拖动配置项", () => { DragDrop.DoDragDrop(CollectionList, item, System.Windows.DragDropEffects.Move); return Task.CompletedTask; }); } }
     private async void CollectionList_Drop(object sender, System.Windows.DragEventArgs e)
     {
         if (SelectedFolder is null || e.Data.GetData(typeof(CollectionItemViewModel)) is not CollectionItemViewModel source) return;
         e.Handled = true;
+        var workspaceId = SelectedFolder.WorkspaceId;
         var folderId = SelectedFolder.Folder.Id;
         var target = FindItem<CollectionItemViewModel>(e.OriginalSource as DependencyObject);
-        await RunActionAsync("收藏排序", async () =>
+        await RunActionAsync("配置排序", async () =>
         {
             // Resolve against the full folder, never the filtered search-result index.
-            var all = (await _collectionService.GetItemsAsync(folderId)).Where(i => i.Id != source.Item.Id).ToList();
+            var all = (await _collectionService.GetItemsAsync(workspaceId, folderId)).Where(i => i.Id != source.Item.Id).ToList();
             if (target?.Item.Id == source.Item.Id) return;
             var index = target is null ? all.Count : all.FindIndex(i => i.Id == target.Item.Id);
-            await _collectionService.MoveItemAsync(source.Item.Id, folderId, index < 0 ? all.Count : index);
+            await _collectionService.MoveItemAsync(workspaceId, source.Item.Id, folderId, index < 0 ? all.Count : index);
             await RefreshFoldersAsync();
         });
     }
@@ -544,11 +930,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var overFolder = IsWithin(e.OriginalSource as DependencyObject, FolderList);
         var overItems = IsWithin(e.OriginalSource as DependencyObject, CollectionList);
-        var internalMove = MainTabs.SelectedIndex == 1 &&
+        var internalMove = IsCollectionTabActive &&
             ((e.Data.GetDataPresent(typeof(FolderViewModel)) && overFolder) ||
              (e.Data.GetDataPresent(typeof(CollectionItemViewModel)) && ((overFolder && FindItem<FolderViewModel>(e.OriginalSource as DependencyObject) is not null) || (overItems && SelectedFolder is not null))));
         e.Effects = internalMove ? System.Windows.DragDropEffects.Move :
-            MainTabs.SelectedIndex == 1 && e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) && SelectedFolder is not null ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None;
+            IsCollectionTabActive && e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) && SelectedFolder is not null ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None;
         e.Handled = true;
     }
     private static bool IsWithin(DependencyObject? source, DependencyObject target)
@@ -562,19 +948,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     private async void Window_Drop(object sender, System.Windows.DragEventArgs e)
     {
-        if (e.Handled || MainTabs.SelectedIndex != 1 || SelectedFolder is null || e.Data.GetData(System.Windows.DataFormats.FileDrop) is not string[] paths) return;
+        if (e.Handled || !IsCollectionTabActive || SelectedFolder is null || e.Data.GetData(System.Windows.DataFormats.FileDrop) is not string[] paths) return;
         e.Handled = true;
-        var folderId = FindItem<FolderViewModel>(e.OriginalSource as DependencyObject)?.Folder.Id ?? SelectedFolder.Folder.Id;
+        var target = FindItem<FolderViewModel>(e.OriginalSource as DependencyObject) ?? SelectedFolder;
+        var workspaceId = target.WorkspaceId;
+        var folderId = target.Folder.Id;
         foreach (var path in paths)
             await RunActionAsync("导入文件", async () =>
             {
                 var ext = Path.GetExtension(path).ToLowerInvariant();
-                if (new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" }.Contains(ext)) await _collectionService.AddImageAsync(folderId, path);
-                else await _collectionService.AddFileAsync(folderId, path);
+                if (new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif" }.Contains(ext)) await _collectionService.AddImageAsync(workspaceId, folderId, path);
+                else await _collectionService.AddFileAsync(workspaceId, folderId, path);
             });
-        await RunActionAsync("刷新收藏", () => RefreshFoldersAsync());
+        await RunActionAsync("刷新配置", () => RefreshFoldersAsync());
     }
-    private void UpdatePauseState(bool paused) { ListeningStatusText.Text = paused ? "● 已暂停" : "● 正在监听"; ListeningStatusText.Foreground = new SolidColorBrush(paused ? System.Windows.Media.Color.FromRgb(180,83,9) : System.Windows.Media.Color.FromRgb(21,128,61)); PauseButton.Content = paused ? "继续" : "暂停"; }
+    private void UpdatePauseState(bool paused)
+    {
+        ListeningStatusText.Text = paused ? "● 已暂停" : "● 正在监听";
+        ListeningStatusText.Foreground = (System.Windows.Media.Brush)FindResource(paused ? "WarningBrush" : "SuccessBrush");
+        PauseButton.IsChecked = paused;
+        PauseButton.Content = paused ? "\uE768" : "\uE769";
+    }
 }
 
 public sealed class HistoryItemViewModel(ClipboardItem item)
@@ -589,6 +983,7 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
     public string PreviewText => Item.ItemType switch
     {
         ClipboardItemType.Image => TypeText,
+        ClipboardItemType.ImageFile => Files.FirstOrDefault() is { } imageFile ? Path.GetFileName(imageFile) : Item.PreviewText ?? "图片",
         ClipboardItemType.Files => Files.Length switch
         {
             0 => Item.PreviewText ?? "文件",
@@ -608,6 +1003,7 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
             _preview = Item.ItemType switch
             {
                 ClipboardItemType.Image => ListPreviewProvider.LoadThumbnail(Item.ThumbnailPath ?? Item.ImagePath),
+                ClipboardItemType.ImageFile when Files.Length > 0 => ListPreviewProvider.LoadThumbnail(Files[0]) ?? ListPreviewProvider.LoadFileIcon(Files[0]),
                 ClipboardItemType.Files when Files.Length > 0 => ListPreviewProvider.LoadFileIcon(Files[0]),
                 _ => null
             };
@@ -616,10 +1012,11 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
     }
 
     public Visibility PreviewVisibility => Item.ItemType == ClipboardItemType.Text ? Visibility.Collapsed : Visibility.Visible;
-    public Stretch PreviewStretch => Item.ItemType == ClipboardItemType.Image ? Stretch.UniformToFill : Stretch.Uniform;
-    public Thickness PreviewPadding => Item.ItemType == ClipboardItemType.Image ? default : new Thickness(9);
-    public string FavoriteMark => Item.IsFavorite ? "♥" : "";
-    public string PinnedMark => Item.IsPinned ? "置顶" : "";
+    public Stretch PreviewStretch => Item.ItemType is ClipboardItemType.Image or ClipboardItemType.ImageFile ? Stretch.UniformToFill : Stretch.Uniform;
+    public Thickness PreviewPadding => Item.ItemType is ClipboardItemType.Image or ClipboardItemType.ImageFile ? default : new Thickness(9);
+    // Rendered with the icon font, so these are glyph code points, not text.
+    public string FavoriteMark => Item.IsFavorite ? "\uEB52" : "";
+    public string PinnedMark => Item.IsPinned ? "\uE718" : "";
     public string Metadata => _metadata ??= BuildMetadata();
 
     /// <summary>The Windows type description, so a row reads "PNG 图像" or "Microsoft Word 文档".</summary>
@@ -631,6 +1028,8 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
     {
         if (Item.ItemType == ClipboardItemType.Image)
             return ListPreviewProvider.LoadTypeName(Item.ImagePath ?? Item.ThumbnailPath) ?? "图片";
+        if (Item.ItemType == ClipboardItemType.ImageFile)
+            return Files.Length > 0 ? ListPreviewProvider.LoadTypeName(Files[0]) ?? "图片" : "图片";
         if (Item.ItemType != ClipboardItemType.Files) return "文本";
         if (Files.Length == 0) return "文件";
         var extensions = Files.Select(Path.GetExtension).Distinct(StringComparer.OrdinalIgnoreCase).Count();
@@ -647,8 +1046,13 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
 
     private string[] ParseFiles()
     {
-        if (Item.ItemType != ClipboardItemType.Files || string.IsNullOrWhiteSpace(Item.FileManifest)) return [];
-        try { return JsonSerializer.Deserialize<string[]>(Item.FileManifest) ?? []; }
+        return ReadFiles(Item);
+    }
+
+    internal static string[] ReadFiles(ClipboardItem item)
+    {
+        if (item.ItemType is not (ClipboardItemType.Files or ClipboardItemType.ImageFile) || string.IsNullOrWhiteSpace(item.FileManifest)) return [];
+        try { return JsonSerializer.Deserialize<string[]>(item.FileManifest) ?? []; }
         catch (JsonException) { return []; }
     }
 
@@ -656,7 +1060,7 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
     {
         var parts = new List<string> { TypeText, Item.SourceApp ?? Item.SourceProcess ?? "未知来源" };
         if (Item.ItemType == ClipboardItemType.Image && Item.ContentSize > 0) parts.Add(FormatSize(Item.ContentSize));
-        if (Item.ItemType == ClipboardItemType.Files && Files.Length > 0)
+        if ((Item.ItemType is ClipboardItemType.Files or ClipboardItemType.ImageFile) && Files.Length > 0)
         {
             var folder = Path.GetDirectoryName(Files[0]);
             if (!string.IsNullOrEmpty(folder)) parts.Add(folder);
@@ -669,7 +1073,21 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
         return string.Join(" · ", parts);
     }
 }
-public sealed class FolderViewModel(CollectionFolder folder, int count) { public CollectionFolder Folder { get; }=folder; public string Name=>Folder.Name; public string CountText=>count.ToString(); }
+/// <summary>
+/// A folder plus the config space it belongs to. Every folder-scoped command reads the
+/// workspace from here rather than from whichever space happens to be selected, which is
+/// what lets the cross-space folder picker hand back an unambiguous target.
+/// </summary>
+public sealed class FolderViewModel(CollectionFolder folder, int count, string spaceName)
+{
+    public CollectionFolder Folder { get; } = folder;
+    public Guid WorkspaceId => Folder.WorkspaceId;
+    public string Name => Folder.Name;
+    public string SpaceName { get; } = spaceName;
+    /// <summary>Space-qualified label for pickers that mix folders from both spaces.</summary>
+    public string QualifiedName => $"{SpaceName} · {Folder.Name}";
+    public string CountText => count.ToString();
+}
 public sealed class CollectionItemViewModel(CollectionItem item)
 {
     private ImageSource? _thumbnail;

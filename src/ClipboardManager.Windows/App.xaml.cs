@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 
@@ -22,6 +23,8 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        await WaitForRestartParentAsync(e.Args);
 
         _singleInstance = new SingleInstanceCoordinator("ClipboardManager.LocalFirst.SingleInstance");
         if (!_singleInstance.TryAcquire())
@@ -57,6 +60,8 @@ public partial class App : System.Windows.Application
                     services.AddSingleton<ForegroundApplicationService>();
                     services.AddSingleton<ClipboardMonitorService>();
                     services.AddSingleton<AutomaticPasteService>();
+                    services.AddSingleton<WindowDockingService>();
+                    services.AddSingleton<AutomaticBackupService>();
                 })
                 .Build();
 
@@ -73,8 +78,10 @@ public partial class App : System.Windows.Application
             log.LogInformation("Local state ready; constructing main window.");
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
             MainWindow = mainWindow;
+            mainWindow.RestoreBackupRequested += (_, backupPath) => RestoreBackupAndRestart(mainWindow, backupPath);
             log.LogInformation("Main window constructed; loading history and folders.");
             await mainWindow.InitializeAsync(context);
+            _host.Services.GetRequiredService<AutomaticBackupService>().Start(context.Device.DeviceName);
             log.LogInformation("Content loaded; registering clipboard listener.");
             await _host.Services.GetRequiredService<ClipboardMonitorService>().StartAsync(mainWindow);
 
@@ -102,6 +109,7 @@ public partial class App : System.Windows.Application
                 toggleCapture: () => Dispatcher.InvokeAsync(async () =>
                     await monitor.SetPausedAsync(!monitor.IsPaused)),
                 isCapturePaused: () => monitor.IsPaused,
+                restartApplication: () => RestartApplication(mainWindow),
                 exitApplication: () =>
                 {
                     mainWindow.AllowClose();
@@ -124,6 +132,63 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void RestartApplication(MainWindow mainWindow)
+    {
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable))
+        {
+            System.Windows.MessageBox.Show("无法确定当前程序路径，请手动重新打开应用。", "重启失败",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var start = new ProcessStartInfo(executable) { UseShellExecute = true };
+        start.ArgumentList.Add($"--restart-after-pid={Environment.ProcessId}");
+        Process.Start(start);
+        mainWindow.AllowClose();
+        Shutdown();
+    }
+
+    private void RestoreBackupAndRestart(MainWindow mainWindow, string backupPath)
+    {
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable)) throw new InvalidOperationException("无法确定当前程序路径。");
+        var helper = Path.Combine(AppContext.BaseDirectory, "ClipboardManager.Maintenance.exe");
+        if (!File.Exists(helper))
+        {
+            System.Windows.MessageBox.Show("恢复助手不存在，请重新下载完整发布包。", "无法恢复备份", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var start = new ProcessStartInfo(helper) { UseShellExecute = true };
+        start.ArgumentList.Add("restore");
+        start.ArgumentList.Add(Path.GetFullPath(backupPath));
+        start.ArgumentList.Add($"--wait-pid={Environment.ProcessId}");
+        start.ArgumentList.Add($"--restart={executable}");
+        Process.Start(start);
+        mainWindow.AllowClose();
+        Shutdown();
+    }
+
+    private static async Task WaitForRestartParentAsync(IReadOnlyList<string> arguments)
+    {
+        const string prefix = "--restart-after-pid=";
+        var value = arguments.FirstOrDefault(argument => argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (value is null || !int.TryParse(value[prefix.Length..], out var processId) || processId <= 0) return;
+
+        await Task.Run(() =>
+        {
+            try
+            {
+                using var parent = Process.GetProcessById(processId);
+                parent.WaitForExit(30_000);
+            }
+            catch (ArgumentException)
+            {
+                // The previous process already exited before the replacement started.
+            }
+        });
+    }
+
     protected override async void OnExit(ExitEventArgs e)
     {
         if (_host is not null)
@@ -131,6 +196,8 @@ public partial class App : System.Windows.Application
             _host.Services.GetService<ClipboardMonitorService>()?.Dispose();
             _host.Services.GetService<GlobalHotkeyService>()?.Dispose();
             _host.Services.GetService<TrayIconService>()?.Dispose();
+            _host.Services.GetService<WindowDockingService>()?.Dispose();
+            _host.Services.GetService<AutomaticBackupService>()?.Dispose();
             await _host.StopAsync(TimeSpan.FromSeconds(3));
             _host.Dispose();
         }
@@ -168,16 +235,20 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (MainWindow.IsVisible && MainWindow.IsActive)
+        var docking = _host?.Services.GetService<WindowDockingService>();
+        if (MainWindow.IsVisible && (MainWindow.IsActive || docking?.ShouldRemainVisibleAfterDeactivation() == true))
         {
+            docking?.Undock();
             MainWindow.Hide();
             return;
         }
 
-        ShowMainWindow();
+        ShowMainWindow(preferChatWindowDocking: true);
     }
 
-    private void ShowMainWindow()
+    private void ShowMainWindow() => ShowMainWindow(preferChatWindowDocking: false);
+
+    private void ShowMainWindow(bool preferChatWindowDocking)
     {
         if (MainWindow is null)
         {
@@ -185,13 +256,19 @@ public partial class App : System.Windows.Application
         }
 
         if (MainWindow is ClipboardManager.Windows.MainWindow clipboardWindow) clipboardWindow.RememberPasteTarget();
+        var docking = _host?.Services.GetService<WindowDockingService>();
+        var docked = preferChatWindowDocking && docking?.TryDockToForeground(MainWindow) == true;
         MainWindow.Show();
         if (MainWindow.WindowState == System.Windows.WindowState.Minimized)
         {
             MainWindow.WindowState = System.Windows.WindowState.Normal;
         }
 
-        DesktopWindowPlacement.PlaceAtCursor(MainWindow);
+        if (!docked)
+        {
+            docking?.Undock();
+            DesktopWindowPlacement.PlaceAtCursor(MainWindow);
+        }
         MainWindow.Activate();
         MainWindow.Topmost = true;
         MainWindow.Topmost = false;

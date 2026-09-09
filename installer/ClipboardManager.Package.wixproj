@@ -1,6 +1,6 @@
 <Project Sdk="WixToolset.Sdk/5.0.2">
   <PropertyGroup>
-    <PackageVersion Condition="'$(PackageVersion)' == ''">0.4.4</PackageVersion>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">0.6.0</PackageVersion>
     <OutputName>ClipboardManager-$(PackageVersion)-win-x64</OutputName>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>

@@ -12,8 +12,15 @@ public sealed record AppSettings
     public bool AlwaysOnTop { get; init; }
     public bool EnableAutomaticPaste { get; init; } = true;
     public bool SingleClickToPaste { get; init; } = true;
+    public bool CompactList { get; init; }
     public bool IsCapturePaused { get; init; }
     public DateTimeOffset? CapturePausedUntil { get; init; }
     public IReadOnlyList<string> ExcludedProcesses { get; init; } = ["KeePass", "1Password", "Bitwarden"];
     public string GlobalHotkey { get; init; } = "Alt+V";
+    public bool AutoBackupChoiceCompleted { get; init; }
+    public int AutoBackupIntervalHours { get; init; }
+    public DateTimeOffset? LastAutomaticBackupAt { get; init; }
+    public string LanDeviceAlias { get; init; } = Environment.MachineName;
+    public int LanPort { get; init; } = 53317;
+    public int LanDiscoverySeconds { get; init; } = 2;
 }

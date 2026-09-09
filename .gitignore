@@ -12,3 +12,8 @@ artifacts/
 logs/
 .tools/
 *.log
+src/ClipboardManager.Windows/Assets/Previous-*/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

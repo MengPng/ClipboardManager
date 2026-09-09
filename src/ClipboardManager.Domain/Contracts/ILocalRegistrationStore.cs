@@ -7,6 +7,6 @@ public interface ILocalRegistrationStore
     Task EnsureRegisteredAsync(
         IdentitySession identity,
         DeviceIdentity device,
-        Workspace workspace,
+        IReadOnlyList<Workspace> workspaces,
         CancellationToken cancellationToken = default);
 }

@@ -20,6 +20,7 @@ internal sealed class CollectionContentDialog : Window
         Title = $"{(editing ? "编辑" : "添加")}{(type == CollectionItemType.Link ? "链接" : "文本")}";
         Width = 560; Height = 430; MinWidth = 400; MinHeight = 300;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        if (TryFindResource("DialogWindowStyle") is Style dialogStyle) Style = dialogStyle;
         var panel = new Grid { Margin = new Thickness(18) };
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
             panel.RowDefinitions.Add(new RowDefinition { Height = height });

@@ -46,6 +46,31 @@ public sealed class SqliteClipboardHistoryRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task ImageFilter_IncludesBitmapAndImageFile_ButFileFilterExcludesThem()
+    {
+        var (repository, workspaceId, deviceId) = await CreateRepositoryAsync();
+        var now = DateTimeOffset.UtcNow;
+        ClipboardItem Item(ClipboardItemType type, string hash) => new()
+        {
+            Id = Guid.NewGuid(), WorkspaceId = workspaceId, DeviceId = deviceId,
+            ItemType = type, ContentHash = hash, FileManifest = type == ClipboardItemType.ImageFile ? "[\"C:\\\\photo.png\"]" : type == ClipboardItemType.Files ? "[\"C:\\\\report.xlsx\"]" : null,
+            ImagePath = type == ClipboardItemType.Image ? "managed.png" : null,
+            CreatedAt = now, UpdatedAt = now, CapturedAt = now
+        };
+        await repository.UpsertAsync(Item(ClipboardItemType.Image, "bitmap"));
+        await repository.UpsertAsync(Item(ClipboardItemType.ImageFile, "image-file"));
+        await repository.UpsertAsync(Item(ClipboardItemType.Files, "document"));
+
+        var images = await repository.SearchAsync(new ClipboardQuery(workspaceId, ItemType: ClipboardItemType.Image));
+        var files = await repository.SearchAsync(new ClipboardQuery(workspaceId, ItemType: ClipboardItemType.Files));
+
+        Assert.Equal(2, images.Count);
+        Assert.All(images, item => Assert.Contains(item.ItemType, new[] { ClipboardItemType.Image, ClipboardItemType.ImageFile }));
+        Assert.Single(files);
+        Assert.Equal(ClipboardItemType.Files, files[0].ItemType);
+    }
+
+    [Fact]
     public async Task Cleanup_PreservesFavoriteAndPinnedItems()
     {
         var (repository, workspaceId, deviceId) = await CreateRepositoryAsync();

@@ -27,7 +27,9 @@ internal sealed class SingleInputDialog : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;
-        Background = System.Windows.Media.Brushes.White;
+        // Resolved from Application.Resources; a dialog is not in the main visual tree,
+        // so the theme has to be applied rather than inherited.
+        if (TryFindResource("DialogWindowStyle") is Style dialogStyle) Style = dialogStyle;
 
         var grid = new Grid { Margin = new Thickness(16) };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

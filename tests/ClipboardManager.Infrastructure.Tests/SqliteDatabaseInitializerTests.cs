@@ -46,17 +46,50 @@ public sealed class SqliteDatabaseInitializerTests : IDisposable
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES ('before'); PRAGMA user_version=1;";
+            command.CommandText = "CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES ('before'); CREATE TABLE clipboard_items(id TEXT PRIMARY KEY, item_type INTEGER, file_manifest TEXT); PRAGMA user_version=1;";
             await command.ExecuteNonQueryAsync();
         }
         var backup = new DatabaseSafetyBackup(paths, factory);
         await new SqliteDatabaseInitializer(factory, NullLogger<SqliteDatabaseInitializer>.Instance, backup).InitializeAsync();
-        var file = Assert.Single(Directory.GetFiles(Path.Combine(_root, "migration-backups"), "clipboard-v1-before-v2-*.db"));
+        var file = Assert.Single(Directory.GetFiles(Path.Combine(_root, "migration-backups"), "clipboard-v1-before-v3-*.db"));
         await using var snapshot = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = file, Mode = SqliteOpenMode.ReadOnly }.ConnectionString);
         await snapshot.OpenAsync();
         await using var check = snapshot.CreateCommand();
         check.CommandText = "SELECT value FROM marker;";
         Assert.Equal("before", await check.ExecuteScalarAsync());
+    }
+
+    [Fact]
+    public async Task UpgradeToVersionThree_ReclassifiesOnlySingleImageFileRecords()
+    {
+        var paths = new AppPaths(_root);
+        var factory = new SqliteConnectionFactory(paths);
+        await using (var connection = factory.Create())
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE clipboard_items(id TEXT PRIMARY KEY, item_type INTEGER, file_manifest TEXT);
+                INSERT INTO clipboard_items VALUES ('image', 2, '["C:\\Temp\\photo.PNG"]');
+                INSERT INTO clipboard_items VALUES ('document', 2, '["C:\\Temp\\report.xlsx"]');
+                INSERT INTO clipboard_items VALUES ('multiple', 2, '["C:\\Temp\\a.png","C:\\Temp\\b.png"]');
+                PRAGMA user_version=2;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await new SqliteDatabaseInitializer(factory, NullLogger<SqliteDatabaseInitializer>.Instance).InitializeAsync();
+
+        await using var verify = factory.Create();
+        await verify.OpenAsync();
+        await using var read = verify.CreateCommand();
+        read.CommandText = "SELECT id, item_type FROM clipboard_items ORDER BY id;";
+        await using var reader = await read.ExecuteReaderAsync();
+        var values = new Dictionary<string, long>();
+        while (await reader.ReadAsync()) values.Add(reader.GetString(0), reader.GetInt64(1));
+        Assert.Equal(3, values["image"]);
+        Assert.Equal(2, values["document"]);
+        Assert.Equal(2, values["multiple"]);
     }
 
     public void Dispose()

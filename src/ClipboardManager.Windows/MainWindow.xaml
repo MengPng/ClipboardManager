@@ -1,59 +1,388 @@
+<!--
+    The window keeps no system frame: WindowChrome extends the DWM frame across the
+    whole client area so the acrylic backdrop shows through, and the title bar below
+    is ordinary content. AllowsTransparency is deliberately left off, because a
+    layered window disables the backdrop this layout depends on.
+-->
 <Window x:Class="ClipboardManager.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="剪切板" Width="600" Height="520" MinWidth="440" MinHeight="380"
+        Title="剪切板"
+        Width="780" Height="580" MinWidth="560" MinHeight="420"
         Icon="Assets/AppIcon.ico"
-        WindowStartupLocation="CenterScreen" Background="{StaticResource PanelBackgroundBrush}"
+        Style="{StaticResource AppWindowStyle}"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        Background="Transparent"
+        WindowStartupLocation="CenterScreen"
         AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver">
-    <Window.Resources>
-        <Style x:Key="FilterButton" TargetType="Button"><Setter Property="Padding" Value="12,6"/><Setter Property="Margin" Value="0,0,7,0"/><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}"/></Style>
-    </Window.Resources>
-    <Border BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
-        <Grid Margin="14">
-            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Grid Grid.Row="0" Margin="0,0,0,10">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal"><Image Source="Assets/AppIcon.png" Width="28" Height="28" Margin="0,0,8,0" VerticalAlignment="Center"/><TextBlock Text="剪切板" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/><Border Margin="9,0,0,0" Padding="8,3" CornerRadius="9" Background="#FFE6FFFB"><TextBlock Text="本机" Foreground="{StaticResource AccentBrush}" FontSize="12"/></Border></StackPanel>
-                <TextBlock x:Name="ListeningStatusText" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#FF15803D" Text="● 正在监听"/>
-                <Button x:Name="PinButton" Grid.Column="2" Padding="10,4" Margin="0,0,8,0" Click="PinButton_Click" ToolTip="常驻前台：窗口始终置顶且打开其他应用时不隐藏" Content="📌 钉住"/>
-                <Button x:Name="PauseButton" Grid.Column="3" Padding="10,4" Click="PauseButton_Click" Content="暂停"/>
-                <Button Grid.Column="4" Margin="8,0,0,0" Padding="10,4" Click="SettingsButton_Click" Content="设置"/>
+
+    <WindowChrome.WindowChrome>
+        <!-- CaptionHeight is zero so the header cannot be double-clicked into a
+             maximised state; dragging is handled explicitly instead. -->
+        <WindowChrome CaptionHeight="0"
+                      GlassFrameThickness="-1"
+                      CornerRadius="0"
+                      ResizeBorderThickness="6"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <!-- RootSurface is opaque-filled from code when the backdrop is unavailable. -->
+    <Border x:Name="RootSurface" Background="{StaticResource WindowVibrancyBrush}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!--  Title bar  -->
+
+            <Grid x:Name="TitleBar" Grid.Row="0" Height="46" Background="Transparent"
+                  MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Margin="16,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Source="pack://application:,,,/ClipboardManager;component/Assets/AppIcon.ico"
+                           Width="20" Height="20" VerticalAlignment="Center" Stretch="Uniform" />
+                    <TextBlock Margin="9,0,0,0" Style="{StaticResource TitleTextStyle}" Text="剪切板" />
+                    <Border Margin="9,0,0,0" Padding="7,2" Background="{StaticResource AccentSoftBrush}"
+                            CornerRadius="{StaticResource RadiusPill}" VerticalAlignment="Center">
+                        <TextBlock Foreground="{StaticResource AccentBrush}" FontSize="{StaticResource FontSizeMeta}" Text="本机" />
+                    </Border>
+                </StackPanel>
+
+                <TextBlock x:Name="ListeningStatusText" Grid.Column="1" Margin="0,0,10,0"
+                           VerticalAlignment="Center" FontSize="{StaticResource FontSizeCaption}"
+                           Foreground="{StaticResource SuccessBrush}" Text="● 正在监听" />
+
+                <!-- The content of these buttons is a private-use icon glyph, which is
+                     meaningless to a screen reader, so each carries an explicit name. -->
+                <StackPanel Grid.Column="2" Margin="0,0,8,0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ToggleButton x:Name="PinButton" Style="{StaticResource IconToggleButtonStyle}"
+                                  Click="PinButton_Click" Content="&#xE718;"
+                                  AutomationProperties.Name="常驻前台" />
+                    <ToggleButton x:Name="PauseButton" Style="{StaticResource IconToggleButtonStyle}"
+                                  Click="PauseButton_Click" Content="&#xE769;"
+                                  AutomationProperties.Name="暂停监听" />
+                    <Button Style="{StaticResource IconButtonStyle}" Click="SettingsButton_Click"
+                            Content="&#xE713;" ToolTip="设置" AutomationProperties.Name="设置" />
+                    <Button Style="{StaticResource IconButtonStyle}" Click="CloseButton_Click"
+                            Content="&#xE8BB;" ToolTip="隐藏面板（Esc）" AutomationProperties.Name="隐藏面板" />
+                </StackPanel>
             </Grid>
 
-            <TabControl x:Name="MainTabs" Grid.Row="1" SelectionChanged="MainTabs_SelectionChanged">
-                <TabItem Header="历史">
-                    <Grid Margin="0,10,0,0">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                        <TextBox x:Name="SearchBox" Height="38" Padding="10,7" Margin="0,0,0,10" TextChanged="SearchBox_TextChanged" ToolTip="搜索正文或来源应用"/>
-                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-                            <Button x:Name="AllFilterButton" Style="{StaticResource FilterButton}" Click="AllFilterButton_Click" Content="全部"/>
-                            <Button x:Name="PinnedFilterButton" Style="{StaticResource FilterButton}" Click="PinnedFilterButton_Click" Content="置顶"/>
-                            <Button x:Name="TextFilterButton" Style="{StaticResource FilterButton}" Click="TextFilterButton_Click" Content="文本"/>
-                            <Button x:Name="ImageFilterButton" Style="{StaticResource FilterButton}" Click="ImageFilterButton_Click" Content="图片"/>
-                            <Button x:Name="FileFilterButton" Style="{StaticResource FilterButton}" Click="FileFilterButton_Click" Content="文件"/>
-                            <Button x:Name="FavoriteFilterButton" Style="{StaticResource FilterButton}" Click="FavoriteFilterButton_Click" Content="快速收藏"/>
-                            <Button Style="{StaticResource FilterButton}" Click="CollectSelectedButton_Click" Content="收藏到目录"/>
-                        </StackPanel>
-                        <Grid Grid.Row="2">
-                            <ListBox x:Name="HistoryList" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem,Mode=TwoWay}" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" Background="White" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" SelectionChanged="HistoryList_SelectionChanged" MouseDoubleClick="HistoryList_MouseDoubleClick" ContextMenuOpening="HistoryList_ContextMenuOpening"><ListBox.ContextMenu><ContextMenu/></ListBox.ContextMenu>
-                                <ListBox.ItemTemplate><DataTemplate><Grid Margin="8,7"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Border Width="48" Height="42" Margin="0,0,9,0" Background="#FFF1F5F9" Padding="{Binding PreviewPadding}" Visibility="{Binding PreviewVisibility}"><Image Source="{Binding Preview}" Stretch="{Binding PreviewStretch}"/></Border><TextBlock Grid.Column="1" Text="{Binding PreviewText}" TextWrapping="Wrap" MaxHeight="58" FontSize="13"/><StackPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,0"><TextBlock Text="{Binding PinnedMark}" Foreground="#FF0F766E" Margin="0,0,5,0"/><TextBlock Text="{Binding FavoriteMark}" Foreground="#FFE11D48"/></StackPanel><TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" Text="{Binding Metadata}" Foreground="#FF64748B" FontSize="11"/></Grid></DataTemplate></ListBox.ItemTemplate>
+            <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom" Background="{StaticResource SeparatorBrush}" />
+
+            <!--  Body  -->
+
+            <!-- The nav strip and the two panels are siblings: 个人配置 and 团队配置 share a
+                 single instance of the config UI and differ only in the target Workspace,
+                 so the panel must not be rebuilt (or duplicated) per space. -->
+            <Grid Grid.Row="1" Margin="10,8,10,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TabControl x:Name="MainTabs" Grid.Row="0" Margin="0,0,0,10"
+                            HorizontalAlignment="Left"
+                            Style="{StaticResource SegmentedTabControlStyle}"
+                            SelectionChanged="MainTabs_SelectionChanged">
+                    <TabItem Header="历史" Tag="&#xE81C;" />
+                    <TabItem Header="个人配置" Tag="&#xE77B;" />
+                    <TabItem x:Name="TeamSpaceTab" Header="团队配置" Tag="&#xE716;" />
+                    <TabItem Header="局域网共享" Tag="&#xE968;" />
+                </TabControl>
+
+                <Grid x:Name="HistoryPanel" Grid.Row="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,9">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="SearchBox" Style="{StaticResource SearchTextBoxStyle}"
+                                 Tag="搜索正文或来源应用" TextChanged="SearchBox_TextChanged" />
+                        <Button Grid.Column="1" Margin="8,0,0,0" Click="CollectSelectedButton_Click"
+                                Content="存入配置" ToolTip="选择个人配置或团队配置中的文件夹，保存选中历史记录的快照" />
+                    </Grid>
+
+                    <!-- A WrapPanel rather than a StackPanel so the pills reflow instead of
+                         being clipped at the window's minimum width. -->
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,3">
+                        <RadioButton x:Name="AllFilterButton" Style="{StaticResource FilterChipStyle}"
+                                     GroupName="HistoryFilter" IsChecked="True"
+                                     Click="AllFilterButton_Click" Content="全部" />
+                        <RadioButton x:Name="PinnedFilterButton" Style="{StaticResource FilterChipStyle}"
+                                     GroupName="HistoryFilter" Click="PinnedFilterButton_Click" Content="置顶" />
+                        <RadioButton x:Name="TextFilterButton" Style="{StaticResource FilterChipStyle}"
+                                     GroupName="HistoryFilter" Click="TextFilterButton_Click" Content="文本" />
+                        <RadioButton x:Name="ImageFilterButton" Style="{StaticResource FilterChipStyle}"
+                                     GroupName="HistoryFilter" Click="ImageFilterButton_Click" Content="图片" />
+                        <RadioButton x:Name="FileFilterButton" Style="{StaticResource FilterChipStyle}"
+                                     GroupName="HistoryFilter" Click="FileFilterButton_Click" Content="文件" />
+                        <RadioButton x:Name="FavoriteFilterButton" Style="{StaticResource FilterChipStyle}"
+                                     GroupName="HistoryFilter" Click="FavoriteFilterButton_Click" Content="快速收藏" />
+                    </WrapPanel>
+
+                    <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}"
+                            BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource RadiusLarge}">
+                        <Grid>
+                            <ListBox x:Name="HistoryList"
+                                     ItemsSource="{Binding Items}"
+                                     SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                                     SelectionChanged="HistoryList_SelectionChanged"
+                                     MouseDoubleClick="HistoryList_MouseDoubleClick"
+                                     ContextMenuOpening="HistoryList_ContextMenuOpening">
+                                <ListBox.ContextMenu>
+                                    <ContextMenu />
+                                </ListBox.ContextMenu>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="{Binding DataContext.RowMargin, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Grid.RowSpan="2" Margin="0,0,10,0" VerticalAlignment="Top"
+                                                    Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                    Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                    Background="{StaticResource ThumbnailBackdropBrush}"
+                                                    CornerRadius="{StaticResource RadiusSmall}"
+                                                    Padding="{Binding PreviewPadding}"
+                                                    Visibility="{Binding PreviewVisibility}">
+                                                <Image Source="{Binding Preview}" Stretch="{Binding PreviewStretch}" />
+                                            </Border>
+
+                                            <TextBlock Grid.Column="1" Text="{Binding PreviewText}" TextWrapping="Wrap"
+                                                       MaxHeight="{Binding DataContext.PreviewMaxHeight, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
+
+                                            <StackPanel Grid.Column="2" Margin="8,0,0,0" Orientation="Horizontal" VerticalAlignment="Top">
+                                                <TextBlock Margin="0,0,5,0" FontFamily="{StaticResource IconFontFamily}"
+                                                           FontSize="{StaticResource FontSizeCaption}"
+                                                           Foreground="{StaticResource AccentBrush}" Text="{Binding PinnedMark}" />
+                                                <TextBlock FontFamily="{StaticResource IconFontFamily}"
+                                                           FontSize="{StaticResource FontSizeCaption}"
+                                                           Foreground="{StaticResource DangerBrush}" Text="{Binding FavoriteMark}" />
+                                            </StackPanel>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,5,0,0"
+                                                       Style="{StaticResource MetaTextStyle}" Text="{Binding Metadata}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
                             </ListBox>
-                            <TextBlock x:Name="EmptyStateText" Text="还没有历史，复制内容试试" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#FF64748B" IsHitTestVisible="False"/>
+                            <TextBlock x:Name="EmptyStateText" Text="还没有历史，复制内容试试"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{StaticResource LabelTertiaryBrush}" IsHitTestVisible="False" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="ConfigPanel" Grid.Row="1" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Shown only for 团队配置, because that space is a second local
+                         container today and must not look like working team sharing. -->
+                    <Border x:Name="ConfigSpaceNotice" Grid.Row="0" Margin="0,0,0,9" Padding="10,6"
+                            Background="{StaticResource AccentSoftBrush}"
+                            CornerRadius="{StaticResource RadiusMedium}" Visibility="Collapsed">
+                        <TextBlock Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap"
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   Text="团队配置目前只保存在本机，尚未接入账号、云端或团队成员共享。" />
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="176" />
+                            <ColumnDefinition Width="9" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Grid.Column="0">
+                            <Border Background="{StaticResource SurfaceBrush}"
+                                    BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1"
+                                    CornerRadius="{StaticResource RadiusLarge}">
+                                <ListBox x:Name="FolderList"
+                                         ItemsSource="{Binding Folders}"
+                                         SelectedItem="{Binding SelectedFolder, Mode=TwoWay}"
+                                         SelectionChanged="FolderList_SelectionChanged"
+                                         ContextMenuOpening="FolderList_ContextMenuOpening"
+                                         PreviewMouseMove="FolderList_PreviewMouseMove"
+                                         Drop="FolderList_Drop" AllowDrop="True">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="8,6">
+                                                <TextBlock DockPanel.Dock="Right" Style="{StaticResource MetaTextStyle}"
+                                                           VerticalAlignment="Center" Text="{Binding CountText}" />
+                                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+                        </Grid>
+
+                        <GridSplitter Grid.Column="1" Width="9" HorizontalAlignment="Stretch" />
+
+                        <Grid Grid.Column="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" Margin="0,0,0,9">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="CollectionSearchBox" Style="{StaticResource SearchTextBoxStyle}"
+                                         Tag="搜索当前空间的配置" TextChanged="CollectionSearchBox_TextChanged" />
+                                <StackPanel x:Name="PersonalTransferPanel" Grid.Column="1" Margin="8,0,0,0" Orientation="Horizontal">
+                                    <Button Margin="0,0,6,0" Click="ExportPersonalConfigButton_Click" Content="导出" ToolTip="将个人配置及其图片、文件副本导出为迁移包" />
+                                    <Button Click="ImportPersonalConfigButton_Click" Content="导入" ToolTip="从迁移包合并导入个人配置" />
+                                </StackPanel>
+                                <Button Grid.Column="2" Margin="8,0,0,0" Click="AddCollectionButton_Click" Content="添加" />
+                            </Grid>
+
+                            <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}"
+                                    BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1"
+                                    CornerRadius="{StaticResource RadiusLarge}">
+                                <Grid>
+                                <ListBox x:Name="CollectionList"
+                                         ItemsSource="{Binding CollectionItems}"
+                                         SelectedItem="{Binding SelectedCollectionItem, Mode=TwoWay}"
+                                         AllowDrop="True"
+                                         PreviewMouseMove="CollectionList_PreviewMouseMove"
+                                         Drop="CollectionList_Drop"
+                                         SelectionChanged="CollectionList_SelectionChanged"
+                                         MouseDoubleClick="CollectionList_MouseDoubleClick"
+                                         ContextMenuOpening="CollectionList_ContextMenuOpening">
+                                    <ListBox.ContextMenu>
+                                        <ContextMenu />
+                                    </ListBox.ContextMenu>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="{Binding DataContext.RowMargin, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Margin="0,0,10,0" VerticalAlignment="Top"
+                                                        Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                        Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                        Background="{StaticResource ThumbnailBackdropBrush}"
+                                                        CornerRadius="{StaticResource RadiusSmall}"
+                                                        Padding="{Binding ThumbnailPadding}"
+                                                        Visibility="{Binding ThumbnailVisibility}">
+                                                    <Image Source="{Binding Thumbnail}" Stretch="{Binding ThumbnailStretch}" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Margin="0,2,0,0" Text="{Binding Preview}" TextWrapping="Wrap"
+                                                               Foreground="{StaticResource LabelSecondaryBrush}"
+                                                               MaxHeight="{Binding DataContext.PreviewMaxHeight, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
+                                                    <TextBlock Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}" Text="{Binding TypeText}" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock x:Name="CollectionEmptyStateText" Text="这个文件夹还没有内容"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{StaticResource LabelTertiaryBrush}" IsHitTestVisible="False" />
+                                </Grid>
+                            </Border>
+
+                            <TextBlock Grid.Row="2" Margin="2,8,0,0" Style="{StaticResource MetaTextStyle}"
+                                       Text="右键编辑 / 移动 / 上移下移 / 文件操作；Alt+↑ Alt+↓ 调整顺序，拖到左侧目录可移动" />
                         </Grid>
                     </Grid>
-                </TabItem>
+                </Grid>
 
-                <TabItem Header="收藏">
-                    <Grid Margin="0,10,0,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Grid Grid.Column="0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="文件夹" FontWeight="SemiBold" Margin="4,0,0,8"/><ListBox x:Name="FolderList" Grid.Row="1" ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder,Mode=TwoWay}" SelectionChanged="FolderList_SelectionChanged" PreviewMouseMove="FolderList_PreviewMouseMove" Drop="FolderList_Drop" AllowDrop="True"><ListBox.ItemTemplate><DataTemplate><DockPanel Margin="5"><TextBlock Text="{Binding CountText}" DockPanel.Dock="Right" Foreground="#FF64748B"/><TextBlock Text="{Binding Name}"/></DockPanel></DataTemplate></ListBox.ItemTemplate></ListBox><WrapPanel Grid.Row="2" Margin="0,8,0,0"><Button Content="+ 文件夹" Padding="8,4" Click="NewFolderButton_Click"/><Button Content="重命名" Margin="5,0,0,0" Padding="8,4" Click="RenameFolderButton_Click"/><Button Content="删除" Margin="5,0,0,0" Padding="8,4" Click="DeleteFolderButton_Click"/></WrapPanel></Grid>
-                        <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch"/>
-                        <Grid Grid.Column="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid Grid.Row="0" Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="CollectionSearchBox" Height="34" Padding="8,5" TextChanged="CollectionSearchBox_TextChanged"/><Button Grid.Column="1" Margin="8,0,0,0" Padding="12,4" Content="+ 添加" Click="AddCollectionButton_Click"/></Grid><ListBox x:Name="CollectionList" Grid.Row="1" ItemsSource="{Binding CollectionItems}" SelectedItem="{Binding SelectedCollectionItem,Mode=TwoWay}" AllowDrop="True" PreviewMouseMove="CollectionList_PreviewMouseMove" Drop="CollectionList_Drop" SelectionChanged="CollectionList_SelectionChanged" MouseDoubleClick="CollectionList_MouseDoubleClick" ContextMenuOpening="CollectionList_ContextMenuOpening" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"><ListBox.ContextMenu><ContextMenu/></ListBox.ContextMenu><ListBox.ItemTemplate><DataTemplate><Grid Margin="8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Border Width="48" Height="48" Margin="0,0,6,0" Background="#FFF1F5F9" Padding="{Binding ThumbnailPadding}" Visibility="{Binding ThumbnailVisibility}"><Image Source="{Binding Thumbnail}" Stretch="{Binding ThumbnailStretch}"/></Border><StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Preview}" TextWrapping="Wrap" MaxHeight="38" Foreground="#FF475569"/><TextBlock Text="{Binding TypeText}" FontSize="10" Foreground="#FF64748B"/></StackPanel></Grid></DataTemplate></ListBox.ItemTemplate></ListBox><TextBlock Grid.Row="2" Margin="0,8,0,0" Text="右键编辑/移动/文件操作；拖到左侧目录可移动，拖到内容前可排序" Foreground="#FF64748B" FontSize="11"/></Grid>
+                <Grid x:Name="LanSharePanel" Grid.Row="1" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="2,0,2,10">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="附近设备" />
+                            <TextBlock x:Name="LanStatusText" Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}"
+                                       Text="点击刷新发现同一局域网内的 LocalSend 设备" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Button Margin="0,0,7,0" Padding="12,6" Click="RefreshLanDevicesButton_Click" Content="刷新设备" />
+                            <Button Padding="12,6" Click="OpenLanSettingsButton_Click" Content="共享设置" />
+                        </StackPanel>
                     </Grid>
-                </TabItem>
-            </TabControl>
+                    <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderSubtleBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource RadiusLarge}">
+                        <Grid>
+                            <ListBox x:Name="LanDeviceList" ItemsSource="{Binding LanDevices}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="10,8">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding Alias}" />
+                                                <TextBlock Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}" Text="{Binding Detail}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource SuccessBrush}" Text="可发送" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <TextBlock x:Name="LanEmptyText" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{StaticResource LabelTertiaryBrush}" Text="尚未发现设备" IsHitTestVisible="False" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
 
-            <Grid Grid.Row="2" Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="CountText" Text="0 条记录" FontSize="12"/><TextBlock x:Name="WorkspaceText" Text="Workspace：初始化中" FontSize="11" Foreground="#FF64748B"/></StackPanel><TextBlock Grid.Column="1" VerticalAlignment="Center" Text="Enter 使用 · Del 删除 · Ctrl+D 收藏 · Alt+V 呼出" Foreground="#FF64748B" FontSize="10"/></Grid>
+            <!--  Footer  -->
+
+            <Border Grid.Row="2" Margin="0,10,0,0" Padding="16,9" Background="{StaticResource ChromeBrush}"
+                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="CountText" Style="{StaticResource SecondaryTextStyle}" Text="0 条记录" />
+                        <TextBlock x:Name="WorkspaceText" Margin="0,1,0,0" Style="{StaticResource MetaTextStyle}"
+                                   Text="Workspace：初始化中" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center"
+                               Style="{StaticResource MetaTextStyle}"
+                               Text="Enter 使用 · Del 删除 · Ctrl+D 存入个人配置 · Ctrl+P 置顶 · Alt+↑/↓ 排序 · Alt+V 呼出" />
+                </Grid>
+            </Border>
         </Grid>
     </Border>
 </Window>

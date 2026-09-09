@@ -30,6 +30,7 @@
 | 输入框快捷键保护 | 未完成桌面验收 | 代码在焦点为 `TextBoxBase`/`PasswordBox` 时跳过 Delete/Enter/Ctrl+D/Ctrl+P | 仍需在搜索框和收藏编辑框逐键操作并观察记录未被改变 |
 | 失焦隐藏 | 未完成桌面验收 | 代码含 80 ms 延迟、常驻和模态窗口保护 | 当前桌面控制后端不能枚举 WPF 窗口，未保留可观察证据 |
 | 多显示器/不同 DPI | 未验证 | 本机枚举只有 `DISPLAY1`、96 DPI | 缺少第二显示器和非 100% 缩放环境 |
+| 亚克力背景与降级 | 部分验证 | Windows 11 实机截图确认 `WindowBackdrop.TryApplyAcrylic` 生效 | Windows 10 与不支持 DWM 背景的环境应回落到 `WindowFallbackBrush` 不透明背景，无可测环境；非 96 DPI 下的表现同样未验证 |
 
 ## 缺陷与最小修复
 

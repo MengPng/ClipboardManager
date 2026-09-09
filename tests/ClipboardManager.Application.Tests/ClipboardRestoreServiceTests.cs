@@ -46,6 +46,17 @@ public sealed class ClipboardRestoreServiceTests
         Assert.Equal(2, clipboard.LastWrittenFiles?.Count);
         Assert.True(guard.TryConsume(ClipboardPayloadType.Files, filesItem.ContentHash));
 
+        var imageFileItem = filesItem with
+        {
+            Id = Guid.NewGuid(),
+            ItemType = ClipboardItemType.ImageFile,
+            FileManifest = "[\"C:\\\\photo.png\"]",
+            ContentHash = "image-file-hash"
+        };
+        await service.RestoreAsync(imageFileItem);
+        Assert.Equal("C:\\photo.png", Assert.Single(clipboard.LastWrittenFiles!));
+        Assert.True(guard.TryConsume(ClipboardPayloadType.Files, imageFileItem.ContentHash));
+
         // When clipboard write fails, the guard must be cleared so next real copy isn't swallowed
         clipboard.FailNext = true;
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.RestoreAsync(textItem));
