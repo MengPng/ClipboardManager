@@ -37,6 +37,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly ISyncEngine _syncEngine;
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
     private bool _allowClose, _favoritesOnly, _pinnedOnly, _refreshingFolders, _isPinnedTopmost;
+    private bool _isCollapsed;
+    private double _expandedHeight = 540;
+    private double _expandedMinHeight = 450;
     private int _activeModalCount;
     private ClipboardItemType? _itemType;
     private HistoryItemViewModel? _selectedItem;
@@ -120,7 +123,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             catch { /* A settings read failure must not crash the desktop shell. */ }
         };
-        IsVisibleChanged += (_, _) => { if (!IsVisible) _windowDockingService.Undock(); };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible && !_windowDockingService.IsTemporarilyHidden) _windowDockingService.Undock();
+        };
         PreviewKeyDown += (_, e) =>
         {
             if (Keyboard.FocusedElement is TextBoxBase or PasswordBox ||
@@ -222,7 +228,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _teamWorkspaceId = context.Workspaces.FirstOrDefault(x => x.Type == WorkspaceType.Team)?.Id;
         _localPersonalWorkspaceId = _personalWorkspaceId;
         _localTeamWorkspaceId = _teamWorkspaceId;
-        if (_teamWorkspaceId is null) TeamSpaceTab.Visibility = Visibility.Collapsed;
+        TeamSpaceTab.Visibility = Visibility.Collapsed;
         _historySpaceName = context.Workspace.Name;
         _deviceName = context.Device.DeviceName;
         _deviceId = context.Device.DeviceId;
@@ -440,7 +446,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _teamWorkspaceId = _localTeamWorkspaceId;
         ModeButton.Content = "本地";
         CloudManageButton.Visibility = Visibility.Collapsed;
-        TeamSpaceTab.Visibility = _teamWorkspaceId is null ? Visibility.Collapsed : Visibility.Visible;
+        TeamSpaceTab.Visibility = Visibility.Collapsed;
         await _cloudModeService.SetModeAsync(AppMode.Local);
         await RefreshFoldersAsync();
     }
@@ -452,7 +458,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         foreach (var workspace in workspaces) await _cloudMirrorStore.EnsureMappingAsync(workspace, cancellationToken);
         _personalWorkspaceId = personal.Id;
         _teamWorkspaceId = workspaces.FirstOrDefault(x => x.Type == WorkspaceType.Team)?.Id;
-        TeamSpaceTab.Visibility = _teamWorkspaceId is null ? Visibility.Collapsed : Visibility.Visible;
+        TeamSpaceTab.Visibility = Visibility.Collapsed;
         CloudManageButton.Visibility = Visibility.Visible;
         CloudStatusText.Text = "同步中";
         foreach (var workspace in workspaces)
@@ -513,6 +519,37 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         }
         catch { /* A settings write failure must not disrupt UI toggle. */ }
+    }
+
+    private void ExpandCollapseButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_isCollapsed)
+        {
+            _expandedHeight = Math.Max(ActualHeight, _expandedMinHeight);
+            _expandedMinHeight = MinHeight;
+            MainContentRow.Height = new GridLength(0);
+            FooterRow.Height = new GridLength(0);
+            MinHeight = 46;
+            Height = 46;
+            ResizeMode = ResizeMode.NoResize;
+            ExpandCollapseButton.Content = "\uE70D";
+            ExpandCollapseButton.ToolTip = "展开剪切板";
+            System.Windows.Automation.AutomationProperties.SetName(ExpandCollapseButton, "展开剪切板");
+            _isCollapsed = true;
+        }
+        else
+        {
+            ResizeMode = ResizeMode.CanResize;
+            MinHeight = _expandedMinHeight;
+            MainContentRow.Height = new GridLength(1, GridUnitType.Star);
+            FooterRow.Height = GridLength.Auto;
+            Height = Math.Max(_expandedHeight, MinHeight);
+            ExpandCollapseButton.Content = "\uE70E";
+            ExpandCollapseButton.ToolTip = "收起为标题栏";
+            System.Windows.Automation.AutomationProperties.SetName(ExpandCollapseButton, "收起剪切板");
+            _isCollapsed = false;
+        }
+        _windowDockingService.Reposition();
     }
 
     private void UpdatePinVisualState(bool pinned)
@@ -610,14 +647,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Offers folders from both config spaces, each labelled with its space, so putting a
-    /// record into 团队配置 is an unambiguous explicit choice rather than a side effect of
-    /// whichever view happened to be open.
+    /// Offers personal folders only while the team configuration feature is hidden.
+    /// The team workspace remains intact for a later release and is never deleted here.
     /// </summary>
     private async Task<FolderViewModel?> ChooseFolderAsync(CancellationToken cancellationToken = default)
     {
         var choices = new List<FolderViewModel>();
-        foreach (var workspaceId in _teamWorkspaceId is { } team ? new[] { _personalWorkspaceId, team } : [_personalWorkspaceId])
+        foreach (var workspaceId in new[] { _personalWorkspaceId })
         {
             var result = await _collectionService.GetFoldersAsync(workspaceId, cancellationToken);
             foreach (var folder in result.Folders)
@@ -897,14 +933,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _collectionService.CollectToUncategorizedAsync(_personalWorkspaceId, item);
             await RefreshFoldersAsync();
         }, "Ctrl+D");
-        if (_teamWorkspaceId is { } teamWorkspaceId)
-        {
-            AddMenu(menu, "存入团队配置（仅本机）", async () =>
-            {
-                await _collectionService.CollectToUncategorizedAsync(teamWorkspaceId, item);
-                await RefreshFoldersAsync();
-            });
-        }
         AddMenu(menu, "选择配置文件夹…", async () =>
         {
             var folder = await ChooseFolderAsync();
@@ -917,7 +945,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _historyService.SetPinnedAsync(item.Id, !item.IsPinned);
             await RefreshHistoryAsync();
         }, "Ctrl+P");
-        AddMenu(menu, "发送到局域网…", () => SendToLanAsync(item));
         menu.Items.Add(new Separator());
         if (item.ItemType == ClipboardItemType.Image) AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.ImagePath));
         if (item.ItemType == ClipboardItemType.ImageFile)

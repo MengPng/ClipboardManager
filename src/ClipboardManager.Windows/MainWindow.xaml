@@ -29,11 +29,11 @@
 
     <!-- RootSurface is opaque-filled from code when the backdrop is unavailable. -->
     <Border x:Name="RootSurface" Background="{StaticResource WindowVibrancyBrush}">
-        <Grid>
+        <Grid x:Name="WindowLayoutRoot">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
+                <RowDefinition x:Name="MainContentRow" Height="*" />
+                <RowDefinition x:Name="FooterRow" Height="Auto" />
             </Grid.RowDefinitions>
 
             <!--  Title bar  -->
@@ -67,6 +67,9 @@
                 <!-- The content of these buttons is a private-use icon glyph, which is
                      meaningless to a screen reader, so each carries an explicit name. -->
                 <StackPanel Grid.Column="2" Margin="0,0,8,0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ExpandCollapseButton" Style="{StaticResource IconButtonStyle}"
+                            Click="ExpandCollapseButton_Click" Content="&#xE70E;"
+                            ToolTip="收起为标题栏" AutomationProperties.Name="收起剪切板" />
                     <ToggleButton x:Name="PinButton" Style="{StaticResource IconToggleButtonStyle}"
                                   Click="PinButton_Click" Content="&#xE718;"
                                   AutomationProperties.Name="常驻前台" />
@@ -99,8 +102,8 @@
                             SelectionChanged="MainTabs_SelectionChanged">
                     <TabItem Header="历史" Tag="&#xE81C;" />
                     <TabItem Header="个人配置" Tag="&#xE77B;" />
-                    <TabItem x:Name="TeamSpaceTab" Header="团队配置" Tag="&#xE716;" />
-                    <TabItem Header="局域网共享" Tag="&#xE968;" />
+                    <TabItem x:Name="TeamSpaceTab" Header="团队配置" Tag="&#xE716;" Visibility="Collapsed" />
+                    <TabItem x:Name="LanShareTab" Header="局域网共享" Tag="&#xE968;" Visibility="Collapsed" />
                 </TabControl>
 
                 <Grid x:Name="HistoryPanel" Grid.Row="1">

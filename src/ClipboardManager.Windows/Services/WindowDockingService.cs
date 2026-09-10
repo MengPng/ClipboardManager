@@ -22,10 +22,12 @@ public sealed class WindowDockingService : IDisposable
     private readonly WinEventDelegate _targetStateChangedDelegate;
     private IntPtr _locationHook;
     private IntPtr _minimizeHook;
+    private IntPtr _visibilityHook;
     private IntPtr _destroyHook;
     private IntPtr _targetWindow;
     private Window? _panel;
     private bool _updatePending;
+    private bool _hiddenForTargetState;
 
     public WindowDockingService()
     {
@@ -33,7 +35,8 @@ public sealed class WindowDockingService : IDisposable
         _targetStateChangedDelegate = OnTargetStateChanged;
     }
 
-    public bool IsDocked => _targetWindow != IntPtr.Zero && _panel?.IsVisible == true;
+    public bool IsDocked => _targetWindow != IntPtr.Zero && _panel is not null;
+    public bool IsTemporarilyHidden => IsDocked && _hiddenForTargetState;
 
     public bool TryDockToForeground(Window panel)
     {
@@ -84,9 +87,16 @@ public sealed class WindowDockingService : IDisposable
             _destroyHook = IntPtr.Zero;
         }
 
+        if (_visibilityHook != IntPtr.Zero)
+        {
+            UnhookWinEvent(_visibilityHook);
+            _visibilityHook = IntPtr.Zero;
+        }
+
         _targetWindow = IntPtr.Zero;
         _panel = null;
         _updatePending = false;
+        _hiddenForTargetState = false;
     }
 
     private static bool IsSupportedTarget(IntPtr window)
@@ -119,6 +129,8 @@ public sealed class WindowDockingService : IDisposable
             _targetStateChangedDelegate, processId, 0, WinEventOutOfContext);
         _destroyHook = SetWinEventHook(EventObjectDestroy, EventObjectDestroy, IntPtr.Zero,
             _targetStateChangedDelegate, processId, 0, WinEventOutOfContext);
+        _visibilityHook = SetWinEventHook(EventObjectShow, EventObjectHide, IntPtr.Zero,
+            _targetStateChangedDelegate, processId, 0, WinEventOutOfContext);
     }
 
     private void OnLocationChanged(IntPtr hook, uint eventType, IntPtr window, int objectId, int childId, uint eventThread, uint eventTime)
@@ -130,15 +142,48 @@ public sealed class WindowDockingService : IDisposable
     {
         if (window != _targetWindow || (objectId != ObjectIdWindow && objectId != 0)) return;
 
-        if (eventType == EventObjectDestroy || eventType == EventSystemMinimizeStart)
+        if (eventType == EventObjectDestroy)
         {
+            var panel = _panel;
+            panel?.Dispatcher.BeginInvoke(() => { panel.Hide(); Undock(); });
+            return;
+        }
+
+        if (eventType is EventSystemMinimizeStart or EventObjectHide)
+        {
+            _hiddenForTargetState = true;
             var panel = _panel;
             panel?.Dispatcher.BeginInvoke(() => panel.Hide());
             return;
         }
 
-        if (eventType == EventSystemMinimizeEnd) QueuePositionUpdate();
+        if (eventType is EventSystemMinimizeEnd or EventObjectShow) RestorePanelAfterTargetReturns();
     }
+
+    private void RestorePanelAfterTargetReturns()
+    {
+        var panel = _panel;
+        if (panel is null) return;
+        panel.Dispatcher.BeginInvoke(async () =>
+        {
+            // Some WeChat/WeCom builds emit the restore event before their top-level
+            // window becomes visible. Retry briefly so the panel is not left hidden.
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                await Task.Delay(attempt == 0 ? 80 : 100);
+                if (!IsWindow(_targetWindow)) return;
+                if (IsIconic(_targetWindow) || !IsWindowVisible(_targetWindow)) continue;
+
+                _hiddenForTargetState = false;
+                panel.ShowActivated = false;
+                if (!panel.IsVisible) panel.Show();
+                PositionPanel();
+                return;
+            }
+        }, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    public void Reposition() => QueuePositionUpdate();
 
     private void QueuePositionUpdate()
     {
@@ -187,6 +232,8 @@ public sealed class WindowDockingService : IDisposable
     private const uint EventSystemMinimizeStart = 0x0016;
     private const uint EventSystemMinimizeEnd = 0x0017;
     private const uint EventObjectDestroy = 0x8001;
+    private const uint EventObjectShow = 0x8002;
+    private const uint EventObjectHide = 0x8003;
     private const uint EventObjectLocationChange = 0x800B;
     private const int ObjectIdWindow = 0;
     private const uint WinEventOutOfContext = 0;
