@@ -333,8 +333,11 @@ public partial class App : System.Windows.Application
             DesktopWindowPlacement.PlaceAtCursor(MainWindow);
         }
         MainWindow.Activate();
+        var keepTopmost = MainWindow is ClipboardManager.Windows.MainWindow pinnedWindow &&
+                          pinnedWindow.IsPinnedTopmost;
         MainWindow.Topmost = true;
-        MainWindow.Topmost = false;
+        // The activation pulse must not clear the user's persistent pin.
+        if (!keepTopmost) MainWindow.Topmost = false;
         MainWindow.Focus();
     }
 }

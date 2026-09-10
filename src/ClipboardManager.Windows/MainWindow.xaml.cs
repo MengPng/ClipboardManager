@@ -38,7 +38,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
     private bool _allowClose, _favoritesOnly, _pinnedOnly, _refreshingFolders, _isPinnedTopmost;
     private bool _isCollapsed;
+    private double _expandedWidth = 420;
     private double _expandedHeight = 540;
+    private double _expandedMinWidth = 400;
     private double _expandedMinHeight = 450;
     private int _activeModalCount;
     private ClipboardItemType? _itemType;
@@ -188,6 +190,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public HistoryItemViewModel? SelectedItem { get => _selectedItem; set { _selectedItem = value; Changed(nameof(SelectedItem)); } }
     public FolderViewModel? SelectedFolder { get => _selectedFolder; set { _selectedFolder = value; Changed(nameof(SelectedFolder)); } }
     public CollectionItemViewModel? SelectedCollectionItem { get => _selectedCollectionItem; set { _selectedCollectionItem = value; Changed(nameof(SelectedCollectionItem)); } }
+    public bool IsPinnedTopmost => _isPinnedTopmost;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     // Row metrics the item templates bind to. Keeping them here rather than swapping
@@ -525,11 +528,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (!_isCollapsed)
         {
+            _expandedWidth = Math.Max(ActualWidth, _expandedMinWidth);
             _expandedHeight = Math.Max(ActualHeight, _expandedMinHeight);
+            _expandedMinWidth = MinWidth;
             _expandedMinHeight = MinHeight;
             MainContentRow.Height = new GridLength(0);
             FooterRow.Height = new GridLength(0);
+            MinWidth = 330;
             MinHeight = 46;
+            Width = 330;
             Height = 46;
             ResizeMode = ResizeMode.NoResize;
             ExpandCollapseButton.Content = "\uE70D";
@@ -540,9 +547,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         else
         {
             ResizeMode = ResizeMode.CanResize;
+            MinWidth = _expandedMinWidth;
             MinHeight = _expandedMinHeight;
             MainContentRow.Height = new GridLength(1, GridUnitType.Star);
             FooterRow.Height = GridLength.Auto;
+            Width = Math.Max(_expandedWidth, MinWidth);
             Height = Math.Max(_expandedHeight, MinHeight);
             ExpandCollapseButton.Content = "\uE70E";
             ExpandCollapseButton.ToolTip = "收起为标题栏";

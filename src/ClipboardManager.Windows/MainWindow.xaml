@@ -53,14 +53,14 @@
                     <Button x:Name="ModeButton" Margin="9,0,0,0" Padding="9,3"
                             Click="ModeButton_Click" Content="本地"
                             ToolTip="切换本地 / 云端模式" />
-                    <TextBlock x:Name="CloudStatusText" Margin="8,0,0,0" VerticalAlignment="Center"
+                    <TextBlock x:Name="CloudStatusText" Margin="8,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"
                                Foreground="{StaticResource LabelSecondaryBrush}" FontSize="{StaticResource FontSizeMeta}"
                                Text="仅本地" />
                     <Button x:Name="CloudManageButton" Margin="6,0,0,0" Padding="7,2" Visibility="Collapsed"
                             Click="CloudManageButton_Click" Content="管理" ToolTip="团队、成员、分组、邀请码和设备" />
                 </StackPanel>
 
-                <TextBlock x:Name="ListeningStatusText" Grid.Column="1" Margin="0,0,10,0"
+                <TextBlock x:Name="ListeningStatusText" Grid.Column="1" Margin="0,0,10,0" Visibility="Collapsed"
                            VerticalAlignment="Center" FontSize="{StaticResource FontSizeCaption}"
                            Foreground="{StaticResource SuccessBrush}" Text="● 正在监听" />
 
@@ -131,7 +131,8 @@
                                      GroupName="HistoryFilter" IsChecked="True"
                                      Click="AllFilterButton_Click" Content="全部" />
                         <RadioButton x:Name="PinnedFilterButton" Style="{StaticResource FilterChipStyle}"
-                                     GroupName="HistoryFilter" Click="PinnedFilterButton_Click" Content="置顶" />
+                                     GroupName="HistoryFilter" Click="PinnedFilterButton_Click" Content="置顶"
+                                     Visibility="Collapsed" />
                         <RadioButton x:Name="TextFilterButton" Style="{StaticResource FilterChipStyle}"
                                      GroupName="HistoryFilter" Click="TextFilterButton_Click" Content="文本" />
                         <RadioButton x:Name="ImageFilterButton" Style="{StaticResource FilterChipStyle}"
@@ -139,7 +140,8 @@
                         <RadioButton x:Name="FileFilterButton" Style="{StaticResource FilterChipStyle}"
                                      GroupName="HistoryFilter" Click="FileFilterButton_Click" Content="文件" />
                         <RadioButton x:Name="FavoriteFilterButton" Style="{StaticResource FilterChipStyle}"
-                                     GroupName="HistoryFilter" Click="FavoriteFilterButton_Click" Content="快速收藏" />
+                                     GroupName="HistoryFilter" Click="FavoriteFilterButton_Click" Content="快速收藏"
+                                     Visibility="Collapsed" />
                     </WrapPanel>
 
                     <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}"
