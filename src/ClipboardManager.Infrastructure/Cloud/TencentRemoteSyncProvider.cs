@@ -25,7 +25,10 @@ public sealed class TencentRemoteSyncProvider(HttpClient http, TencentCloudHttpA
             operation.CreatedAt
         }).ToArray();
         using var response = await http.PostAsJsonAsync("v1/sync/push", new { workspaceId = operations[0].WorkspaceId, operations = wireOperations }, cancellationToken);
-        return await ReadAsync<PushResult>(response, cancellationToken);
+        var wire = await ReadAsync<PushWireResponse>(response, cancellationToken);
+        return new(wire.Succeeded, wire.ServerVersions, Conflicts: wire.Conflicts?.Select(x =>
+            new RemoteConflict(x.OperationId,x.EntityId,x.ExpectedVersion,x.ActualVersion,
+                x.RemotePayload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? "{}" : x.RemotePayload.GetRawText())).ToArray());
     }
 
     public async Task<PullResult> PullAsync(Guid workspaceId, string? cursor, CancellationToken cancellationToken = default)
@@ -33,7 +36,13 @@ public sealed class TencentRemoteSyncProvider(HttpClient http, TencentCloudHttpA
         await authorizer.ConfigureAsync(http, cancellationToken);
         var route = $"v1/sync/pull?workspaceId={workspaceId:D}&cursor={Uri.EscapeDataString(cursor ?? string.Empty)}";
         using var response = await http.GetAsync(route, cancellationToken);
-        return await ReadAsync<PullResult>(response, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException(await response.Content.ReadAsStringAsync(cancellationToken), null, response.StatusCode);
+        var wire = await response.Content.ReadFromJsonAsync<PullWireResponse>(Json, cancellationToken)
+            ?? throw new InvalidDataException("云端返回无效数据。");
+        return new(wire.Succeeded, wire.NextCursor,
+            wire.Changes.Select(x => new RemoteChange(x.EntityType, x.EntityId, x.ServerVersion,
+                x.Payload.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined ? "{}" : x.Payload.GetRawText(), x.IsDeleted)).ToArray());
     }
 
     private static async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -42,4 +51,9 @@ public sealed class TencentRemoteSyncProvider(HttpClient http, TencentCloudHttpA
             throw new HttpRequestException(await response.Content.ReadAsStringAsync(cancellationToken), null, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<T>(Json, cancellationToken) ?? throw new InvalidDataException("云端返回无效数据。");
     }
+
+    private sealed record PullWireResponse(bool Succeeded, string? NextCursor, IReadOnlyList<PullWireChange> Changes);
+    private sealed record PushWireResponse(bool Succeeded, Dictionary<Guid,long> ServerVersions, IReadOnlyList<ConflictWire>? Conflicts);
+    private sealed record ConflictWire(Guid OperationId, Guid EntityId, long ExpectedVersion, long ActualVersion, JsonElement RemotePayload);
+    private sealed record PullWireChange(string EntityType, Guid EntityId, long ServerVersion, JsonElement Payload, bool IsDeleted);
 }

@@ -10,13 +10,20 @@ public sealed class TencentCloudAccountService(HttpClient http, ICredentialVault
 {
     private const string SessionKey = "CloudSession";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private readonly SemaphoreSlim sessionGate = new(1, 1);
 
     public async Task<CloudSession?> GetSessionAsync(CancellationToken cancellationToken = default)
     {
+        await sessionGate.WaitAsync(cancellationToken);
+        try
+        {
         var saved = await vault.ReadAsync(SessionKey, cancellationToken);
         if (string.IsNullOrWhiteSpace(saved)) return null;
+        await EnsureBaseAddressAsync(cancellationToken);
         var stored = JsonSerializer.Deserialize<StoredSession>(saved, Json);
         if (stored is null) return null;
+        if (stored.Endpoint != http.BaseAddress!.AbsoluteUri)
+            throw new UnauthorizedAccessException("会话不属于当前云端地址，请重新登录。");
         if (stored.ExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(2))
         {
             if (string.IsNullOrWhiteSpace(stored.RefreshToken)) return null;
@@ -25,6 +32,8 @@ public sealed class TencentCloudAccountService(HttpClient http, ICredentialVault
         }
         ApplyBearer(stored.AccessToken);
         return stored.ToPublic();
+        }
+        finally { sessionGate.Release(); }
     }
 
     public async Task<CloudSession> SignInAsync(CloudSignInRequest request, CancellationToken cancellationToken = default)
@@ -45,6 +54,9 @@ public sealed class TencentCloudAccountService(HttpClient http, ICredentialVault
 
     public async Task SignOutAsync(bool allDevices, CancellationToken cancellationToken = default)
     {
+        await sessionGate.WaitAsync(cancellationToken);
+        try
+        {
         var saved = await vault.ReadAsync(SessionKey, cancellationToken);
         if (saved is not null)
         {
@@ -52,13 +64,23 @@ public sealed class TencentCloudAccountService(HttpClient http, ICredentialVault
             if (stored is not null)
             {
                 await EnsureBaseAddressAsync(cancellationToken);
+                if (stored.Endpoint != http.BaseAddress!.AbsoluteUri)
+                    throw new UnauthorizedAccessException("会话地址已变更；已清除本机会话，原服务会话需另行撤销。");
                 ApplyBearer(stored.AccessToken);
                 using var response = await http.PostAsJsonAsync("v1/auth/sign-out", new { allDevices }, cancellationToken);
                 if (response.StatusCode is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)) await EnsureSuccessAsync(response, cancellationToken);
             }
         }
-        http.DefaultRequestHeaders.Authorization = null;
-        await vault.DeleteAsync(SessionKey, cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                http.DefaultRequestHeaders.Authorization = null;
+                await vault.DeleteAsync(SessionKey, CancellationToken.None);
+            }
+            finally { sessionGate.Release(); }
+        }
     }
 
     private async Task<StoredSession> PostSessionAsync(string route, object body, CancellationToken cancellationToken)
@@ -66,7 +88,8 @@ public sealed class TencentCloudAccountService(HttpClient http, ICredentialVault
         await EnsureBaseAddressAsync(cancellationToken);
         using var response = await http.PostAsJsonAsync(route, body, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
-        return await response.Content.ReadFromJsonAsync<StoredSession>(Json, cancellationToken) ?? throw new InvalidDataException("云端返回了无效会话。");
+        var session = await response.Content.ReadFromJsonAsync<StoredSession>(Json, cancellationToken) ?? throw new InvalidDataException("云端返回了无效会话。");
+        return session with { Endpoint = http.BaseAddress!.AbsoluteUri };
     }
 
     private Task SaveAsync(StoredSession session, CancellationToken cancellationToken) => vault.WriteAsync(SessionKey, JsonSerializer.Serialize(session, Json), cancellationToken);
@@ -84,10 +107,12 @@ public sealed class TencentCloudAccountService(HttpClient http, ICredentialVault
         var configured = (await settings.LoadAsync(cancellationToken)).CloudApiBaseUrl;
         if (!Uri.TryCreate(configured, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
             throw new InvalidOperationException("请先配置有效的 HTTPS 云端服务地址。");
-        http.BaseAddress = uri.AbsoluteUri.EndsWith('/') ? uri : new Uri(uri.AbsoluteUri + "/");
+        var endpoint = uri.AbsoluteUri.EndsWith('/') ? uri : new Uri(uri.AbsoluteUri + "/");
+        if (http.BaseAddress is null) http.BaseAddress = endpoint;
+        else if (http.BaseAddress != endpoint) throw new InvalidOperationException("云端地址已变更，请退出账号并重启软件。");
     }
 
-    private sealed record StoredSession(Guid UserId, string Email, string DisplayName, string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt)
+    private sealed record StoredSession(Guid UserId, string Email, string DisplayName, string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt, string? Endpoint = null)
     {
         public CloudSession ToPublic() => new(UserId, Email, DisplayName, ExpiresAt);
     }

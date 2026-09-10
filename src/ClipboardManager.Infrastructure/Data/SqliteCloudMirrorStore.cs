@@ -69,6 +69,16 @@ public sealed class SqliteCloudMirrorStore(SqliteConnectionFactory factory) : IC
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         foreach (var change in changes)
         {
+            await using (var pending = connection.CreateCommand())
+            {
+                pending.Transaction = (SqliteTransaction)transaction;
+                pending.CommandText = "SELECT EXISTS(SELECT 1 FROM sync_operations WHERE workspace_id=$w AND entity_type=$t AND entity_id=$id AND synced_at IS NULL)";
+                pending.Parameters.AddWithValue("$w", cloudWorkspaceId.ToString("D"));
+                pending.Parameters.AddWithValue("$t", change.EntityType);
+                pending.Parameters.AddWithValue("$id", change.EntityId.ToString("D"));
+                if (Convert.ToInt32(await pending.ExecuteScalarAsync(cancellationToken)) != 0)
+                    throw new InvalidOperationException("存在未推送的本地更改，暂不覆盖本地镜像或推进游标。");
+            }
             if (change.EntityType == "collection_folder") await ApplyFolderAsync(connection, (SqliteTransaction)transaction, cloudWorkspaceId, change, cancellationToken);
             else if (change.EntityType == "collection_item") await ApplyItemAsync(connection, (SqliteTransaction)transaction, cloudWorkspaceId, change, cancellationToken);
             else throw new InvalidDataException($"不支持的云端实体类型：{change.EntityType}");
@@ -102,7 +112,8 @@ public sealed class SqliteCloudMirrorStore(SqliteConnectionFactory factory) : IC
             INSERT INTO collection_folders(id,workspace_id,parent_folder_id,name,sort_key,is_system,created_at,updated_at,deleted_at,local_version,server_version,sync_status)
             VALUES($id,$workspace,$parent,$name,$sort,$system,$created,$updated,$deleted,1,$version,0)
             ON CONFLICT(id) DO UPDATE SET parent_folder_id=excluded.parent_folder_id,name=excluded.name,sort_key=excluded.sort_key,
-              updated_at=excluded.updated_at,deleted_at=excluded.deleted_at,server_version=excluded.server_version,sync_status=0;
+              updated_at=excluded.updated_at,deleted_at=excluded.deleted_at,server_version=excluded.server_version,sync_status=0
+            WHERE collection_folders.workspace_id=excluded.workspace_id AND COALESCE(collection_folders.server_version,0)<=excluded.server_version;
             """;
         Add(command, "$id", change.EntityId.ToString("D")); Add(command, "$workspace", workspaceId.ToString("D"));
         Add(command, "$parent", StringOrNull(root, "parentFolderId")); Add(command, "$name", StringOr(root, "name", "未命名"));
@@ -123,7 +134,8 @@ public sealed class SqliteCloudMirrorStore(SqliteConnectionFactory factory) : IC
               text_content=excluded.text_content,url=excluded.url,description=excluded.description,local_path=excluded.local_path,
               thumbnail_path=excluded.thumbnail_path,file_manifest=excluded.file_manifest,content_hash=excluded.content_hash,
               content_size=excluded.content_size,sort_key=excluded.sort_key,updated_at=excluded.updated_at,
-              deleted_at=excluded.deleted_at,server_version=excluded.server_version,sync_status=0;
+              deleted_at=excluded.deleted_at,server_version=excluded.server_version,sync_status=0
+            WHERE collection_items.workspace_id=excluded.workspace_id AND COALESCE(collection_items.server_version,0)<=excluded.server_version;
             """;
         Add(command, "$id", change.EntityId.ToString("D")); Add(command, "$workspace", workspaceId.ToString("D")); Add(command, "$folder", RequiredString(root, "folderId"));
         Add(command, "$type", IntOr(root, "itemType", 0)); Add(command, "$title", StringOrNull(root, "title")); Add(command, "$text", StringOrNull(root, "textContent"));

@@ -16,3 +16,14 @@ public sealed record PushResponse(bool Succeeded, IReadOnlyDictionary<Guid, long
 public sealed record ConflictResponse(Guid OperationId, Guid EntityId, long ExpectedVersion, long ActualVersion, JsonElement? RemotePayload);
 public sealed record PullChange(string EntityType, Guid EntityId, long ServerVersion, JsonElement? Payload, bool IsDeleted);
 public sealed record PullResponse(bool Succeeded, string NextCursor, IReadOnlyList<PullChange> Changes);
+public sealed record CreateWorkspaceRequest(string Name);
+public sealed record ProvisionAccountRequest(string Email, string DisplayName, string Password);
+public sealed record TeamMemberResponse(Guid UserId, string Email, string DisplayName, string Role, IReadOnlyList<Guid> GroupIds);
+public sealed record CreateGroupRequest(string Name);
+public sealed record MemberGroupResponse(Guid Id, Guid WorkspaceId, string Name, int MemberCount);
+public sealed record UpdateGroupMembersRequest(IReadOnlyList<Guid> UserIds);
+public sealed record CreateInvitationRequest(int LifetimeSeconds = 86400, int MaxUses = 1);
+public sealed record InvitationResponse(Guid Id, Guid WorkspaceId, string Code, DateTimeOffset ExpiresAt, int MaxUses, int UsedCount, DateTimeOffset? RevokedAt);
+public sealed record JoinInvitationRequest(string Code);
+public sealed record UpdateMemberRoleRequest(string Role);
+public sealed record DeviceResponse(Guid Id, string Name, DateTimeOffset? LastSeenAt, DateTimeOffset CreatedAt, DateTimeOffset? RevokedAt, bool IsCurrent);

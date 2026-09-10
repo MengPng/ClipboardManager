@@ -25,6 +25,11 @@ public sealed class DatabaseMigrator(NpgsqlDataSource dataSource)
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             await using var stream = assembly.GetManifestResourceStream(name) ?? throw new InvalidOperationException($"Migration resource {name} is missing.");
             using var reader = new StreamReader(stream); var sql = await reader.ReadToEndAsync(cancellationToken);
+            // Historical scripts also support psql and contain an outer transaction.
+            // The runner owns the transaction so the version marker commits atomically.
+            sql = sql.Trim();
+            if (sql.StartsWith("BEGIN;", StringComparison.OrdinalIgnoreCase)) sql = sql[6..].TrimStart();
+            if (sql.EndsWith("COMMIT;", StringComparison.OrdinalIgnoreCase)) sql = sql[..^7].TrimEnd();
             await using (var apply = new NpgsqlCommand(sql, connection, transaction)) await apply.ExecuteNonQueryAsync(cancellationToken);
             await using (var mark = new NpgsqlCommand("INSERT INTO schema_migrations(version) VALUES($1)", connection, transaction))
             { mark.Parameters.AddWithValue(version); await mark.ExecuteNonQueryAsync(cancellationToken); }

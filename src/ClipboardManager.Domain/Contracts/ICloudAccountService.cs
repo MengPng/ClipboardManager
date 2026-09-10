@@ -20,10 +20,17 @@ public interface ICloudAccountService
 public interface ICloudWorkspaceService
 {
     Task<IReadOnlyList<CloudWorkspace>> GetAvailableAsync(CancellationToken cancellationToken = default);
+    Task<CloudWorkspace> CreateTeamAsync(string name, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TeamMember>> GetMembersAsync(Guid workspaceId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<MemberGroup>> GetGroupsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<MemberGroup> CreateGroupAsync(Guid workspaceId, string name, CancellationToken cancellationToken = default);
+    Task SetGroupMembersAsync(Guid workspaceId, Guid groupId, IReadOnlyList<Guid> userIds, CancellationToken cancellationToken = default);
+    Task UpdateMemberRoleAsync(Guid workspaceId, Guid memberId, WorkspaceRole role, CancellationToken cancellationToken = default);
+    Task RemoveMemberAsync(Guid workspaceId, Guid memberId, CancellationToken cancellationToken = default);
     Task<TeamInvitation> CreateInvitationAsync(Guid workspaceId, TimeSpan lifetime, int maxUses, CancellationToken cancellationToken = default);
     Task JoinAsync(string invitationCode, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<CloudDevice>> GetDevicesAsync(CancellationToken cancellationToken = default);
+    Task RevokeDeviceAsync(Guid deviceId, CancellationToken cancellationToken = default);
 }
 
 public interface ICloudModeService

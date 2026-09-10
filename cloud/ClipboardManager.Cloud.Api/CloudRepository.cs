@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace ClipboardManager.Cloud.Api;
 
-public sealed class CloudRepository(NpgsqlDataSource dataSource)
+public sealed partial class CloudRepository(NpgsqlDataSource dataSource)
 {
     public async Task<CloudProfile?> ValidatePasswordAsync(string email, string password, CancellationToken ct)
     {
@@ -106,6 +106,7 @@ public sealed class CloudRepository(NpgsqlDataSource dataSource)
         var result = new List<WorkspaceResponse>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) result.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetInt64(5)));
+        await reader.DisposeAsync();
         await transaction.CommitAsync(ct);
         return result;
     }
@@ -114,6 +115,7 @@ public sealed class CloudRepository(NpgsqlDataSource dataSource)
     {
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
+        await RequireMemberAsync(connection, transaction, workspaceId, profileId, ct);
         await SetUserAsync(connection, profileId, transaction, ct);
         await using var command = new NpgsqlCommand("""
             SELECT sequence,entity_type,entity_id,version,payload,deleted_at IS NOT NULL
@@ -128,6 +130,7 @@ public sealed class CloudRepository(NpgsqlDataSource dataSource)
             changes.Add(new(reader.GetString(1), reader.GetGuid(2), reader.GetInt64(3),
                 reader.IsDBNull(4) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(4)), reader.GetBoolean(5)));
         }
+        await reader.DisposeAsync();
         await transaction.CommitAsync(ct);
         return new(true, next.ToString(), changes);
     }
@@ -138,11 +141,19 @@ public sealed class CloudRepository(NpgsqlDataSource dataSource)
         if (request.Operations.Select(x => x.Id).Distinct().Count() != request.Operations.Count) throw new ArgumentException("操作 ID 重复。");
         await using var connection = await dataSource.OpenConnectionAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
+        // Serialize a workspace's version checks and writes, including first creation.
+        await using (var mutex = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", connection, transaction))
+        {
+            mutex.Parameters.AddWithValue(request.WorkspaceId.ToString("D"));
+            await mutex.ExecuteNonQueryAsync(ct);
+        }
         await SetUserAsync(connection, principal.ProfileId, transaction, ct);
         if (!await CanEditAsync(connection, transaction, request.WorkspaceId, principal.ProfileId, ct)) throw new UnauthorizedAccessException("没有写入权限。");
         var versions = new Dictionary<Guid, long>(); var conflicts = new List<ConflictResponse>();
         foreach (var operation in request.Operations)
         {
+            if (operation.OperationType is < 0 or > 2 || operation.EntityType is not ("collection_folder" or "collection_item") || operation.EntityId == Guid.Empty)
+                throw new ArgumentException("无效的同步操作。");
             var previous = await GetOperationVersionAsync(connection, transaction, operation.Id, ct);
             if (previous is not null) { versions[operation.Id] = previous.Value; continue; }
             var current = await GetEntityVersionAsync(connection, transaction, request.WorkspaceId, operation.EntityType, operation.EntityId, ct);
@@ -231,6 +242,8 @@ public sealed class CloudRepository(NpgsqlDataSource dataSource)
         {
             var name = RequiredString(operation.Payload, "name", 120);
             var parent = OptionalGuid(operation.Payload, "parentFolderId");
+            if (parent == operation.EntityId) throw new ArgumentException("文件夹不能作为自己的父目录。");
+            if (parent.HasValue) await RequireFolderAsync(c, tx, workspace, parent.Value, ct);
             var sortKey = RequiredDecimal(operation.Payload, "sortKey");
             var scopeAll = OptionalBoolean(operation.Payload, "scopeAllMembers", true);
             await using var command = new NpgsqlCommand("""
@@ -252,6 +265,7 @@ public sealed class CloudRepository(NpgsqlDataSource dataSource)
         if (operation.EntityType == "collection_item")
         {
             var folderId = RequiredGuid(operation.Payload, "folderId");
+            await RequireFolderAsync(c, tx, workspace, folderId, ct);
             var itemType = RequiredInt(operation.Payload, "itemType") switch
             {
                 0 => "text", 1 => "link", 2 => "image", 3 => "file",
@@ -273,6 +287,13 @@ public sealed class CloudRepository(NpgsqlDataSource dataSource)
         }
 
         throw new ArgumentException($"不支持的同步实体类型：{operation.EntityType}");
+    }
+
+    private static async Task RequireFolderAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid workspace, Guid folder, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM collection_folders WHERE id=$1 AND workspace_id=$2 AND deleted_at IS NULL)",c,tx);
+        command.Parameters.AddWithValue(folder);command.Parameters.AddWithValue(workspace);
+        if (!(bool)(await command.ExecuteScalarAsync(ct))!) throw new ArgumentException("目标目录不存在或不属于当前空间。");
     }
 
     private static string RequiredString(JsonElement payload, string name, int maxLength)

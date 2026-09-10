@@ -41,6 +41,7 @@ public static class DependencyInjection
         services.AddSingleton<IIdentityProvider, LocalAnonymousIdentityProvider>();
         services.AddSingleton<IWorkspaceService, LocalWorkspaceService>();
         services.AddSingleton<IRemoteSyncProvider>(provider => provider.GetRequiredService<TencentRemoteSyncProvider>());
+        services.AddSingleton<ISyncEngine, SqliteCloudSyncEngine>();
         return services;
     }
 }

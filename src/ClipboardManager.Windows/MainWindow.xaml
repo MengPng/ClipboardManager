@@ -56,6 +56,8 @@
                     <TextBlock x:Name="CloudStatusText" Margin="8,0,0,0" VerticalAlignment="Center"
                                Foreground="{StaticResource LabelSecondaryBrush}" FontSize="{StaticResource FontSizeMeta}"
                                Text="仅本地" />
+                    <Button x:Name="CloudManageButton" Margin="6,0,0,0" Padding="7,2" Visibility="Collapsed"
+                            Click="CloudManageButton_Click" Content="管理" ToolTip="团队、成员、分组、邀请码和设备" />
                 </StackPanel>
 
                 <TextBlock x:Name="ListeningStatusText" Grid.Column="1" Margin="0,0,10,0"
@@ -212,7 +214,7 @@
                             CornerRadius="{StaticResource RadiusMedium}" Visibility="Collapsed">
                         <TextBlock Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap"
                                    FontSize="{StaticResource FontSizeCaption}"
-                                   Text="团队配置目前只保存在本机，尚未接入账号、云端或团队成员共享。" />
+                                   Text="本地团队配置仅保存在本机；切换云端后显示当前云团队的本地镜像。" />
                     </Border>
 
                     <Grid Grid.Row="1">

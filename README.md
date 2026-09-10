@@ -523,10 +523,10 @@ content_size
 - [x] 客户端本地/云端模式入口、HTTPS Provider、Windows Credential Manager 会话存储。
 - [x] SQLite schema 5：Outbox 重试/租约、远端游标、冲突副本、云端 Workspace 本地映射和可恢复附件传输状态；界面读取本地镜像，不逐条请求云端。
 - [x] PostgreSQL 初始实体、幂等操作、递增游标、配额约束及 Workspace RLS 基线。
-- [ ] 完成生产 API、内部开通/忘记密码、设备撤销、成员/分组/邀请码管理。
+- [x] 正式 API、内部账号开通、设备撤销、成员/分组/邀请码管理；邮件找回密码尚未启用。
 - [ ] 完成 COS 分片上传、STS、文件头校验、隔离、垃圾回收和配额并发验收。
 - [ ] 完成本地数据显式迁移向导、冲突中心、同步队列与权限状态界面。
-- [ ] 部署正式环境并在两台真实 Windows 设备验收；通过前不得发布正式 `0.7.0`。
+- [ ] 在两台真实 Windows 设备完成端到端同步验收；在此之前仅发布 `0.7.1-cloud-preview`，不宣称为正式云端稳定版。
 
 云端仅同步个人配置和团队配置，普通剪切板历史永不自动上传。详见 [`docs/adr/0003-tencent-cloud-provider.md`](./docs/adr/0003-tencent-cloud-provider.md) 与 [`cloud/README.md`](./cloud/README.md)。
 

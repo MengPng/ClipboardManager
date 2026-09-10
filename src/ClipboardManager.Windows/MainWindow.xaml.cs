@@ -32,6 +32,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly ILanShareService _lanShareService;
     private readonly ICloudModeService _cloudModeService;
     private readonly ICloudAccountService _cloudAccountService;
+    private readonly ICloudWorkspaceService _cloudWorkspaceService;
+    private readonly ICloudMirrorStore _cloudMirrorStore;
+    private readonly ISyncEngine _syncEngine;
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
     private bool _allowClose, _favoritesOnly, _pinnedOnly, _refreshingFolders, _isPinnedTopmost;
     private int _activeModalCount;
@@ -47,6 +50,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _lanSettingsLoaded;
     private string _lanSessionPin = string.Empty;
     private Guid _personalWorkspaceId;
+    private Guid _localPersonalWorkspaceId;
+    private Guid? _localTeamWorkspaceId;
     private Guid? _teamWorkspaceId;
     private string? _historySpaceName, _deviceName;
     private Guid _deviceId;
@@ -71,7 +76,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ClipboardManager.Domain.Contracts.IStorageMaintenanceService storageMaintenance,
         ClipboardManager.Domain.Contracts.IPersonalConfigTransferService personalConfigTransfer,
         ILanShareService lanShareService, ICloudModeService cloudModeService,
-        ICloudAccountService cloudAccountService)
+        ICloudAccountService cloudAccountService, ICloudWorkspaceService cloudWorkspaceService,
+        ICloudMirrorStore cloudMirrorStore, ISyncEngine syncEngine)
     {
         _historyService = historyService; _restoreService = restoreService; _monitorService = monitorService;
         _captureService = captureService; _payloadCaptureService = payloadCaptureService;
@@ -82,6 +88,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _lanShareService = lanShareService;
         _cloudModeService = cloudModeService;
         _cloudAccountService = cloudAccountService;
+        _cloudWorkspaceService = cloudWorkspaceService;
+        _cloudMirrorStore = cloudMirrorStore;
+        _syncEngine = syncEngine;
         DataContext = this;
         InitializeComponent();
         var pauseMenu = new ContextMenu();
@@ -211,6 +220,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // the third segment, so it is hidden rather than aliased onto 个人配置.
         _personalWorkspaceId = context.Workspace.Id;
         _teamWorkspaceId = context.Workspaces.FirstOrDefault(x => x.Type == WorkspaceType.Team)?.Id;
+        _localPersonalWorkspaceId = _personalWorkspaceId;
+        _localTeamWorkspaceId = _teamWorkspaceId;
         if (_teamWorkspaceId is null) TeamSpaceTab.Visibility = Visibility.Collapsed;
         _historySpaceName = context.Workspace.Name;
         _deviceName = context.Device.DeviceName;
@@ -218,12 +229,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _cloudModeService.StatusChanged += (_, status) => Dispatcher.Invoke(() => CloudStatusText.Text = status.Message);
         ModeButton.Content = context.Settings.CloudModeEnabled ? "云端" : "本地";
         CloudStatusText.Text = context.Settings.CloudModeEnabled ? "需要连接" : "仅本地";
+        CloudManageButton.Visibility = Visibility.Collapsed;
         ApplySpaceLayout();
         UpdatePauseState(CapturePrivacyPolicy.IsPaused(context.Settings, DateTimeOffset.UtcNow));
         UpdatePinVisualState(context.Settings.AlwaysOnTop);
         ApplyDensity(context.Settings.CompactList);
         await RefreshHistoryAsync(cancellationToken);
         await RefreshFoldersAsync(cancellationToken);
+        if (context.Settings.CloudModeEnabled)
+        {
+            try { await _cloudModeService.SetModeAsync(AppMode.Cloud, cancellationToken); await ConnectCloudWorkspacesAsync(cancellationToken); }
+            catch { await RestoreLocalModeAsync(); CloudStatusText.Text="云端连接失败，已回到本地"; }
+        }
         if (!context.Settings.AutoBackupChoiceCompleted)
         {
             var dialog = new AutoBackupSetupDialog(this);
@@ -392,8 +409,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_cloudModeService.Mode == AppMode.Cloud)
         {
-            await _cloudModeService.SetModeAsync(AppMode.Local);
-            ModeButton.Content = "本地";
+            await RestoreLocalModeAsync();
             return;
         }
 
@@ -405,8 +421,53 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _settingsStore.SaveAsync(settings with { CloudApiBaseUrl = dialog.ApiBaseUrl });
             await _cloudAccountService.SignInAsync(new CloudSignInRequest(dialog.Email, dialog.Password, _deviceId, _deviceName ?? Environment.MachineName));
         }
-        await _cloudModeService.SetModeAsync(AppMode.Cloud);
-        ModeButton.Content = "云端";
+        try
+        {
+            await _cloudModeService.SetModeAsync(AppMode.Cloud);
+            ModeButton.Content = "云端";
+            await ConnectCloudWorkspacesAsync();
+        }
+        catch
+        {
+            await RestoreLocalModeAsync();
+            throw;
+        }
+    });
+    private async Task RestoreLocalModeAsync()
+    {
+        _personalWorkspaceId = _localPersonalWorkspaceId;
+        _teamWorkspaceId = _localTeamWorkspaceId;
+        ModeButton.Content = "本地";
+        CloudManageButton.Visibility = Visibility.Collapsed;
+        TeamSpaceTab.Visibility = _teamWorkspaceId is null ? Visibility.Collapsed : Visibility.Visible;
+        await _cloudModeService.SetModeAsync(AppMode.Local);
+        await RefreshFoldersAsync();
+    }
+    private async Task ConnectCloudWorkspacesAsync(CancellationToken cancellationToken = default)
+    {
+        var workspaces = await _cloudWorkspaceService.GetAvailableAsync(cancellationToken);
+        var personal = workspaces.FirstOrDefault(x => x.Type == WorkspaceType.Personal)
+            ?? throw new InvalidOperationException("账号尚未初始化个人云空间，请联系平台管理员。");
+        foreach (var workspace in workspaces) await _cloudMirrorStore.EnsureMappingAsync(workspace, cancellationToken);
+        _personalWorkspaceId = personal.Id;
+        _teamWorkspaceId = workspaces.FirstOrDefault(x => x.Type == WorkspaceType.Team)?.Id;
+        TeamSpaceTab.Visibility = _teamWorkspaceId is null ? Visibility.Collapsed : Visibility.Visible;
+        CloudManageButton.Visibility = Visibility.Visible;
+        CloudStatusText.Text = "同步中";
+        foreach (var workspace in workspaces)
+        {
+            var result = await _syncEngine.SynchronizeAsync(workspace.Id, SyncReason.UserRequested, cancellationToken);
+            if (!result.Succeeded && result.Status.State != SyncState.Conflict) CloudStatusText.Text = result.Status.Message;
+        }
+        if (workspaces.All(x => _syncEngine.GetStatus(x.Id).State == SyncState.Synced)) CloudStatusText.Text = "已同步";
+        await RefreshFoldersAsync(cancellationToken);
+    }
+
+    private async void CloudManageButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("云端管理", async () =>
+    {
+        var dialog = new CloudManagementDialog(_cloudWorkspaceService) { Owner = this };
+        WithModal(() => dialog.ShowDialog());
+        await ConnectCloudWorkspacesAsync();
     });
     private void Changed(string property) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
     private async Task RunActionAsync(string name, Func<Task> action)

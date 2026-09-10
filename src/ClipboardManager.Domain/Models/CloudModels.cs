@@ -10,7 +10,8 @@ public sealed record CloudWorkspace(Guid Id, WorkspaceType Type, string Name, Wo
 public sealed record CloudStatus(CloudConnectionState State, string Message, DateTimeOffset? LastSuccessfulSyncAt = null, int PendingOperations = 0, int ConflictCount = 0);
 public sealed record TeamMember(Guid UserId, string Email, string DisplayName, WorkspaceRole Role, IReadOnlyList<Guid> GroupIds);
 public sealed record MemberGroup(Guid Id, Guid WorkspaceId, string Name, int MemberCount);
-public sealed record TeamInvitation(Guid Id, Guid WorkspaceId, DateTimeOffset ExpiresAt, int MaxUses, int UsedCount, DateTimeOffset? RevokedAt);
+public sealed record TeamInvitation(Guid Id, Guid WorkspaceId, DateTimeOffset ExpiresAt, int MaxUses, int UsedCount, DateTimeOffset? RevokedAt, string? Code = null);
+public sealed record CloudDevice(Guid Id, string Name, DateTimeOffset? LastSeenAt, DateTimeOffset CreatedAt, DateTimeOffset? RevokedAt, bool IsCurrent);
 
 public static class CloudLimits
 {

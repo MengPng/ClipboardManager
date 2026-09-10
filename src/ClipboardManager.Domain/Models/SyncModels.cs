@@ -30,7 +30,8 @@ public sealed record SyncOperation(
     string Payload,
     DateTimeOffset CreatedAt);
 
-public sealed record PushResult(bool Succeeded, IReadOnlyDictionary<Guid, long> ServerVersions, string? Error = null);
+public sealed record PushResult(bool Succeeded, IReadOnlyDictionary<Guid, long> ServerVersions, string? Error = null, IReadOnlyList<RemoteConflict>? Conflicts = null);
+public sealed record RemoteConflict(Guid OperationId, Guid EntityId, long ExpectedVersion, long ActualVersion, string RemotePayload);
 
 public sealed record PullResult(bool Succeeded, string? NextCursor, IReadOnlyList<RemoteChange> Changes, string? Error = null);
 

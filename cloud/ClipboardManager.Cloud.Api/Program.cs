@@ -29,6 +29,17 @@ builder.Services.AddRateLimiter(options => options.AddPolicy("auth", context =>
 
 var app = builder.Build();
 await app.Services.GetRequiredService<DatabaseMigrator>().MigrateAsync(CancellationToken.None);
+if (args.Contains("--provision-account", StringComparer.Ordinal))
+{
+    // Provisioning is available only to a server operator through stdin, never HTTP.
+    var input = await Console.In.ReadToEndAsync();
+    var request = System.Text.Json.JsonSerializer.Deserialize<ProvisionAccountRequest>(input,
+        new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+        ?? throw new ArgumentException("Account request required.");
+    var profile = await app.Services.GetRequiredService<CloudRepository>().ProvisionAccountAsync(request, CancellationToken.None);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { profile.Id, profile.Email }));
+    return;
+}
 app.UseExceptionHandler();
 app.UseHttpsRedirection();
 app.UseRateLimiter();
@@ -42,6 +53,14 @@ app.Use(async (context, next) =>
     catch (InvalidOperationException)
     {
         await Results.Problem("请求状态冲突。", statusCode: StatusCodes.Status409Conflict).ExecuteAsync(context);
+    }
+    catch (KeyNotFoundException ex)
+    {
+        await Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound).ExecuteAsync(context);
+    }
+    catch (ArgumentException ex)
+    {
+        await Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest).ExecuteAsync(context);
     }
 });
 
@@ -80,6 +99,88 @@ app.MapGet("/v1/workspaces", async (HttpContext context, CloudRepository reposit
 {
     var principal = await context.RequireCloudUserAsync(repository, ct);
     return Results.Ok(await repository.GetWorkspacesAsync(principal.ProfileId, ct));
+});
+
+app.MapPost("/v1/workspaces", async (HttpContext context, CreateWorkspaceRequest request, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    return Results.Ok(await repository.CreateTeamWorkspaceAsync(principal, request.Name, ct));
+});
+
+app.MapGet("/v1/workspaces/{workspaceId:guid}/members", async (HttpContext context, Guid workspaceId, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    return Results.Ok(await repository.GetMembersAsync(principal.ProfileId, workspaceId, ct));
+});
+
+app.MapPatch("/v1/workspaces/{workspaceId:guid}/members/{memberId:guid}/role", async (HttpContext context, Guid workspaceId, Guid memberId,
+    UpdateMemberRoleRequest request, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    await repository.UpdateMemberRoleAsync(principal, workspaceId, memberId, request.Role, ct);
+    return Results.NoContent();
+});
+
+app.MapDelete("/v1/workspaces/{workspaceId:guid}/members/{memberId:guid}", async (HttpContext context, Guid workspaceId, Guid memberId,
+    CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    await repository.RemoveMemberAsync(principal, workspaceId, memberId, ct);
+    return Results.NoContent();
+});
+
+app.MapGet("/v1/workspaces/{workspaceId:guid}/groups", async (HttpContext context, Guid workspaceId, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    return Results.Ok(await repository.GetGroupsAsync(principal.ProfileId, workspaceId, ct));
+});
+
+app.MapPost("/v1/workspaces/{workspaceId:guid}/groups", async (HttpContext context, Guid workspaceId, CreateGroupRequest request,
+    CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    return Results.Ok(await repository.CreateGroupAsync(principal, workspaceId, request.Name, ct));
+});
+
+app.MapPut("/v1/workspaces/{workspaceId:guid}/groups/{groupId:guid}/members", async (HttpContext context, Guid workspaceId, Guid groupId,
+    UpdateGroupMembersRequest request, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    await repository.SetGroupMembersAsync(principal, workspaceId, groupId, request.UserIds, ct);
+    return Results.NoContent();
+});
+
+app.MapPost("/v1/workspaces/{workspaceId:guid}/invitations", async (HttpContext context, Guid workspaceId, CreateInvitationRequest request,
+    CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    return Results.Ok(await repository.CreateInvitationAsync(principal, workspaceId, request.LifetimeSeconds, request.MaxUses, ct));
+});
+
+app.MapPost("/v1/invitations/join", async (HttpContext context, JoinInvitationRequest request, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    return Results.Ok(await repository.JoinInvitationAsync(principal, request.Code, ct));
+});
+
+app.MapPost("/v1/workspaces/{workspaceId:guid}/invitations/{invitationId:guid}/revoke", async (HttpContext context, Guid workspaceId, Guid invitationId, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    await repository.RevokeInvitationAsync(principal, workspaceId, invitationId, ct);
+    return Results.NoContent();
+});
+
+app.MapGet("/v1/devices", async (HttpContext context, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    return Results.Ok(await repository.GetDevicesAsync(principal, ct));
+});
+
+app.MapPost("/v1/devices/{deviceId:guid}/revoke", async (HttpContext context, Guid deviceId, CloudRepository repository, CancellationToken ct) =>
+{
+    var principal = await context.RequireCloudUserAsync(repository, ct);
+    await repository.RevokeDeviceAsync(principal, deviceId, ct);
+    return Results.NoContent();
 });
 
 app.MapGet("/v1/sync/pull", async (HttpContext context, Guid workspaceId, long? cursor, CloudRepository repository, CancellationToken ct) =>

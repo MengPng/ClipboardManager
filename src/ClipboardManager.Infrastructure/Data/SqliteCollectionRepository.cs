@@ -2,6 +2,7 @@ using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
 using Microsoft.Data.Sqlite;
 using System.Globalization;
+using System.Text.Json;
 
 namespace ClipboardManager.Infrastructure.Data;
 
@@ -27,6 +28,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
             IsSystem = true, CreatedAt = now, UpdatedAt = now
         };
         await InsertFolderAsync(connection, folder, cancellationToken, transaction);
+        await QueueFolderAsync(connection, transaction, folder.WorkspaceId, folder.Id, SyncOperationType.Create, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return folder;
     }
@@ -58,6 +60,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
             CreatedAt = now, UpdatedAt = now
         };
         await InsertFolderAsync(connection, folder, cancellationToken, transaction);
+        await QueueFolderAsync(connection, transaction, folder.WorkspaceId, folder.Id, SyncOperationType.Create, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return folder;
     }
@@ -66,13 +69,16 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
     {
         name = ValidateName(name);
         await using var connection = await OpenAsync(cancellationToken);
-        await EnsureUniqueNameAsync(connection, workspaceId, name, folderId, cancellationToken);
-        await using var command = connection.CreateCommand();
+        using var transaction = connection.BeginTransaction();
+        await EnsureUniqueNameAsync(connection, workspaceId, name, folderId, cancellationToken, transaction);
+        await using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "UPDATE collection_folders SET name=$name,updated_at=$now,local_version=local_version+1 WHERE workspace_id=$workspace AND id=$id AND is_system=0 AND deleted_at IS NULL;";
         command.Parameters.AddWithValue("$name", name);
         AddIdentity(command, workspaceId, folderId);
         command.Parameters.AddWithValue("$now", Format(DateTimeOffset.UtcNow));
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await QueueFolderAsync(connection, transaction, workspaceId, folderId, SyncOperationType.Update, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task DeleteFolderAsync(Guid workspaceId, Guid folderId, Guid fallbackFolderId, CancellationToken cancellationToken = default)
@@ -95,6 +101,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         await ExecuteAsync(connection, transaction,
             "UPDATE collection_folders SET deleted_at=$now,updated_at=$now,local_version=local_version+1 WHERE workspace_id=$workspace AND id=$folder AND is_system=0 AND deleted_at IS NULL;",
             cancellationToken, ("$now", now), ("$workspace", workspaceId.ToString("D")), ("$folder", folderId.ToString("D")));
+        await QueueFolderAsync(connection, transaction, workspaceId, folderId, SyncOperationType.Delete, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -148,6 +155,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
             CreatedAt = now, UpdatedAt = now
         };
         await WriteItemAsync(connection, transaction, item, false, cancellationToken);
+        await QueueItemAsync(connection, transaction, workspaceId, item.Id, SyncOperationType.Create, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return item;
     }
@@ -158,6 +166,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         using var transaction = connection.BeginTransaction();
         await RequireFolderAsync(connection, transaction, item.WorkspaceId, item.FolderId, cancellationToken);
         await WriteItemAsync(connection, transaction, item with { UpdatedAt = DateTimeOffset.UtcNow }, true, cancellationToken);
+        await QueueItemAsync(connection, transaction, item.WorkspaceId, item.Id, SyncOperationType.Update, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -185,11 +194,14 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
     public async Task DeleteItemAsync(Guid workspaceId, Guid itemId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
+        using var transaction = connection.BeginTransaction();
+        await using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "UPDATE collection_items SET deleted_at=$now,updated_at=$now,local_version=local_version+1 WHERE workspace_id=$workspace AND id=$id AND deleted_at IS NULL;";
         command.Parameters.AddWithValue("$now", Format(DateTimeOffset.UtcNow));
         AddIdentity(command, workspaceId, itemId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await QueueItemAsync(connection, transaction, workspaceId, itemId, SyncOperationType.Delete, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)
@@ -270,13 +282,17 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         return Candidate() ?? throw new InvalidOperationException("无法生成安全的排序键。");
     }
 
-    private static Task SavePositionAsync(SqliteConnection connection, SqliteTransaction transaction,
-        Guid workspaceId, Guid? folderId, Guid id, decimal key, CancellationToken cancellationToken) =>
-        ExecuteAsync(connection, transaction, folderId is null
+    private static async Task SavePositionAsync(SqliteConnection connection, SqliteTransaction transaction,
+        Guid workspaceId, Guid? folderId, Guid id, decimal key, CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(connection, transaction, folderId is null
             ? "UPDATE collection_folders SET sort_key=$key,updated_at=$now,local_version=local_version+1 WHERE workspace_id=$workspace AND id=$id AND deleted_at IS NULL;"
             : "UPDATE collection_items SET folder_id=$folder,sort_key=$key,updated_at=$now,local_version=local_version+1 WHERE workspace_id=$workspace AND id=$id AND deleted_at IS NULL;",
             cancellationToken, ("$key", (double)key), ("$now", Format(DateTimeOffset.UtcNow)),
             ("$workspace", workspaceId.ToString("D")), ("$id", id.ToString("D")), ("$folder", Db(folderId?.ToString("D"))));
+        if (folderId is null) await QueueFolderAsync(connection, transaction, workspaceId, id, SyncOperationType.Update, cancellationToken);
+        else await QueueItemAsync(connection, transaction, workspaceId, id, SyncOperationType.Update, cancellationToken);
+    }
 
     private static async Task InsertFolderAsync(SqliteConnection connection, CollectionFolder folder, CancellationToken cancellationToken, SqliteTransaction transaction)
     {
@@ -316,6 +332,52 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         }) command.Parameters.AddWithValue(pair.Item1, Db(pair.Item2));
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
             throw new InvalidOperationException("收藏项不存在、已删除或不属于指定空间和文件夹。");
+    }
+
+    private static async Task<bool> IsCloudWorkspaceAsync(SqliteConnection connection, SqliteTransaction transaction, Guid workspaceId, CancellationToken ct)
+    {
+        await using var command=connection.CreateCommand(); command.Transaction=transaction;
+        command.CommandText="SELECT role FROM cloud_workspace_mappings WHERE cloud_workspace_id=$id";
+        command.Parameters.AddWithValue("$id",workspaceId.ToString("D"));
+        var role = await command.ExecuteScalarAsync(ct) as string;
+        if (role == "member") throw new UnauthorizedAccessException("当前成员只有读取权限。");
+        return role is not null;
+    }
+
+    private static async Task QueueFolderAsync(SqliteConnection connection, SqliteTransaction transaction, Guid workspaceId, Guid id, SyncOperationType type, CancellationToken ct)
+    {
+        if (!await IsCloudWorkspaceAsync(connection,transaction,workspaceId,ct)) return;
+        await using var read=connection.CreateCommand(); read.Transaction=transaction;
+        read.CommandText="SELECT parent_folder_id,name,sort_key,is_system,created_at,updated_at,deleted_at,COALESCE(server_version,0) FROM collection_folders WHERE workspace_id=$w AND id=$id";
+        read.Parameters.AddWithValue("$w",workspaceId.ToString("D")); read.Parameters.AddWithValue("$id",id.ToString("D"));
+        await using var r=await read.ExecuteReaderAsync(ct); if(!await r.ReadAsync(ct)) return;
+        var payload=JsonSerializer.Serialize(new { parentFolderId=r.IsDBNull(0)?null:r.GetString(0), name=r.GetString(1), sortKey=r.GetDouble(2), isSystem=r.GetInt32(3)!=0, scopeAllMembers=true, createdAt=r.GetString(4), updatedAt=r.GetString(5) });
+        var baseVersion=r.GetInt64(7); await r.DisposeAsync();
+        await InsertOperationAsync(connection,transaction,workspaceId,"collection_folder",id,type,baseVersion,payload,ct);
+        await ExecuteAsync(connection,transaction,"UPDATE collection_folders SET sync_status=1 WHERE workspace_id=$workspace AND id=$id",ct,("$workspace",workspaceId.ToString("D")),("$id",id.ToString("D")));
+    }
+
+    private static async Task QueueItemAsync(SqliteConnection connection, SqliteTransaction transaction, Guid workspaceId, Guid id, SyncOperationType type, CancellationToken ct)
+    {
+        if (!await IsCloudWorkspaceAsync(connection,transaction,workspaceId,ct)) return;
+        await using var read=connection.CreateCommand(); read.Transaction=transaction;
+        read.CommandText="SELECT folder_id,item_type,title,text_content,url,description,local_path,thumbnail_path,file_manifest,content_hash,content_size,sort_key,created_at,updated_at,COALESCE(server_version,0) FROM collection_items WHERE workspace_id=$w AND id=$id";
+        read.Parameters.AddWithValue("$w",workspaceId.ToString("D")); read.Parameters.AddWithValue("$id",id.ToString("D"));
+        await using var r=await read.ExecuteReaderAsync(ct); if(!await r.ReadAsync(ct)) return;
+        string? S(int n)=>r.IsDBNull(n)?null:r.GetString(n);
+        var payload=JsonSerializer.Serialize(new { folderId=r.GetString(0), itemType=r.GetInt32(1), title=S(2), textContent=S(3), url=S(4), description=S(5), localPath=S(6), thumbnailPath=S(7), fileManifest=S(8), contentHash=S(9), contentSize=r.GetInt64(10), sortKey=r.GetDouble(11), createdAt=r.GetString(12), updatedAt=r.GetString(13) });
+        var baseVersion=r.GetInt64(14); await r.DisposeAsync();
+        await InsertOperationAsync(connection,transaction,workspaceId,"collection_item",id,type,baseVersion,payload,ct);
+        await ExecuteAsync(connection,transaction,"UPDATE collection_items SET sync_status=1 WHERE workspace_id=$workspace AND id=$id",ct,("$workspace",workspaceId.ToString("D")),("$id",id.ToString("D")));
+    }
+
+    private static async Task InsertOperationAsync(SqliteConnection connection,SqliteTransaction transaction,Guid workspaceId,string entityType,Guid entityId,SyncOperationType type,long baseVersion,string payload,CancellationToken ct)
+    {
+        await using var command=connection.CreateCommand(); command.Transaction=transaction;
+        command.CommandText="INSERT INTO sync_operations(id,workspace_id,entity_type,entity_id,operation_type,base_version,payload,created_at) VALUES($id,$w,$type,$entity,$op,$base,$payload,$created)";
+        command.Parameters.AddWithValue("$id",Guid.NewGuid().ToString("D")); command.Parameters.AddWithValue("$w",workspaceId.ToString("D")); command.Parameters.AddWithValue("$type",entityType);
+        command.Parameters.AddWithValue("$entity",entityId.ToString("D")); command.Parameters.AddWithValue("$op",(int)type); command.Parameters.AddWithValue("$base",baseVersion); command.Parameters.AddWithValue("$payload",payload); command.Parameters.AddWithValue("$created",Format(DateTimeOffset.UtcNow));
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     private static CollectionFolder ReadFolder(SqliteDataReader r) => new()
