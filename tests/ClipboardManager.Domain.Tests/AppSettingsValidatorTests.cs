@@ -18,4 +18,12 @@ public sealed class AppSettingsValidatorTests
     [Fact]
     public void CacheMustFitOneImage() =>
         Assert.Throws<ArgumentException>(() => AppSettingsValidator.Validate(new AppSettings { MaxPersistedImageBytes = 20, MaxImageCacheBytes = 19 }));
+
+    [Fact]
+    public void HttpCloudEndpoint_IsRejected() =>
+        Assert.Throws<ArgumentException>(() => AppSettingsValidator.Validate(new AppSettings { CloudApiBaseUrl = "http://example.test" }));
+
+    [Fact]
+    public void HttpsCloudEndpoint_IsAccepted() =>
+        AppSettingsValidator.Validate(new AppSettings { CloudApiBaseUrl = "https://cloud.example.test" });
 }

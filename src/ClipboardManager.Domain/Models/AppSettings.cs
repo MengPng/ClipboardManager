@@ -23,4 +23,6 @@ public sealed record AppSettings
     public string LanDeviceAlias { get; init; } = Environment.MachineName;
     public int LanPort { get; init; } = 53317;
     public int LanDiscoverySeconds { get; init; } = 2;
+    public bool CloudModeEnabled { get; init; }
+    public string CloudApiBaseUrl { get; init; } = string.Empty;
 }

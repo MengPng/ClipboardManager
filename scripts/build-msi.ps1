@@ -1,4 +1,4 @@
-param([string]$PackageVersion = "0.6.0")
+param([string]$PackageVersion = "0.6.6")
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $publish = Join-Path $root "artifacts/publish/msi-single"

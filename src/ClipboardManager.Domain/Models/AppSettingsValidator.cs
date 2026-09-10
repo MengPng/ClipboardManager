@@ -21,5 +21,9 @@ public static class AppSettingsValidator
             throw new ArgumentException("局域网端口必须为 1024–65535。");
         if (settings.LanDiscoverySeconds is < 1 or > 10)
             throw new ArgumentException("设备发现等待时间必须为 1–10 秒。");
+        if (!string.IsNullOrWhiteSpace(settings.CloudApiBaseUrl) &&
+            (!Uri.TryCreate(settings.CloudApiBaseUrl, UriKind.Absolute, out var cloudApiUri) ||
+             cloudApiUri.Scheme != Uri.UriSchemeHttps))
+            throw new ArgumentException("云端服务地址必须是有效的 HTTPS 地址。");
     }
 }

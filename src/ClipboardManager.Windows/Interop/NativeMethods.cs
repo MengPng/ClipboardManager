@@ -4,6 +4,8 @@ namespace ClipboardManager.Windows.Interop;
 
 internal static partial class NativeMethods
 {
+    [LibraryImport("user32.dll")]
+    public static partial uint GetDoubleClickTime();
     public const int WmHotkey = 0x0312;
     public const int WmClipboardUpdate = 0x031D;
     public const uint ModAlt = 0x0001;

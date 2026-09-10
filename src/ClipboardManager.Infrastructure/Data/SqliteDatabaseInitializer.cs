@@ -9,7 +9,7 @@ public sealed class SqliteDatabaseInitializer(
     ILogger<SqliteDatabaseInitializer> logger,
     DatabaseSafetyBackup? safetyBackup = null) : IDatabaseInitializer
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 5;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -50,6 +50,20 @@ public sealed class SqliteDatabaseInitializer(
         {
             await ApplyVersion3Async(connection, cancellationToken);
             await ExecuteAsync(connection, "PRAGMA user_version=3;", cancellationToken);
+            version = 3;
+        }
+
+        if (version < 4)
+        {
+            await ApplyVersion4Async(connection, cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA user_version=4;", cancellationToken);
+            version = 4;
+        }
+
+        if (version < 5)
+        {
+            await ApplyVersion5Async(connection, cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA user_version=5;", cancellationToken);
         }
 
         logger.LogInformation("Local database schema is at version {Version}.", CurrentVersion);
@@ -288,6 +302,85 @@ public sealed class SqliteDatabaseInitializer(
                 lower(json_extract(file_manifest, '$[0]')) LIKE '%.ico' OR
                 lower(json_extract(file_manifest, '$[0]')) LIKE '%.svg'
               );
+            COMMIT;
+            """;
+        await ExecuteAsync(connection, sql, cancellationToken);
+    }
+
+    private static async Task ApplyVersion4Async(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS sync_operations (
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL, operation_type INTEGER NOT NULL, base_version INTEGER NOT NULL,
+                payload TEXT NOT NULL, created_at TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT NULL, synced_at TEXT NULL
+            );
+            ALTER TABLE sync_operations ADD COLUMN next_attempt_at TEXT NULL;
+            ALTER TABLE sync_operations ADD COLUMN error_code TEXT NULL;
+            ALTER TABLE sync_operations ADD COLUMN lease_owner TEXT NULL;
+            ALTER TABLE sync_operations ADD COLUMN lease_expires_at TEXT NULL;
+
+            CREATE TABLE IF NOT EXISTS sync_conflicts (
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL, local_payload TEXT NOT NULL, remote_payload TEXT NOT NULL,
+                local_version INTEGER NOT NULL, server_version INTEGER NOT NULL,
+                device_name TEXT NULL, actor_name TEXT NULL, detected_at TEXT NOT NULL,
+                resolved_at TEXT NULL, resolution TEXT NULL
+            );
+            CREATE TABLE IF NOT EXISTS cloud_workspaces_cache (
+                id TEXT PRIMARY KEY, workspace_type INTEGER NOT NULL, name TEXT NOT NULL,
+                role TEXT NOT NULL, quota_bytes INTEGER NOT NULL, used_bytes INTEGER NOT NULL,
+                cached_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS cloud_members_cache (
+                workspace_id TEXT NOT NULL, identity_id TEXT NOT NULL, display_name TEXT NOT NULL,
+                email TEXT NOT NULL, role TEXT NOT NULL, status TEXT NOT NULL, cached_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, identity_id)
+            );
+            CREATE TABLE IF NOT EXISTS cloud_groups_cache (
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
+                member_ids_json TEXT NOT NULL, cached_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS blob_transfers (
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, blob_id TEXT NOT NULL,
+                direction TEXT NOT NULL, local_path TEXT NOT NULL, content_hash TEXT NOT NULL,
+                byte_size INTEGER NOT NULL, transferred_bytes INTEGER NOT NULL DEFAULT 0,
+                upload_session_id TEXT NULL, state TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT NULL, last_error_code TEXT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_sync_operations_retry
+                ON sync_operations(workspace_id, synced_at, next_attempt_at, created_at);
+            CREATE INDEX IF NOT EXISTS ix_sync_conflicts_open
+                ON sync_conflicts(workspace_id, resolved_at, detected_at DESC);
+            CREATE INDEX IF NOT EXISTS ix_blob_transfers_pending
+                ON blob_transfers(workspace_id, state, next_attempt_at, created_at);
+            COMMIT;
+            """;
+        await ExecuteAsync(connection, sql, cancellationToken);
+    }
+
+    private static async Task ApplyVersion5Async(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS cloud_workspace_mappings (
+                cloud_workspace_id TEXT PRIMARY KEY,
+                local_workspace_id TEXT NOT NULL UNIQUE,
+                workspace_type INTEGER NOT NULL,
+                display_name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                remote_cursor TEXT NULL,
+                cache_state TEXT NOT NULL DEFAULT 'empty',
+                last_success_at TEXT NULL,
+                last_error_code TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(local_workspace_id) REFERENCES workspaces(id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_cloud_workspace_mappings_state
+                ON cloud_workspace_mappings(cache_state, updated_at);
             COMMIT;
             """;
         await ExecuteAsync(connection, sql, cancellationToken);

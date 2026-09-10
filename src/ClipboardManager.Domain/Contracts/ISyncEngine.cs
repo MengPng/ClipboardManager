@@ -19,6 +19,7 @@ public interface IRemoteSyncProvider
         CancellationToken cancellationToken = default);
 
     Task<PullResult> PullAsync(
+        Guid workspaceId,
         string? cursor,
         CancellationToken cancellationToken = default);
 }

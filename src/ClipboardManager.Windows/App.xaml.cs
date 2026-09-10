@@ -2,6 +2,7 @@ using ClipboardManager.Application;
 using ClipboardManager.Application.Services;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Infrastructure;
+using ClipboardManager.Infrastructure.Data;
 using ClipboardManager.Infrastructure.Paths;
 using ClipboardManager.Windows.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +14,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Windows;
 
 namespace ClipboardManager.Windows;
@@ -25,6 +27,12 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (TryWriteReleaseInfo(e.Args))
+        {
+            Shutdown();
+            return;
+        }
 
         await WaitForRestartParentAsync(e.Args);
 
@@ -132,6 +140,29 @@ public partial class App : System.Windows.Application
                 MessageBoxImage.Error);
             Shutdown(-1);
         }
+    }
+
+    private static bool TryWriteReleaseInfo(IReadOnlyList<string> arguments)
+    {
+        const string prefix = "--write-release-info=";
+        var argument = arguments.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (argument is null) return false;
+
+        var destination = argument[prefix.Length..].Trim('"');
+        if (string.IsNullOrWhiteSpace(destination)) throw new ArgumentException("发布信息输出路径不能为空。");
+        var assembly = Assembly.GetExecutingAssembly();
+        var payload = new
+        {
+            product = "ClipboardManager",
+            version = assembly.GetName().Version?.ToString(3),
+            informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
+            databaseSchemaVersion = SqliteDatabaseInitializer.CurrentVersion,
+            runtime = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier
+        };
+        var fullPath = Path.GetFullPath(destination);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return true;
     }
 
     private void RestartApplication(MainWindow mainWindow)

@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: clipboardmanager
+      POSTGRES_USER: clipboardmanager_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clipboardmanager_owner -d clipboardmanager"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 640m
+    cpus: 0.75
+
+  api:
+    image: clipboardmanager-cloud-api:${IMAGE_TAG}
+    build:
+      context: ../..
+      dockerfile: cloud/ClipboardManager.Cloud.Api/Dockerfile.build
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      CloudDatabase__Host: postgres
+      CloudDatabase__Database: clipboardmanager
+      CloudDatabase__Username: clipboardmanager_owner
+      CloudDatabase__PasswordFile: /run/secrets/postgres_password
+      FeatureFlags__CloudEnabled: "true"
+      TencentCos__Region: ${TENCENT_COS_REGION}
+      TencentCos__Bucket: ${TENCENT_COS_BUCKET}
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 384m
+    cpus: 0.75
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CLOUD_DOMAIN: ${CLOUD_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 128m
+    cpus: 0.25
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password

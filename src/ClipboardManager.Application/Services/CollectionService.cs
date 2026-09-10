@@ -143,6 +143,16 @@ public sealed class CollectionService(
         }, cancellationToken);
     }
 
+    public async Task UpdateTitleAsync(Guid workspaceId, CollectionItem item, string title, CancellationToken cancellationToken = default)
+    {
+        if (item.WorkspaceId != workspaceId || item.DeletedAt is not null)
+            throw new InvalidOperationException("配置项不属于目标空间或已删除。");
+        title = title.Trim();
+        if (string.IsNullOrWhiteSpace(title)) throw new ArgumentException("配置名称不能为空。", nameof(title));
+        if (title.Length > 200) throw new ArgumentException("配置名称不能超过 200 个字符。", nameof(title));
+        await repository.UpdateItemAsync(item with { Title = title }, cancellationToken);
+    }
+
     public Task MoveItemAsync(Guid workspaceId, Guid itemId, Guid folderId, int targetIndex, CancellationToken cancellationToken = default) =>
         repository.MoveItemAsync(workspaceId, itemId, folderId, targetIndex, cancellationToken);
 

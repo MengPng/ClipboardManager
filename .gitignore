@@ -12,6 +12,10 @@ artifacts/
 logs/
 .tools/
 *.log
+*secret*.json
+*.dpapi.json
+.env
+.env.*
 src/ClipboardManager.Windows/Assets/Previous-*/
 .idea/
 .vscode/

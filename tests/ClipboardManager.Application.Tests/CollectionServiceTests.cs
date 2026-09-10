@@ -38,6 +38,47 @@ public sealed class CollectionServiceTests
         Assert.Null(repository.Updated.TextContent);
     }
 
+    [Fact]
+    public async Task UpdateTitle_AllowsImageAndFileNamesWithoutChangingTheirPayload()
+    {
+        var repository = new FakeCollectionRepository();
+        var service = new CollectionService(repository, new WorkspaceService(), new AssetStore());
+        var now = DateTimeOffset.UtcNow;
+        var image = new CollectionItem
+        {
+            Id = Guid.NewGuid(), WorkspaceId = WorkspaceService.LocalId, FolderId = Guid.NewGuid(),
+            ItemType = CollectionItemType.Image, Title = "old", LocalPath = "managed.png",
+            SortKey = 0, CreatedAt = now, UpdatedAt = now
+        };
+
+        await service.UpdateTitleAsync(WorkspaceService.LocalId, image, " 新名称 ");
+
+        Assert.Equal("新名称", repository.Updated!.Title);
+        Assert.Equal("managed.png", repository.Updated.LocalPath);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UpdateTitleAsync(Guid.NewGuid(), image, "越界"));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.UpdateTitleAsync(WorkspaceService.LocalId, image, "  "));
+    }
+
+    [Fact]
+    public async Task AddFile_AcceptsDirectoryAsLocalFolderMapping()
+    {
+        var repository = new FakeCollectionRepository();
+        var service = new CollectionService(repository, new WorkspaceService(), new AssetStore());
+        var folder = await repository.EnsureUncategorizedAsync(WorkspaceService.LocalId);
+        var path = Path.Combine(Path.GetTempPath(), $"ClipboardManager-folder-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        try
+        {
+            var saved = await service.AddFileAsync(WorkspaceService.LocalId, folder.Id, path);
+            Assert.Equal(CollectionItemType.File, saved.ItemType);
+            Assert.Equal(Path.GetFileName(path), saved.Title);
+            Assert.Equal(path, saved.LocalPath);
+        }
+        finally { Directory.Delete(path); }
+    }
+
     /// <summary>
     /// The target space is passed explicitly, but a config item still has to belong to the
     /// space it is edited in: editing a 团队配置 item while claiming 个人配置 must fail.

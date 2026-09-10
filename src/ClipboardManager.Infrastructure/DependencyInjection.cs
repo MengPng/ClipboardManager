@@ -5,6 +5,7 @@ using ClipboardManager.Infrastructure.Lan;
 using ClipboardManager.Infrastructure.Paths;
 using ClipboardManager.Infrastructure.Sync;
 using ClipboardManager.Infrastructure.Workspaces;
+using ClipboardManager.Infrastructure.Cloud;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ClipboardManager.Infrastructure;
@@ -23,6 +24,15 @@ public static class DependencyInjection
         services.AddSingleton<IStorageMaintenanceService, StorageMaintenanceService>();
         services.AddSingleton<IPersonalConfigTransferService, PersonalConfigTransferService>();
         services.AddSingleton<ILanShareService, LocalSendLanShareService>();
+        services.AddSingleton<ICredentialVault, WindowsCredentialVault>();
+        services.AddHttpClient<TencentCloudAccountService>(client => client.Timeout = TimeSpan.FromSeconds(20));
+        services.AddHttpClient<TencentCloudWorkspaceService>(client => client.Timeout = TimeSpan.FromSeconds(20));
+        services.AddHttpClient<TencentRemoteSyncProvider>(client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddSingleton<ICloudAccountService>(provider => provider.GetRequiredService<TencentCloudAccountService>());
+        services.AddSingleton<TencentCloudHttpAuthorizer>();
+        services.AddSingleton<ICloudWorkspaceService>(provider => provider.GetRequiredService<TencentCloudWorkspaceService>());
+        services.AddSingleton<ICloudModeService, CloudModeService>();
+        services.AddSingleton<ICloudMirrorStore, SqliteCloudMirrorStore>();
         services.AddSingleton<IClipboardHistoryRepository, SqliteClipboardHistoryRepository>();
         services.AddSingleton<ICollectionRepository, SqliteCollectionRepository>();
         services.AddSingleton<IClipboardItemRepository>(provider => provider.GetRequiredService<IClipboardHistoryRepository>());
@@ -30,7 +40,7 @@ public static class DependencyInjection
         services.AddSingleton<IDeviceIdentityStore, JsonDeviceIdentityStore>();
         services.AddSingleton<IIdentityProvider, LocalAnonymousIdentityProvider>();
         services.AddSingleton<IWorkspaceService, LocalWorkspaceService>();
-        services.AddSingleton<IRemoteSyncProvider, UnsupportedRemoteSyncProvider>();
+        services.AddSingleton<IRemoteSyncProvider>(provider => provider.GetRequiredService<TencentRemoteSyncProvider>());
         return services;
     }
 }

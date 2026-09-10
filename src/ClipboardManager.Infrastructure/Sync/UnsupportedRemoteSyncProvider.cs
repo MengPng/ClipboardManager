@@ -16,6 +16,7 @@ public sealed class UnsupportedRemoteSyncProvider : IRemoteSyncProvider
     }
 
     public Task<PullResult> PullAsync(
+        Guid workspaceId,
         string? cursor,
         CancellationToken cancellationToken = default)
     {

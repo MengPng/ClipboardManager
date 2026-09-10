@@ -1,9 +1,14 @@
 param(
-    [string]$Version = "0.6.0",
-    [switch]$IncludeMsi
+    [string]$Version = "0.6.6",
+    [switch]$IncludeMsi = $true
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+$contractPath = Join-Path $root "release/release-contract.json"
+$contract = Get-Content $contractPath -Raw | ConvertFrom-Json
+if ($Version -ne $contract.appVersion) {
+    throw "发布版本 $Version 与发布契约版本 $($contract.appVersion) 不一致。请先更新 release-contract.json。"
+}
 $releaseDir = Join-Path $root "artifacts/release/$Version"
 $portableDir = Join-Path $releaseDir "ClipboardManager-$Version-win-x64"
 $zipPath = Join-Path $releaseDir "ClipboardManager-$Version-win-x64-portable.zip"
@@ -14,6 +19,11 @@ New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
 
 & (Join-Path $PSScriptRoot "publish-single-exe.ps1") -OutputPath "artifacts/release/$Version/ClipboardManager-$Version-win-x64/ClipboardManager.exe" -Version $Version
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& (Join-Path $PSScriptRoot "test-release-artifact.ps1") `
+    -ExecutablePath (Join-Path $portableDir "ClipboardManager.exe") `
+    -ExpectedVersion $contract.appVersion `
+    -ExpectedSchemaVersion $contract.databaseSchemaVersion
 
 $helperTarget = Join-Path $portableDir "ClipboardManager.Maintenance.exe"
 if (-not (Test-Path $helperTarget)) { throw "便携包缺少恢复助手。" }
@@ -44,6 +54,10 @@ if ($IncludeMsi) {
     if (-not $builtMsi) { throw "未找到版本 $Version 的 MSI。" }
     $msiTarget = Join-Path $releaseDir $builtMsi.Name
     Copy-Item $builtMsi.FullName $msiTarget -Force
+    & (Join-Path $PSScriptRoot "test-msi-artifact.ps1") `
+        -MsiPath $msiTarget `
+        -ExpectedVersion $contract.appVersion `
+        -ExpectedSchemaVersion $contract.databaseSchemaVersion
     $checksums += "$(Get-FileHash $msiTarget -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $msiTarget -Leaf)"
 }
 $checksums | Set-Content (Join-Path $releaseDir "SHA256SUMS.txt") -Encoding ascii

@@ -35,6 +35,11 @@ public sealed class SqliteDatabaseInitializerTests : IDisposable
         Assert.Contains("clipboard_items", tables);
         Assert.Contains("workspaces", tables);
         Assert.Contains("sync_operations", tables);
+        Assert.Contains("sync_conflicts", tables);
+        Assert.Contains("blob_transfers", tables);
+        await reader.DisposeAsync();
+        command.CommandText = "PRAGMA user_version;";
+        Assert.Equal(SqliteDatabaseInitializer.CurrentVersion, Convert.ToInt32(await command.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -51,7 +56,7 @@ public sealed class SqliteDatabaseInitializerTests : IDisposable
         }
         var backup = new DatabaseSafetyBackup(paths, factory);
         await new SqliteDatabaseInitializer(factory, NullLogger<SqliteDatabaseInitializer>.Instance, backup).InitializeAsync();
-        var file = Assert.Single(Directory.GetFiles(Path.Combine(_root, "migration-backups"), "clipboard-v1-before-v3-*.db"));
+        var file = Assert.Single(Directory.GetFiles(Path.Combine(_root, "migration-backups"), "clipboard-v1-before-v5-*.db"));
         await using var snapshot = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = file, Mode = SqliteOpenMode.ReadOnly }.ConnectionString);
         await snapshot.OpenAsync();
         await using var check = snapshot.CreateCommand();

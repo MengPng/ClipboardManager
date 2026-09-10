@@ -30,6 +30,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly ClipboardManager.Domain.Contracts.IStorageMaintenanceService _storageMaintenance;
     private readonly ClipboardManager.Domain.Contracts.IPersonalConfigTransferService _personalConfigTransfer;
     private readonly ILanShareService _lanShareService;
+    private readonly ICloudModeService _cloudModeService;
+    private readonly ICloudAccountService _cloudAccountService;
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
     private bool _allowClose, _favoritesOnly, _pinnedOnly, _refreshingFolders, _isPinnedTopmost;
     private int _activeModalCount;
@@ -47,6 +49,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Guid _personalWorkspaceId;
     private Guid? _teamWorkspaceId;
     private string? _historySpaceName, _deviceName;
+    private Guid _deviceId;
+    private Guid? _lastOpenedFolderMappingId;
+    private long _lastOpenedFolderMappingTick;
     // Positions of the selected folder's items in its unfiltered order, used to decide
     // whether 上移/下移 are at a boundary. Null while a search narrows the list.
     private List<Guid>? _folderItemOrder;
@@ -65,7 +70,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ClipboardManager.Domain.Contracts.IAppSettingsStore settingsStore,
         ClipboardManager.Domain.Contracts.IStorageMaintenanceService storageMaintenance,
         ClipboardManager.Domain.Contracts.IPersonalConfigTransferService personalConfigTransfer,
-        ILanShareService lanShareService)
+        ILanShareService lanShareService, ICloudModeService cloudModeService,
+        ICloudAccountService cloudAccountService)
     {
         _historyService = historyService; _restoreService = restoreService; _monitorService = monitorService;
         _captureService = captureService; _payloadCaptureService = payloadCaptureService;
@@ -74,6 +80,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settingsStore = settingsStore; _storageMaintenance = storageMaintenance;
         _personalConfigTransfer = personalConfigTransfer;
         _lanShareService = lanShareService;
+        _cloudModeService = cloudModeService;
+        _cloudAccountService = cloudAccountService;
         DataContext = this;
         InitializeComponent();
         var pauseMenu = new ContextMenu();
@@ -139,6 +147,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (collectionHit is not null && IsCollectionTabActive)
             {
                 SelectedCollectionItem = collectionHit;
+                if (IsFolderMapping(collectionHit.Item))
+                {
+                    _ = Dispatcher.InvokeAsync(async () =>
+                        await RunActionAsync("打开映射文件夹", () => OpenFolderMappingAsync(collectionHit.Item)));
+                    return;
+                }
                 _ = Dispatcher.InvokeAsync(async () =>
                 {
                     var settings = await _settingsStore.LoadAsync();
@@ -200,6 +214,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_teamWorkspaceId is null) TeamSpaceTab.Visibility = Visibility.Collapsed;
         _historySpaceName = context.Workspace.Name;
         _deviceName = context.Device.DeviceName;
+        _deviceId = context.Device.DeviceId;
+        _cloudModeService.StatusChanged += (_, status) => Dispatcher.Invoke(() => CloudStatusText.Text = status.Message);
+        ModeButton.Content = context.Settings.CloudModeEnabled ? "云端" : "本地";
+        CloudStatusText.Text = context.Settings.CloudModeEnabled ? "需要连接" : "仅本地";
         ApplySpaceLayout();
         UpdatePauseState(CapturePrivacyPolicy.IsPaused(context.Settings, DateTimeOffset.UtcNow));
         UpdatePinVisualState(context.Settings.AlwaysOnTop);
@@ -370,6 +388,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     public void AllowClose() => _allowClose = true;
+    private async void ModeButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("切换模式", async () =>
+    {
+        if (_cloudModeService.Mode == AppMode.Cloud)
+        {
+            await _cloudModeService.SetModeAsync(AppMode.Local);
+            ModeButton.Content = "本地";
+            return;
+        }
+
+        var settings = await _settingsStore.LoadAsync();
+        if (await _cloudAccountService.GetSessionAsync() is null)
+        {
+            var dialog = new CloudLoginDialog(settings.CloudApiBaseUrl) { Owner = this };
+            if (WithModal(() => dialog.ShowDialog()) != true) return;
+            await _settingsStore.SaveAsync(settings with { CloudApiBaseUrl = dialog.ApiBaseUrl });
+            await _cloudAccountService.SignInAsync(new CloudSignInRequest(dialog.Email, dialog.Password, _deviceId, _deviceName ?? Environment.MachineName));
+        }
+        await _cloudModeService.SetModeAsync(AppMode.Cloud);
+        ModeButton.Content = "云端";
+    });
     private void Changed(string property) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
     private async Task RunActionAsync(string name, Func<Task> action)
     {
@@ -641,6 +679,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AddMenu(menu, "添加链接", () => EditContentAsync(workspaceId, folderId, CollectionItemType.Link));
         AddMenu(menu, "添加图片", async () => { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.gif" }; if (WithModal(() => dialog.ShowDialog(this)) == true) { await _collectionService.AddImageAsync(workspaceId, folderId, dialog.FileName); await RefreshFoldersAsync(); } });
         AddMenu(menu, "添加文件", async () => { var dialog = new Microsoft.Win32.OpenFileDialog(); if (WithModal(() => dialog.ShowDialog(this)) == true) { await _collectionService.AddFileAsync(workspaceId, folderId, dialog.FileName); await RefreshFoldersAsync(); } });
+        AddMenu(menu, "添加文件夹映射", async () =>
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择要映射的本地文件夹", Multiselect = false };
+            if (WithModal(() => dialog.ShowDialog(this)) == true)
+            {
+                await _collectionService.AddFileAsync(workspaceId, folderId, dialog.FolderName);
+                await RefreshFoldersAsync();
+            }
+        });
         menu.IsOpen = true;
     }
 
@@ -705,6 +752,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }, item is not null);
         if (WithModal(() => dialog.ShowDialog()) == true) await RefreshFoldersAsync();
     }
+    private async Task RenameCollectionItemAsync(CollectionItem item)
+    {
+        string? title = WithModal(() =>
+        {
+            var dialog = new SingleInputDialog(this, "修改配置名称", "请输入配置名称：", item.Title ?? "");
+            return dialog.ShowDialog() == true ? dialog.Value : null;
+        });
+        if (string.IsNullOrWhiteSpace(title)) return;
+        await _collectionService.UpdateTitleAsync(item.WorkspaceId, item, title);
+        await RefreshCollectionItemsAsync();
+    }
     private MenuItem AddMenu(ItemsControl menu, string title, Func<Task> action, string? gesture = null, bool enabled = true)
     {
         var item = new MenuItem { Header = title, IsEnabled = enabled };
@@ -723,6 +781,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AddMenu(menu, "复制到剪切板", async () => { await _collectionRestoreService.UseAsync(item); });
         if (item.ItemType is CollectionItemType.Text or CollectionItemType.Link)
             AddMenu(menu, "编辑…", () => EditContentAsync(item.WorkspaceId, item.FolderId, item.ItemType, item));
+        else
+            AddMenu(menu, "修改名称…", () => RenameCollectionItemAsync(item));
         if (item.ItemType == CollectionItemType.Link)
             AddMenu(menu, "在浏览器打开", () => { _collectionRestoreService.OpenLink(item); return Task.CompletedTask; });
         var position = _folderItemOrder?.IndexOf(item.Id) ?? -1;
@@ -732,8 +792,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         foreach (var folder in Folders.Where(f => f.Folder.Id != item.FolderId))
             AddMenu(move, folder.Name, () => MoveToFolderAsync(item, folder.Folder.Id));
         move.IsEnabled = move.Items.Count > 0; menu.Items.Add(move);
-        if (item.ItemType == CollectionItemType.Image) AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.LocalPath));
-        if (item.ItemType == CollectionItemType.File) AddFileMenus(menu, item.FileManifest, item.LocalPath);
+        if (item.ItemType == CollectionItemType.Image)
+        {
+            AddMenu(menu, "打开图片所在位置…", () => ChooseFileActionAsync(null, item.LocalPath, true));
+            AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.LocalPath));
+        }
+        if (item.ItemType == CollectionItemType.File)
+        {
+            if (!string.IsNullOrWhiteSpace(item.LocalPath) && Directory.Exists(item.LocalPath))
+                AddMenu(menu, "打开映射文件夹", () => { OpenFile(item.LocalPath, false); return Task.CompletedTask; });
+            else
+                AddFileMenus(menu, item.FileManifest, item.LocalPath);
+        }
         AddMenu(menu, "删除配置项", async () => { await _collectionService.DeleteItemAsync(item.WorkspaceId, item.Id); await RefreshFoldersAsync(); });
         CollectionList.ContextMenu = menu;
     }
@@ -875,7 +945,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await RefreshFoldersAsync();
     }
     private async void CollectionList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    { if (FindItem<CollectionItemViewModel>(e.OriginalSource as DependencyObject) is not null) await RunActionAsync("使用配置", () => UseCollectionSelectedAsync(true)); }
+    {
+        var hit = FindItem<CollectionItemViewModel>(e.OriginalSource as DependencyObject);
+        if (hit is null) return;
+        if (IsFolderMapping(hit.Item)) return;
+        await RunActionAsync("使用配置", () => UseCollectionSelectedAsync(true));
+    }
+
+    private static bool IsFolderMapping(CollectionItem item) =>
+        item.ItemType == CollectionItemType.File &&
+        !string.IsNullOrWhiteSpace(item.LocalPath) &&
+        Directory.Exists(item.LocalPath);
+
+    private Task OpenFolderMappingAsync(CollectionItem item)
+    {
+        if (!IsFolderMapping(item)) throw new DirectoryNotFoundException("映射的本地文件夹已不存在。");
+        var now = Environment.TickCount64;
+        if (_lastOpenedFolderMappingId == item.Id && now - _lastOpenedFolderMappingTick <= Interop.NativeMethods.GetDoubleClickTime())
+            return Task.CompletedTask;
+        _lastOpenedFolderMappingId = item.Id;
+        _lastOpenedFolderMappingTick = now;
+        OpenFile(item.LocalPath!, false);
+        return Task.CompletedTask;
+    }
     private async Task UseCollectionSelectedAsync(bool automaticPaste)
     {
         if (SelectedCollectionItem is null) return;
@@ -1094,14 +1186,22 @@ public sealed class CollectionItemViewModel(CollectionItem item)
     private bool _thumbnailResolved;
     private string? _typeText;
 
-    public CollectionItem Item { get; }=item; public string Title=>Item.Title??TypeText;
-    public string Preview=>Item.ItemType switch { CollectionItemType.Text=>Item.TextContent??"",CollectionItemType.Link=>Item.Url??"",CollectionItemType.Image=>Item.LocalPath??"",_=>Item.LocalPath??"" };
+    public CollectionItem Item { get; }=item;
+    public string Title => string.IsNullOrWhiteSpace(Item.Title) ? TypeText : Item.Title;
+    public string Preview => Item.ItemType switch
+    {
+        CollectionItemType.Text => TextContentService.CreatePreview(Item.TextContent ?? ""),
+        CollectionItemType.Link => Item.Url ?? "",
+        _ => ""
+    };
     public string TypeText=>_typeText??=Item.ItemType switch
     {
         CollectionItemType.Text=>"文本",
         CollectionItemType.Link=>"链接",
         CollectionItemType.Image=>ListPreviewProvider.LoadTypeName(Item.LocalPath??Item.ThumbnailPath)??"图片",
-        _=>ListPreviewProvider.LoadTypeName(Item.LocalPath)??"文件"
+        _=>!string.IsNullOrWhiteSpace(Item.LocalPath) && Directory.Exists(Item.LocalPath)
+            ? "文件夹映射"
+            : ListPreviewProvider.LoadTypeName(Item.LocalPath)??"文件"
     };
 
     public ImageSource? Thumbnail
@@ -1121,6 +1221,9 @@ public sealed class CollectionItemViewModel(CollectionItem item)
     }
 
     public Visibility ThumbnailVisibility => Item.ItemType is CollectionItemType.Image or CollectionItemType.File ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility PreviewVisibility => Item.ItemType is CollectionItemType.Text or CollectionItemType.Link
+        ? Visibility.Visible
+        : Visibility.Collapsed;
     public Stretch ThumbnailStretch => Item.ItemType == CollectionItemType.Image ? Stretch.UniformToFill : Stretch.Uniform;
     public Thickness ThumbnailPadding => Item.ItemType == CollectionItemType.Image ? default : new Thickness(9);
 }
