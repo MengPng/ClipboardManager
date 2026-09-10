@@ -24,5 +24,5 @@ public sealed record AppSettings
     public int LanPort { get; init; } = 53317;
     public int LanDiscoverySeconds { get; init; } = 2;
     public bool CloudModeEnabled { get; init; }
-    public string CloudApiBaseUrl { get; init; } = string.Empty;
+    public string CloudApiBaseUrl { get; init; } = "https://clipboard.netkaize.com";
 }

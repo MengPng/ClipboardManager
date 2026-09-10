@@ -9,7 +9,7 @@ public sealed class CloudModeServiceTests
     [Fact]
     public async Task CloudMode_RequiresHttpsEndpoint()
     {
-        var store = new MemorySettings(new AppSettings());
+        var store = new MemorySettings(new AppSettings { CloudApiBaseUrl = "http://not-https.example.test" });
         var service = new CloudModeService(store, new Account(new CloudSession(Guid.NewGuid(), "a@example.test", "A", DateTimeOffset.UtcNow.AddHours(1))));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetModeAsync(AppMode.Cloud));

@@ -420,6 +420,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (WithModal(() => dialog.ShowDialog()) != true) return;
             await _settingsStore.SaveAsync(settings with { CloudApiBaseUrl = dialog.ApiBaseUrl });
             await _cloudAccountService.SignInAsync(new CloudSignInRequest(dialog.Email, dialog.Password, _deviceId, _deviceName ?? Environment.MachineName));
+            dialog.DeleteInitialCredential();
         }
         try
         {
