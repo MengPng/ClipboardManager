@@ -1,14 +1,14 @@
-param(
+﻿param(
     [string]$Configuration = "Release",
     [string]$OutputPath = "artifacts/ClipboardManager.exe",
-    [string]$Version = "0.6.6"
+    [string]$Version = "0.8.0"
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $proj = Join-Path $root "src/ClipboardManager.Windows/ClipboardManager.Windows.csproj"
 $maintenanceProj = Join-Path $root "tools/ClipboardManager.Maintenance/ClipboardManager.Maintenance.csproj"
-$tempPublish = Join-Path $root "artifacts/publish/single-exe"
-$maintenancePublish = Join-Path $root "artifacts/publish/maintenance-single-exe"
+$tempPublish = Join-Path $root "artifacts/publish/$Version/single-exe"
+$maintenancePublish = Join-Path $root "artifacts/publish/$Version/maintenance-single-exe"
 
 if (Test-Path $tempPublish) {
     Remove-Item $tempPublish -Recurse -Force
@@ -20,6 +20,7 @@ if (Test-Path $maintenancePublish) {
 Write-Output "正在发布备份恢复助手..."
 dotnet publish $maintenanceProj `
     --configuration $Configuration `
+    -m:1 `
     --runtime win-x64 `
     --self-contained true `
     -p:PublishSingleFile=true `
@@ -40,6 +41,7 @@ if (-not (Test-Path $maintenanceExe)) {
 Write-Output "正在发布内置恢复能力的 Windows x64 单文件程序..."
 dotnet publish $proj `
     --configuration $Configuration `
+    -m:1 `
     --runtime win-x64 `
     --self-contained true `
     -p:PublishSingleFile=true `
@@ -65,6 +67,7 @@ if (-not (Test-Path $destDir)) {
 }
 
 Copy-Item $sourceExe $destFile -Force
+Copy-Item -LiteralPath (Join-Path $root "THIRD-PARTY-NOTICES.txt") -Destination $destDir -Force
 $maintenanceDest = Join-Path $destDir "ClipboardManager.Maintenance.exe"
 Copy-Item $maintenanceExe $maintenanceDest -Force
 $hash = (Get-FileHash $destFile -Algorithm SHA256).Hash

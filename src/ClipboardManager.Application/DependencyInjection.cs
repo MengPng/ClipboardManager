@@ -16,6 +16,9 @@ public static class DependencyInjection
         services.AddSingleton<ClipboardRestoreService>();
         services.AddSingleton<CollectionService>();
         services.AddSingleton<CollectionRestoreService>();
+        services.AddSingleton<TodoService>();
+        services.AddSingleton<SelectionAiService>();
+        services.AddSingleton<ClipboardCalculationService>();
         services.AddSingleton<ISyncEngine, LocalOnlySyncEngine>();
         return services;
     }

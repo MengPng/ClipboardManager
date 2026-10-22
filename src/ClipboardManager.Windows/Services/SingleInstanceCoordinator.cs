@@ -61,8 +61,22 @@ public sealed class SingleInstanceCoordinator(string name) : IDisposable
 
     public void StartListening(Action activated)
     {
+        if (!_ownsMutex)
+        {
+            throw new InvalidOperationException("Only the primary instance can listen for activation requests.");
+        }
+
+        if (_listenerTask is not null)
+        {
+            throw new InvalidOperationException("The activation listener has already been started.");
+        }
+
         _listenerCancellation = new CancellationTokenSource();
-        _listenerTask = ListenAsync(activated, _listenerCancellation.Token);
+        // Create the first server synchronously. Exceptions thrown before the first await in an
+        // async method are otherwise stored in its Task and can leave a healthy-looking window
+        // holding the mutex without any activation pipe.
+        var firstServer = CreateServer();
+        _listenerTask = ListenAsync(activated, firstServer, _listenerCancellation.Token);
     }
 
     public void Dispose()
@@ -87,18 +101,18 @@ public sealed class SingleInstanceCoordinator(string name) : IDisposable
         _mutex?.Dispose();
     }
 
-    private async Task ListenAsync(Action activated, CancellationToken cancellationToken)
+    private async Task ListenAsync(
+        Action activated,
+        NamedPipeServerStream firstServer,
+        CancellationToken cancellationToken)
     {
+        NamedPipeServerStream? nextServer = firstServer;
         while (!cancellationToken.IsCancellationRequested)
         {
-            await using var server = new NamedPipeServerStream(
-                _pipeName,
-                PipeDirection.In,
-                1,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous);
             try
             {
+                await using var server = nextServer ?? CreateServer();
+                nextServer = null;
                 await server.WaitForConnectionAsync(cancellationToken);
                 var buffer = new byte[1];
                 if (await server.ReadAsync(buffer, cancellationToken) > 0)
@@ -114,6 +128,18 @@ public sealed class SingleInstanceCoordinator(string name) : IDisposable
             {
                 await Task.Delay(100, cancellationToken);
             }
+            catch (UnauthorizedAccessException)
+            {
+                await Task.Delay(100, cancellationToken);
+            }
         }
     }
+
+    private NamedPipeServerStream CreateServer() =>
+        new(
+            _pipeName,
+            PipeDirection.In,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 }

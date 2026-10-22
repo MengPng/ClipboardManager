@@ -1,0 +1,26 @@
+{
+  "file": "homepage-compact-v4.png",
+  "pixels": [
+    680,
+    1080
+  ],
+  "window_logical_size": [
+    340,
+    540
+  ],
+  "minimum_logical_size": [
+    340,
+    450
+  ],
+  "mode": "default compact home; static mockup only",
+  "status": "not implemented or interaction tested",
+  "direction": "continuous compact reading surface; no row thumbnails, source line, or full-width action banner",
+  "sample_data": true,
+  "renderer": "local precise typography and layout",
+  "sha256": "ffd26c8af102d3fac188648e9860500e6f053b298ec438fab7db5abe252f71fc",
+  "contrast_checks": {
+    "primary_text_on_surface": 15.14,
+    "secondary_text_on_surface": 5.15,
+    "white_on_copy_action": 16.1
+  }
+}

@@ -1,10 +1,11 @@
-using ClipboardManager.Application;
+﻿using ClipboardManager.Application;
 using ClipboardManager.Application.Services;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Infrastructure;
 using ClipboardManager.Infrastructure.Data;
 using ClipboardManager.Infrastructure.Paths;
 using ClipboardManager.Windows.Services;
+using ClipboardManager.Windows.Themes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -54,6 +55,17 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // Listen as soon as the mutex is acquired. Startup may still be loading the database,
+        // cloud state, or the main window; a second launch during that work must not mistake a
+        // healthy primary instance for a wedged one.
+        _singleInstance.StartListening(() => Dispatcher.Invoke(() =>
+        {
+            if (MainWindow is not null)
+            {
+                ShowMainWindow();
+            }
+        }));
+
         try
         {
             _host = Host.CreateDefaultBuilder(e.Args)
@@ -65,10 +77,16 @@ public partial class App : System.Windows.Application
                     services.AddSingleton<MainWindow>();
                     services.AddSingleton<GlobalHotkeyService>();
                     services.AddSingleton<TrayIconService>();
-                    services.AddSingleton<ISystemClipboard, WindowsSystemClipboard>();
+                    services.AddSingleton<WindowsSystemClipboard>();
+                    services.AddSingleton<ISystemClipboard>(sp => sp.GetRequiredService<WindowsSystemClipboard>());
+                    services.AddSingleton<IClipboardTextRewriter>(sp => sp.GetRequiredService<WindowsSystemClipboard>());
                     services.AddSingleton<ILocalAssetStore, WindowsLocalAssetStore>();
                     services.AddSingleton<ForegroundApplicationService>();
                     services.AddSingleton<ClipboardMonitorService>();
+                    services.AddSingleton<SelectionClipboardGate>();
+                    services.AddSingleton<ISelectionTextCapture, SelectionTextCapture>();
+                    services.AddSingleton<ISelectionGestureMonitor, SelectionGestureMonitor>();
+                    services.AddSingleton<SelectionAiController>();
                     services.AddSingleton<AutomaticPasteService>();
                     services.AddSingleton<WindowDockingService>();
                     services.AddSingleton<AutomaticBackupService>();
@@ -94,6 +112,7 @@ public partial class App : System.Windows.Application
             _host.Services.GetRequiredService<AutomaticBackupService>().Start(context.Device.DeviceName);
             log.LogInformation("Content loaded; registering clipboard listener.");
             await _host.Services.GetRequiredService<ClipboardMonitorService>().StartAsync(mainWindow);
+            await _host.Services.GetRequiredService<SelectionAiController>().StartAsync(mainWindow);
 
             var hotkey = _host.Services.GetRequiredService<GlobalHotkeyService>();
             hotkey.Pressed += (_, _) => ToggleMainWindow();
@@ -126,7 +145,6 @@ public partial class App : System.Windows.Application
                     Shutdown();
                 });
 
-            _singleInstance.StartListening(() => Dispatcher.Invoke(ShowMainWindow));
             ShowMainWindow();
             log.LogInformation("Startup complete; main window shown.");
         }
@@ -256,6 +274,7 @@ public partial class App : System.Windows.Application
     {
         if (_host is not null)
         {
+            _host.Services.GetService<SelectionAiController>()?.Dispose();
             _host.Services.GetService<ClipboardMonitorService>()?.Dispose();
             _host.Services.GetService<GlobalHotkeyService>()?.Dispose();
             _host.Services.GetService<TrayIconService>()?.Dispose();
@@ -267,6 +286,23 @@ public partial class App : System.Windows.Application
 
         _singleInstance?.Dispose();
         base.OnExit(e);
+    }
+
+    public async void OpenSelectionAiSettings(Window owner)
+    {
+        if (_host is null) return;
+        try
+        {
+            var window = new SelectionAiSettingsWindow(
+                _host.Services.GetRequiredService<IAppSettingsStore>(),
+                _host.Services.GetRequiredService<ICredentialVault>()) { Owner = owner };
+            if (window.ShowDialog() == true)
+                await _host.Services.GetRequiredService<SelectionAiController>().ReloadAsync();
+        }
+        catch
+        {
+            System.Windows.MessageBox.Show(owner, "划词设置加载失败，请关闭后重试。", "划词与 AI", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     /// <summary>

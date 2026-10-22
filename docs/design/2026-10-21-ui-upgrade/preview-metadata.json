@@ -1,0 +1,22 @@
+{
+  "file": "homepage-preview-v1.png",
+  "size": [
+    880,
+    1440
+  ],
+  "logical_size": [
+    440,
+    720
+  ],
+  "kind": "static design mockup, not a running application screenshot",
+  "data": "fictional sample content",
+  "renderer": "local typography and composition",
+  "original_asset": "src/ClipboardManager.Windows/Assets/AppIcon.png",
+  "date": "2026-10-21",
+  "sha256": "6c788aa1ebc96067289dc9b0e8af10246aafdd96cc929aa1d8fa9a1a0f84a12e",
+  "contrast": {
+    "body_on_paper": 12.09,
+    "secondary_on_paper": 4.62,
+    "white_on_primary": 8.48
+  }
+}

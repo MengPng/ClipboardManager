@@ -8,7 +8,17 @@ public sealed class ForegroundApplicationService
 {
     public ClipboardSource GetCurrentSource()
     {
-        var window = NativeMethods.GetForegroundWindow();
+        return GetSourceForWindow(NativeMethods.GetForegroundWindow());
+    }
+
+    public ClipboardOwnerObservation GetClipboardOwner()
+    {
+        var window = SelectionNative.GetClipboardOwner();
+        return new ClipboardOwnerObservation(window, GetSourceForWindow(window));
+    }
+
+    public ClipboardSource GetSourceForWindow(IntPtr window)
+    {
         if (window == IntPtr.Zero)
         {
             return new ClipboardSource(null, null);
@@ -41,4 +51,9 @@ public sealed class ForegroundApplicationService
             return new ClipboardSource(null, null);
         }
     }
+}
+
+public readonly record struct ClipboardOwnerObservation(IntPtr Window, ClipboardSource Source)
+{
+    public bool IsKnown => Window != IntPtr.Zero && !string.IsNullOrWhiteSpace(Source.ProcessName);
 }

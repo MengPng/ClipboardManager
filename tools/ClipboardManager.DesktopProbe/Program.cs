@@ -13,6 +13,8 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Contains("--clipboard-safety", StringComparer.OrdinalIgnoreCase)) return ClipboardSafetyProbe.Run();
+        if (args.Any(arg => arg is "--selection" or "--selection-target" or "--selection-ui" or "--selection-gateway")) return SelectionProbe.Run(args);
         var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {

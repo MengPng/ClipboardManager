@@ -5,6 +5,12 @@ namespace ClipboardManager.Windows.Interop;
 internal static partial class NativeMethods
 {
     [LibraryImport("user32.dll")]
+    public static partial uint GetClipboardSequenceNumber();
+
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr GetClipboardData(uint format);
+
+    [LibraryImport("user32.dll")]
     public static partial uint GetDoubleClickTime();
     public const int WmHotkey = 0x0312;
     public const int WmClipboardUpdate = 0x031D;

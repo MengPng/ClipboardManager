@@ -25,6 +25,8 @@ public static class DependencyInjection
         services.AddSingleton<IPersonalConfigTransferService, PersonalConfigTransferService>();
         services.AddSingleton<ILanShareService, LocalSendLanShareService>();
         services.AddSingleton<ICredentialVault, WindowsCredentialVault>();
+        services.AddHttpClient<ITextAiProvider, Ai.OpenAiCompatibleTextProvider>()
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddHttpClient<TencentCloudAccountService>(client => client.Timeout = TimeSpan.FromSeconds(20));
         services.AddHttpClient<TencentCloudWorkspaceService>(client => client.Timeout = TimeSpan.FromSeconds(20));
         services.AddHttpClient<TencentRemoteSyncProvider>(client => client.Timeout = TimeSpan.FromSeconds(30));
@@ -33,6 +35,7 @@ public static class DependencyInjection
         services.AddSingleton<ICloudWorkspaceService>(provider => provider.GetRequiredService<TencentCloudWorkspaceService>());
         services.AddSingleton<ICloudModeService, CloudModeService>();
         services.AddSingleton<ICloudMirrorStore, SqliteCloudMirrorStore>();
+        services.AddSingleton<ITodoRepository, SqliteTodoRepository>();
         services.AddSingleton<IClipboardHistoryRepository, SqliteClipboardHistoryRepository>();
         services.AddSingleton<ICollectionRepository, SqliteCollectionRepository>();
         services.AddSingleton<IClipboardItemRepository>(provider => provider.GetRequiredService<IClipboardHistoryRepository>());

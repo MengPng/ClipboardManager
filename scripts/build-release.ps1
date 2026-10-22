@@ -1,5 +1,5 @@
-param(
-    [string]$Version = "0.6.6",
+﻿param(
+    [string]$Version = "0.8.0",
     [switch]$IncludeMsi = $true
 )
 $ErrorActionPreference = "Stop"

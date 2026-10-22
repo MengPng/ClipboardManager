@@ -1,0 +1,115 @@
+<Border xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Width="340" Height="540" CornerRadius="12" BorderBrush="#FFDDE2E8" BorderThickness="1"
+        SnapsToDevicePixels="True" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="ClearType">
+    <Border.Background>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#FFFBFCFE" Offset="0" />
+            <GradientStop Color="#FFF7F8FA" Offset="0.32" />
+            <GradientStop Color="#FFF5F7F9" Offset="1" />
+        </LinearGradientBrush>
+    </Border.Background>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="42" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="50" />
+            <RowDefinition Height="38" />
+            <RowDefinition Height="30" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="32" />
+        </Grid.RowDefinitions>
+
+        <Grid Margin="14,0,10,0">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Image Source="__ICON__" Width="16" Height="16" />
+                <TextBlock Margin="8,0,7,0" Text="剪切板" FontFamily="Microsoft YaHei UI" FontSize="14" FontWeight="Bold" Foreground="#FF1F2329" />
+                <Border Height="22" Padding="8,0" CornerRadius="11" Background="#FFEAF5F1">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse Width="6" Height="6" Fill="#FF16775E" Margin="0,0,5,0" />
+                        <TextBlock Text="监听中" FontFamily="Microsoft YaHei UI" FontSize="11" FontWeight="SemiBold" Foreground="#FF16775E" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Width="28" TextAlignment="Center" Text="&#xE769;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#FF59616D" />
+                <TextBlock Width="28" TextAlignment="Center" Text="&#xE718;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#FF59616D" />
+                <TextBlock Width="28" TextAlignment="Center" Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#FF59616D" />
+                <TextBlock Width="28" TextAlignment="Center" Text="&#xE8BB;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#FF59616D" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="1" Margin="14,4,14,10" Padding="3" CornerRadius="10" Background="#FFEDF0F4">
+            <UniformGrid Columns="5">
+                <Border CornerRadius="7" Background="White"><TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Text="历史" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="Bold" Foreground="#FF1F2329" /></Border>
+                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Text="待办" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Text="配置" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Text="计算" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Text="划词" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+            </UniformGrid>
+        </Border>
+
+        <Border Grid.Row="2" Margin="14,0,14,12" Padding="12,0,8,0" CornerRadius="10" BorderBrush="#FFDCE2E9" BorderThickness="1" Background="White">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#FF69717D" />
+                <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="搜索剪切板内容" FontFamily="Microsoft YaHei UI" FontSize="12.5" Foreground="#FF6B7380" />
+                <Border Grid.Column="2" Height="20" Padding="6,0" CornerRadius="5" BorderBrush="#FFE0E5EB" BorderThickness="1" Background="#FFFAFBFC"><TextBlock VerticalAlignment="Center" Text="Ctrl F" FontFamily="Segoe UI" FontSize="10" Foreground="#FF646D79" /></Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="3" Margin="14,0">
+            <Border VerticalAlignment="Bottom" Height="1" Background="#FFE6E9EE" />
+            <StackPanel Orientation="Horizontal">
+                <Grid Margin="0,0,16,0"><TextBlock VerticalAlignment="Center" Text="全部" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="Bold" Foreground="#FF1F2329" /><Border VerticalAlignment="Bottom" Height="2" CornerRadius="1" Background="#FF1661AB" /></Grid>
+                <TextBlock Margin="0,0,16,0" VerticalAlignment="Center" Text="文本" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+                <TextBlock Margin="0,0,16,0" VerticalAlignment="Center" Text="图片" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+                <TextBlock VerticalAlignment="Center" Text="文件" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+            </StackPanel>
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Margin="0,0,4,0" Text="&#xE718;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="11" Foreground="#FF4F5866" />
+                <TextBlock Text="置顶" FontFamily="Microsoft YaHei UI" FontSize="12" Foreground="#FF4F5866" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="4" Margin="14,0">
+            <TextBlock VerticalAlignment="Center" Text="今天" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="Bold" Foreground="#FF1F2329" />
+            <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center" Text="5 条" FontFamily="Microsoft YaHei UI" FontSize="11" Foreground="#FF6B7380" />
+        </Grid>
+
+        <StackPanel Grid.Row="5" Margin="10,0">
+            <Border Padding="12,11,12,9" CornerRadius="12" BorderBrush="#FFC8DDF3" BorderThickness="1">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFF8FBFF" Offset="0" /><GradientStop Color="#FFEDF5FD" Offset="1" /></LinearGradientBrush>
+                </Border.Background>
+                <Grid>
+                    <Border Width="3" Margin="-12,-11,0,-9" HorizontalAlignment="Left" CornerRadius="12,0,0,12" Background="#FF1661AB" />
+                    <StackPanel>
+                        <Grid><TextBlock Text="下一版界面调整" FontFamily="Microsoft YaHei UI" FontSize="13" FontWeight="Bold" Foreground="#FF1F2329" /><TextBlock HorizontalAlignment="Right" Text="刚刚" FontFamily="Microsoft YaHei UI" FontSize="10.5" Foreground="#FF6B7380" /></Grid>
+                        <TextBlock Margin="0,4,0,0" TextWrapping="Wrap" MaxHeight="36" Text="搜索、内容确认与复制放在同一条路径里，减少来回寻找。" FontFamily="Microsoft YaHei UI" FontSize="12" LineHeight="18" Foreground="#FF4F5866" />
+                        <Border Margin="0,8,0,0" Padding="0,6,0,0" BorderBrush="#211661AB" BorderThickness="0,1,0,0">
+                            <Grid>
+                                <Border HorizontalAlignment="Left" Height="26" Padding="10,0,8,0" CornerRadius="8" Background="#FF1661AB">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="复制" FontFamily="Microsoft YaHei UI" FontSize="11.5" FontWeight="Bold" Foreground="White" /><TextBlock Margin="7,1,0,0" Text="Enter" FontFamily="Segoe UI" FontSize="9.5" Foreground="#C8FFFFFF" /></StackPanel>
+                                </Border>
+                                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                    <TextBlock Width="26" TextAlignment="Center" VerticalAlignment="Center" Text="&#xE734;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="#FF4F6F8F" />
+                                    <TextBlock Width="26" TextAlignment="Center" VerticalAlignment="Center" Text="&#xE718;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="#FF4F6F8F" />
+                                    <TextBlock Width="26" TextAlignment="Center" VerticalAlignment="Center" Text="&#xE712;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="#FF4F6F8F" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            __ROWS__
+        </StackPanel>
+
+        <Grid Grid.Row="6" Margin="14,0,14,8">
+            <TextBlock HorizontalAlignment="Left" VerticalAlignment="Center" Text="↑↓ 选择" FontFamily="Microsoft YaHei UI" FontSize="10.5" Foreground="#FF6B7380" />
+            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Text="Space 预览" FontFamily="Microsoft YaHei UI" FontSize="10.5" Foreground="#FF6B7380" />
+            <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center" Text="Ctrl+Enter 尝试粘贴" FontFamily="Microsoft YaHei UI" FontSize="10.5" Foreground="#FF6B7380" />
+        </Grid>
+    </Grid>
+</Border>

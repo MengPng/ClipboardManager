@@ -7,9 +7,8 @@ using System.Windows.Interop;
 
 namespace ClipboardManager.Windows.Services;
 
-public sealed class GlobalHotkeyService : IDisposable
+public sealed class GlobalHotkeyService(int hotkeyId = 0x434D) : IDisposable
 {
-    private const int HotkeyId = 0x434D;
     private HwndSource? _source;
     private IntPtr _windowHandle;
     private bool _registered;
@@ -32,7 +31,7 @@ public sealed class GlobalHotkeyService : IDisposable
 
         var modifiers = ToNativeModifiers(gesture.Modifiers) | NativeMethods.ModNoRepeat;
         var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(gesture.Key);
-        if (!NativeMethods.RegisterHotKey(_windowHandle, HotkeyId, modifiers, virtualKey))
+        if (!NativeMethods.RegisterHotKey(_windowHandle, hotkeyId, modifiers, virtualKey))
         {
             var error = Marshal.GetLastWin32Error();
             _source.RemoveHook(WindowProc);
@@ -47,7 +46,7 @@ public sealed class GlobalHotkeyService : IDisposable
     {
         if (_registered)
         {
-            NativeMethods.UnregisterHotKey(_windowHandle, HotkeyId);
+            NativeMethods.UnregisterHotKey(_windowHandle, hotkeyId);
             _registered = false;
         }
 
@@ -57,7 +56,7 @@ public sealed class GlobalHotkeyService : IDisposable
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (message == NativeMethods.WmHotkey && wParam.ToInt32() == HotkeyId)
+        if (message == NativeMethods.WmHotkey && wParam.ToInt32() == hotkeyId)
         {
             Pressed?.Invoke(this, EventArgs.Empty);
             handled = true;

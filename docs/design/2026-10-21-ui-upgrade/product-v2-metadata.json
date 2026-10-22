@@ -1,0 +1,28 @@
+{
+  "file": "homepage-product-v2.png",
+  "pixels": [
+    2400,
+    1700
+  ],
+  "canvas_logical_size": [
+    1200,
+    850
+  ],
+  "app_logical_size": [
+    1124,
+    776
+  ],
+  "mode": "expanded desktop concept",
+  "status": "static mockup; not implemented or interaction tested",
+  "direction": "neutral white and grey, blue interaction accent, dark primary controls; no paper texture",
+  "reference": "codex-clipboard-f6a811b1-50bc-4173-bd0d-9d5e5924ad51.png",
+  "sample_data": true,
+  "renderer": "local precise typography and layout",
+  "sha256": "fb542532b40153c36931dd8235acab1dc9e7001e43ef5ecd63a2065c793b9be2",
+  "contrast_checks": {
+    "primary_text_on_white": 16.1,
+    "secondary_on_app_surface": 4.97,
+    "metadata_on_white": 4.94,
+    "white_on_primary": 16.1
+  }
+}
