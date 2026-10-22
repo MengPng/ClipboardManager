@@ -1,4 +1,4 @@
-﻿<!--
+<!--
     Shared Qingxu control templates for the desktop shell. The stock WPF templates paint opaque
     grey gradients and a 17px chromed scrollbar, both of which read as solid blocks
     on top of an acrylic backdrop, so every control the app uses is retemplated.
@@ -176,7 +176,7 @@
                         <Trigger Property="IsChecked" Value="True">
                             <Setter Property="Foreground" Value="{StaticResource LabelPrimaryBrush}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
-                            <Setter TargetName="Mark" Property="Background" Value="{StaticResource AccentBrandBrush}" />
+                            <Setter TargetName="Mark" Property="Background" Value="{StaticResource LabelPrimaryBrush}" />
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Mark" Property="Background" Value="{StaticResource BorderStrongBrush}" />
@@ -235,8 +235,8 @@
     <!-- Search field: leading magnifier plus a placeholder taken from Tag, so the
          hint is markup rather than a watermark the code-behind has to clear. -->
     <Style x:Key="SearchTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
-        <Setter Property="MinHeight" Value="34" />
-        <Setter Property="Padding" Value="0,6" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Padding" Value="0,4" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
@@ -876,6 +876,128 @@
         <Setter Property="Padding" Value="9,8" />
         <Setter Property="Margin" Value="0,0,0,7" />
         <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    </Style>
+
+    <!-- Flat ComboBox: replaces the default chrome gradient with the warm control
+         fill, one hairline border and a neutral glyph. -->
+    <Style TargetType="ComboBox">
+        <Setter Property="Background" Value="{StaticResource ControlFillBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource LabelPrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderSubtleBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="9,5" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid x:Name="Root" SnapsToDevicePixels="True">
+                        <Border x:Name="Field"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{StaticResource RadiusMedium}" />
+                        <ToggleButton x:Name="Toggle"
+                                      Background="Transparent"
+                                      BorderThickness="0"
+                                      Padding="{TemplateBinding Padding}"
+                                      HorizontalContentAlignment="Stretch"
+                                      Focusable="False"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                      ClickMode="Press">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Grid Background="Transparent">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ContentPresenter Grid.Column="0"
+                                                          Margin="{TemplateBinding Padding}"
+                                                          VerticalAlignment="Center"
+                                                          Content="{TemplateBinding Content}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Margin="0,0,9,0"
+                                                   VerticalAlignment="Center"
+                                                   FontFamily="{StaticResource IconFontFamily}"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource LabelSecondaryBrush}"
+                                                   Text="&#xE70D;" />
+                                    </Grid>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+                        <ContentPresenter x:Name="ContentSite"
+                                          Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                          IsHitTestVisible="False" />
+                        <Popup x:Name="PART_Popup"
+                               Placement="Bottom"
+                               IsOpen="{TemplateBinding IsDropDownOpen}"
+                               AllowsTransparency="True"
+                               PopupAnimation="Fade">
+                            <Grid MinWidth="{Binding ActualWidth, ElementName=Root}">
+                                <Border Background="{StaticResource PopoverBrush}"
+                                        BorderBrush="{StaticResource BorderSubtleBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="{StaticResource RadiusMedium}"
+                                        Padding="4"
+                                        Effect="{StaticResource PopoverShadow}">
+                                    <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
+                                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
+                                    </ScrollViewer>
+                                </Border>
+                            </Grid>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Field" Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Field" Property="BorderBrush" Value="{StaticResource AccentBrandBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsEditable" Value="True">
+                <Setter Property="IsTabStop" Value="False" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="ComboBoxItem">
+        <Setter Property="Padding" Value="9,6" />
+        <Setter Property="Foreground" Value="{StaticResource LabelPrimaryBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBoxItem">
+                    <Border x:Name="Root"
+                            Background="Transparent"
+                            CornerRadius="{StaticResource RadiusSmall}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{StaticResource ControlFillHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{StaticResource SelectionBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
 </ResourceDictionary>

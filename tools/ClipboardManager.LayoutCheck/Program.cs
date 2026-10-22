@@ -72,7 +72,7 @@ internal static class Program
             var pin = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("PinButton");
             if (pin.Visibility != Visibility.Visible || !pin.Focusable)
                 throw new InvalidOperationException("The global always-on-top toggle must remain visible and keyboard accessible.");
-            var output = Path.Combine(root, "artifacts", "review", "0.8.0", "layout");
+            var output = Path.Combine(root, "artifacts", "review", "0.8.1", "layout");
             Directory.CreateDirectory(output);
             window.DataContext = new
             {
