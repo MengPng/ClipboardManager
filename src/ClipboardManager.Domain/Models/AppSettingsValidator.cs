@@ -5,6 +5,8 @@ public static class AppSettingsValidator
     public static void Validate(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(settings.SelectionAi);
+        SelectionAiSettings.Validate(settings.SelectionAi);
         if (settings.MaxHistoryItems is < 1 or > 100000) throw new ArgumentException("历史条数必须为 1–100000。");
         if (settings.RetentionDays is < 1 or > 3650) throw new ArgumentException("保留天数必须为 1–3650。");
         if (settings.MaxTextBytes is < 1 or > 16 * 1024 * 1024) throw new ArgumentException("文本上限必须在 1 字节至 16 MB 之间。");

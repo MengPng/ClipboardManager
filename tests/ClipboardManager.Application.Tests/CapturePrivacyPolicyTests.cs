@@ -22,4 +22,20 @@ public sealed class CapturePrivacyPolicyTests
         Assert.False(CapturePrivacyPolicy.IsPaused(settings, now.AddMinutes(5)));
         Assert.True(CapturePrivacyPolicy.IsPaused(settings with { IsCapturePaused = true }, now.AddDays(1)));
     }
+
+    [Fact]
+    public void UnknownOwner_IsRejectedOnlyWhenExclusionsAreConfigured()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var unknown = new ClipboardSource(null, null);
+
+        Assert.False(CapturePrivacyPolicy.CanRead(
+            new AppSettings { ExcludedProcesses = ["KeePass"] },
+            unknown,
+            now));
+        Assert.True(CapturePrivacyPolicy.CanRead(
+            new AppSettings { ExcludedProcesses = [] },
+            unknown,
+            now));
+    }
 }

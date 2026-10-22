@@ -8,6 +8,16 @@ public sealed class JsonAppSettingsStoreTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ClipboardManager.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task ClipboardCalculator_DefaultsOff_AndPersistsAcrossRestart()
+    {
+        var store = new JsonAppSettingsStore(new AppPaths(_root));
+        var original = await store.LoadAsync();
+        Assert.False(original.EnableClipboardCalculator);
+        await store.SaveAsync(original with { EnableClipboardCalculator = true });
+        Assert.True((await new JsonAppSettingsStore(new AppPaths(_root)).LoadAsync()).EnableClipboardCalculator);
+    }
+
+    [Fact]
     public async Task InvalidSave_PreservesPreviousSettings()
     {
         var store = new JsonAppSettingsStore(new AppPaths(_root));

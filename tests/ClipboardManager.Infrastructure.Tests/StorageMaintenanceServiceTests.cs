@@ -19,7 +19,12 @@ public sealed class StorageMaintenanceServiceTests : IDisposable
         await InsertClipboardAsync("before", null, null);
         Directory.CreateDirectory(Paths.BlobsPath);
         await File.WriteAllTextAsync(Path.Combine(Paths.BlobsPath, "a.bin"), "asset-before");
-        await File.WriteAllTextAsync(Paths.SettingsPath, "settings-before");
+        await File.WriteAllTextAsync(Paths.SettingsPath, """
+            {"maxHistoryItems":1000,"retentionDays":30,"maxTextBytes":2097152,
+            "maxPersistedImageBytes":20971520,"maxImageCacheBytes":536870912,
+            "excludedProcesses":[],"globalHotkey":"Alt+V","autoBackupIntervalHours":0,
+            "lanDeviceAlias":"test","lanPort":53317,"lanDiscoverySeconds":2}
+            """);
         var backup = Path.Combine(_root, "backup.zip");
 
         await service.CreateBackupAsync(backup);
@@ -27,12 +32,42 @@ public sealed class StorageMaintenanceServiceTests : IDisposable
 
         await ExecuteAsync("UPDATE clipboard_items SET text_content='after';");
         await File.WriteAllTextAsync(Path.Combine(Paths.BlobsPath, "a.bin"), "asset-after");
-        await File.WriteAllTextAsync(Paths.SettingsPath, "settings-after");
+        await File.WriteAllTextAsync(Paths.SettingsPath, "{}");
         await service.RestoreAsync(backup);
 
         Assert.Equal("before", await ScalarStringAsync("SELECT text_content FROM clipboard_items LIMIT 1;"));
         Assert.Equal("asset-before", await File.ReadAllTextAsync(Path.Combine(Paths.BlobsPath, "a.bin")));
-        Assert.Equal("settings-before", await File.ReadAllTextAsync(Paths.SettingsPath));
+        Assert.Contains("\"globalHotkey\":\"Alt+V\"", await File.ReadAllTextAsync(Paths.SettingsPath));
+    }
+
+    [Fact]
+    public async Task BackupRestore_RoundTripsTodosTagsAndCompletionState()
+    {
+        var service = await CreateAsync();
+        var workspace = Guid.NewGuid().ToString("D");
+        var tag = Guid.NewGuid().ToString("D");
+        var todo = Guid.NewGuid().ToString("D");
+        var created = DateTimeOffset.UtcNow.AddDays(-1).ToString("O");
+        var completed = DateTimeOffset.UtcNow.AddMinutes(-5).ToString("O");
+        await ExecuteAsync("INSERT INTO workspaces(id,workspace_type,name,created_at,updated_at) VALUES($w,0,'local',$now,$now);", ("$w", workspace), ("$now", created));
+        await ExecuteAsync("""
+            INSERT INTO todo_tags(id,workspace_id,name,color,is_preset,sort_key,created_at,updated_at)
+            VALUES($id,$w,'项目','#2563EB',0,0,$created,$created);
+            INSERT INTO todo_items(id,workspace_id,title,is_completed,completed_at,created_at,updated_at)
+            VALUES($id2,$w,'验证备份恢复',1,$completed,$created,$completed);
+            INSERT INTO todo_item_tags(todo_id,tag_id,workspace_id) VALUES($id2,$id,$w);
+            """, ("$id", tag), ("$id2", todo), ("$w", workspace), ("$created", created), ("$completed", completed));
+        var backup = Path.Combine(_root, "todo-backup.clipbackup");
+
+        await service.CreateBackupAsync(backup);
+        await ExecuteAsync("UPDATE todo_items SET title='已改变', is_completed=0, completed_at=NULL WHERE id=$id; DELETE FROM todo_item_tags WHERE todo_id=$id;", ("$id", todo));
+        await service.RestoreAsync(backup);
+
+        Assert.Equal("验证备份恢复", await ScalarStringAsync("SELECT title FROM todo_items WHERE id='" + todo + "';"));
+        Assert.Equal("1", await ScalarStringAsync("SELECT is_completed FROM todo_items WHERE id='" + todo + "';"));
+        Assert.Equal(completed, await ScalarStringAsync("SELECT completed_at FROM todo_items WHERE id='" + todo + "';"));
+        Assert.Equal("项目", await ScalarStringAsync("SELECT name FROM todo_tags WHERE id='" + tag + "';"));
+        Assert.Equal(tag, await ScalarStringAsync("SELECT tag_id FROM todo_item_tags WHERE todo_id='" + todo + "';"));
     }
 
     [Fact]

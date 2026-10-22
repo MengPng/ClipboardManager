@@ -15,6 +15,14 @@ public sealed class PersonalConfigTransferService(
     private const int FormatVersion = 1;
     private const string ManifestEntryName = "manifest.json";
     private const long MaxPackageBytes = 20L * 1024 * 1024 * 1024;
+    // The manifest is metadata, not an asset container. Bound it separately so a
+    // small zip entry cannot expand into an unbounded JSON document.
+    private const long MaxManifestCompressedBytes = 4L * 1024 * 1024;
+    private const long MaxManifestBytes = 16L * 1024 * 1024;
+    private const int MaxFolderCount = 10_000;
+    private const int MaxItemCount = 100_000;
+    private const int MaxAssetCount = 100_000;
+    private const int MaxAssetReferences = 200_000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public async Task<PersonalConfigExportResult> ExportAsync(Guid personalWorkspaceId, string packagePath, CancellationToken cancellationToken = default)
@@ -78,6 +86,7 @@ public sealed class PersonalConfigTransferService(
                 await JsonSerializer.SerializeAsync(output, manifest, JsonOptions, cancellationToken);
             archive.Dispose();
             await stream.FlushAsync(cancellationToken);
+            await stream.DisposeAsync();
             File.Move(temporary, fullPath, true);
             return new PersonalConfigExportResult(packageFolders.Count, packageItems.Count, assets.Count, missingFiles, includedBytes);
         }
@@ -109,14 +118,17 @@ public sealed class PersonalConfigTransferService(
             var safetyBackup = Path.Combine(safetyDirectory, $"before-personal-import-{DateTime.Now:yyyyMMdd-HHmmss}.clipbackup");
             await storageMaintenance.CreateBackupAsync(safetyBackup, cancellationToken);
 
-            var importRoot = Path.Combine(paths.Root, "imports", manifest.PackageId.ToString("N"));
+            var importRoot = Path.Combine(paths.ImportsPath,
+                $"{manifest.PackageId:N}-{Guid.NewGuid():N}");
             var createdItems = new List<(Guid WorkspaceId, Guid ItemId)>();
             var createdFolders = new List<Guid>();
             var skipped = 0;
             CollectionFolder? uncategorized = null;
+            var committed = false;
             try
             {
                 Directory.CreateDirectory(importRoot);
+                var materializedAssets = new Dictionary<string, string>(StringComparer.Ordinal);
                 var existingFolders = await repository.GetFoldersAsync(personalWorkspaceId, cancellationToken);
                 uncategorized = await repository.EnsureUncategorizedAsync(personalWorkspaceId, cancellationToken);
                 var folderMap = new Dictionary<Guid, Guid>();
@@ -150,12 +162,12 @@ public sealed class PersonalConfigTransferService(
                         continue;
                     }
 
-                    var localPath = await MaterializeAsync(archive, manifest, item.ImageEntry, importRoot, cancellationToken);
-                    var thumbnailPath = await MaterializeAsync(archive, manifest, item.ThumbnailEntry, importRoot, cancellationToken);
+                    var localPath = await MaterializeAsync(archive, manifest, item.ImageEntry, importRoot, materializedAssets, cancellationToken);
+                    var thumbnailPath = await MaterializeAsync(archive, manifest, item.ThumbnailEntry, importRoot, materializedAssets, cancellationToken);
                     var filePaths = new List<string>();
                     foreach (var entry in item.FileEntries)
                     {
-                        var file = await MaterializeAsync(archive, manifest, entry, importRoot, cancellationToken);
+                        var file = await MaterializeAsync(archive, manifest, entry, importRoot, materializedAssets, cancellationToken);
                         if (file is not null) filePaths.Add(file);
                     }
                     if (((CollectionItemType)item.ItemType == CollectionItemType.Image && localPath is null) ||
@@ -167,23 +179,33 @@ public sealed class PersonalConfigTransferService(
 
                     var created = await repository.CreateItemAsync(personalWorkspaceId, new CreateCollectionItem(
                         folderId, (CollectionItemType)item.ItemType, item.Title, item.TextContent,
-                        item.Url, item.Description, localPath, thumbnailPath,
+                        item.ItemType == (int)CollectionItemType.Link ? CollectionLink.Normalize(item.Url) : item.Url, item.Description, localPath, thumbnailPath,
                         filePaths.Count == 0 ? null : JsonSerializer.Serialize(filePaths), item.ContentHash,
                         item.ContentSize), cancellationToken);
                     createdItems.Add((personalWorkspaceId, created.Id));
                 }
 
+                committed = true;
                 return new PersonalConfigImportResult(createdFolders.Count, createdItems.Count, skipped, safetyBackup);
             }
             catch
             {
                 foreach (var item in createdItems.AsEnumerable().Reverse())
-                    await repository.DeleteItemAsync(item.WorkspaceId, item.ItemId, CancellationToken.None);
+                {
+                    try { await repository.DeleteItemAsync(item.WorkspaceId, item.ItemId, CancellationToken.None); }
+                    catch { }
+                }
                 if (uncategorized is not null)
                     foreach (var folder in createdFolders.AsEnumerable().Reverse())
-                        await repository.DeleteFolderAsync(personalWorkspaceId, folder, uncategorized.Id, CancellationToken.None);
-                TryDeleteDirectory(importRoot);
+                    {
+                        try { await repository.DeleteFolderAsync(personalWorkspaceId, folder, uncategorized.Id, CancellationToken.None); }
+                        catch { }
+                    }
                 throw;
+            }
+            finally
+            {
+                if (!committed) TryDeleteDirectory(importRoot);
             }
         }
     }
@@ -217,28 +239,39 @@ public sealed class PersonalConfigTransferService(
             if (archive.Entries.Any(entry => !IsSafeEntryName(entry.FullName)))
                 throw new InvalidDataException("迁移包包含不安全路径。");
             var manifestEntry = archive.GetEntry(ManifestEntryName) ?? throw new InvalidDataException("迁移包缺少 manifest.json。");
+            if (manifestEntry.CompressedLength > MaxManifestCompressedBytes || manifestEntry.Length > MaxManifestBytes)
+                throw new InvalidDataException("迁移包清单超出限制。");
             PackageManifest? manifest;
             await using (var input = manifestEntry.Open())
                 manifest = await JsonSerializer.DeserializeAsync<PackageManifest>(input, JsonOptions, cancellationToken);
             if (manifest is null || manifest.FormatVersion != FormatVersion)
                 throw new InvalidDataException("不支持的个人配置迁移包版本。");
-            if (manifest.IncludedBytes < 0 || manifest.IncludedBytes > MaxPackageBytes)
-                throw new InvalidDataException("迁移包解压大小超出限制。");
+            ValidateManifestShape(manifest);
             var assetsByName = manifest.Assets.ToDictionary(asset => asset.EntryName, StringComparer.Ordinal);
             if (assetsByName.Count != manifest.Assets.Count) throw new InvalidDataException("迁移包资源名称重复。");
+            if (archive.Entries.Count != manifest.Assets.Count + 1 ||
+                archive.Entries.Any(entry => entry.FullName != ManifestEntryName && !assetsByName.ContainsKey(entry.FullName)))
+                throw new InvalidDataException("迁移包包含未声明资源。");
             long total = 0;
+            var entries = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
             foreach (var asset in manifest.Assets)
             {
                 if (!IsSafeEntryName(asset.EntryName) || asset.ByteSize < 0) throw new InvalidDataException("迁移包资源描述无效。");
                 var entry = archive.GetEntry(asset.EntryName) ?? throw new InvalidDataException($"迁移包缺少资源：{asset.OriginalName}");
                 if (entry.Length != asset.ByteSize) throw new InvalidDataException($"资源大小校验失败：{asset.OriginalName}");
                 total = checked(total + entry.Length);
+                if (total > MaxPackageBytes) throw new InvalidDataException("迁移包资源总大小校验失败。");
+                entries.Add(asset.EntryName, entry);
+            }
+            if (total != manifest.IncludedBytes) throw new InvalidDataException("迁移包资源总大小校验失败。");
+            foreach (var asset in manifest.Assets)
+            {
+                var entry = entries[asset.EntryName];
                 await using var content = entry.Open();
                 var hash = Convert.ToHexString(await SHA256.HashDataAsync(content, cancellationToken));
                 if (!hash.Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"资源校验失败：{asset.OriginalName}");
             }
-            if (total != manifest.IncludedBytes || total > MaxPackageBytes) throw new InvalidDataException("迁移包资源总大小校验失败。");
             return (archive, manifest);
         }
         catch
@@ -250,9 +283,10 @@ public sealed class PersonalConfigTransferService(
     }
 
     private static async Task<string?> MaterializeAsync(ZipArchive archive, PackageManifest manifest, string? entryName,
-        string importRoot, CancellationToken cancellationToken)
+        string importRoot, Dictionary<string, string> materializedAssets, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(entryName)) return null;
+        if (materializedAssets.TryGetValue(entryName, out var existing)) return existing;
         var asset = manifest.Assets.SingleOrDefault(candidate => candidate.EntryName == entryName)
             ?? throw new InvalidDataException("迁移包项目引用了未声明资源。");
         var entry = archive.GetEntry(entryName) ?? throw new InvalidDataException("迁移包资源缺失。");
@@ -260,7 +294,71 @@ public sealed class PersonalConfigTransferService(
         await using var input = entry.Open();
         await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
         await input.CopyToAsync(output, cancellationToken);
+        materializedAssets.Add(entryName, target);
         return target;
+    }
+
+    private static void ValidateManifestShape(PackageManifest manifest)
+    {
+        if (manifest.PackageId == Guid.Empty || manifest.Folders is null || manifest.Items is null || manifest.Assets is null ||
+            manifest.MissingFileCount < 0 || manifest.IncludedBytes < 0 || manifest.IncludedBytes > MaxPackageBytes ||
+            manifest.Folders.Count > MaxFolderCount || manifest.Items.Count > MaxItemCount || manifest.Assets.Count > MaxAssetCount)
+            throw new InvalidDataException("迁移包清单结构或数量无效。");
+
+        var folders = new HashSet<Guid>();
+        foreach (var folder in manifest.Folders)
+        {
+            if (folder is null || folder.Id == Guid.Empty || string.IsNullOrWhiteSpace(folder.Name) || !folders.Add(folder.Id))
+                throw new InvalidDataException("迁移包文件夹无效。");
+        }
+
+        var items = new HashSet<Guid>();
+        var references = 0;
+        foreach (var item in manifest.Items)
+        {
+            if (item is null || item.Id == Guid.Empty || !items.Add(item.Id) || !folders.Contains(item.FolderId) ||
+                !Enum.IsDefined(typeof(CollectionItemType), item.ItemType) || item.ContentSize < 0 || item.FileEntries is null)
+                throw new InvalidDataException("迁移包项目无效。");
+            var type = (CollectionItemType)item.ItemType;
+            if (type == CollectionItemType.Link)
+            {
+                try { CollectionLink.Normalize(item.Url); }
+                catch (ArgumentException exception) { throw new InvalidDataException("迁移包链接无效。", exception); }
+            }
+            if (type is not CollectionItemType.Image && (item.ImageEntry is not null || item.ThumbnailEntry is not null))
+                throw new InvalidDataException("迁移包项目资源类型不匹配。");
+            if (type != CollectionItemType.File && item.FileEntries.Count != 0)
+                throw new InvalidDataException("迁移包项目资源类型不匹配。");
+            if (item.ImageEntry is not null) references = checked(references + 1);
+            if (item.ThumbnailEntry is not null) references = checked(references + 1);
+            if (item.FileEntries.Any(string.IsNullOrWhiteSpace) ||
+                item.FileEntries.Distinct(StringComparer.Ordinal).Count() != item.FileEntries.Count)
+                throw new InvalidDataException("迁移包文件资源引用重复或无效。");
+            references = checked(references + item.FileEntries.Count);
+        }
+        if (references > MaxAssetReferences)
+            throw new InvalidDataException("迁移包资源引用过多。");
+
+        var assetNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var asset in manifest.Assets)
+        {
+            if (asset is null || !IsSafeEntryName(asset.EntryName) || string.IsNullOrWhiteSpace(asset.OriginalName) || string.IsNullOrWhiteSpace(asset.Sha256) ||
+                asset.Sha256.Length != 64 || !asset.Sha256.All(Uri.IsHexDigit) || !assetNames.Add(asset.EntryName))
+                throw new InvalidDataException("迁移包资源描述无效。");
+        }
+        foreach (var item in manifest.Items)
+        {
+            foreach (var reference in EnumerateAssetReferences(item))
+                if (!assetNames.Contains(reference))
+                    throw new InvalidDataException("迁移包项目引用了未声明资源。");
+        }
+    }
+
+    private static IEnumerable<string> EnumerateAssetReferences(PackageItem item)
+    {
+        if (item.ImageEntry is not null) yield return item.ImageEntry;
+        if (item.ThumbnailEntry is not null) yield return item.ThumbnailEntry;
+        foreach (var entry in item.FileEntries) yield return entry;
     }
 
     private static IReadOnlyList<string> ParseFiles(CollectionItem item)

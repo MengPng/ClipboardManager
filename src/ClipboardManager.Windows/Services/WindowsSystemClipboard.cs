@@ -10,7 +10,7 @@ using System.Windows.Media.Imaging;
 
 namespace ClipboardManager.Windows.Services;
 
-public sealed class WindowsSystemClipboard : ISystemClipboard
+public sealed class WindowsSystemClipboard : ISystemClipboard, IClipboardTextRewriter
 {
     private static readonly TimeSpan[] RetryDelays =
     [
@@ -28,22 +28,47 @@ public sealed class WindowsSystemClipboard : ISystemClipboard
     // dispatcher while our own read still holds the clipboard open. Serialize every access.
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    public Task<ClipboardPayload> ReadAsync(CancellationToken cancellationToken = default) => InvokeOnStaAsync(() =>
+    public async Task<ClipboardPayload> ReadAsync(CancellationToken cancellationToken = default)
+    {
+        var material = await InvokeOnStaAsync(ReadMaterial, cancellationToken);
+        if (material.Image is null) return material.Payload;
+
+        // Clipboard/OLE acquisition stays on the dispatcher. PNG encoding only touches a frozen
+        // bitmap and can safely run elsewhere without holding the clipboard access gate.
+        var imageBytes = await Task.Run(() => EncodePng(material.Image), cancellationToken);
+        return new ClipboardPayload(ClipboardPayloadType.Image, ImageBytes: imageBytes, ImageMimeType: "image/png");
+    }
+
+    private static ClipboardReadMaterial ReadMaterial()
     {
         if (System.Windows.Clipboard.ContainsFileDropList())
-            return new ClipboardPayload(ClipboardPayloadType.Files, Files: System.Windows.Clipboard.GetFileDropList().Cast<string>().ToArray());
+            return new ClipboardReadMaterial(new ClipboardPayload(ClipboardPayloadType.Files, Files: System.Windows.Clipboard.GetFileDropList().Cast<string>().ToArray()));
         if (System.Windows.Clipboard.ContainsImage())
         {
             var image = System.Windows.Clipboard.GetImage();
-            if (image is null) return new ClipboardPayload(ClipboardPayloadType.None);
-            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image));
-            using var stream = new MemoryStream(); encoder.Save(stream);
-            return new ClipboardPayload(ClipboardPayloadType.Image, ImageBytes: stream.ToArray(), ImageMimeType: "image/png");
+            if (image is null) return new ClipboardReadMaterial(new ClipboardPayload(ClipboardPayloadType.None));
+            if (!ClipboardResourceLimits.TryEstimateBitmapBytes(
+                    image.PixelWidth, image.PixelHeight, image.Format.BitsPerPixel, out _))
+                throw new InvalidOperationException("剪切板图片解码后超过 64 MiB 安全限制。");
+            var frozen = (BitmapSource)image.Clone();
+            frozen.Freeze();
+            return new ClipboardReadMaterial(new ClipboardPayload(ClipboardPayloadType.None), frozen);
         }
         if (System.Windows.Clipboard.ContainsText(System.Windows.TextDataFormat.UnicodeText))
-            return new ClipboardPayload(ClipboardPayloadType.Text, Text: System.Windows.Clipboard.GetText(System.Windows.TextDataFormat.UnicodeText));
-        return new ClipboardPayload(ClipboardPayloadType.None);
-    }, cancellationToken);
+            return new ClipboardReadMaterial(new ClipboardPayload(ClipboardPayloadType.Text, Text: System.Windows.Clipboard.GetText(System.Windows.TextDataFormat.UnicodeText)));
+        return new ClipboardReadMaterial(new ClipboardPayload(ClipboardPayloadType.None));
+    }
+
+    private static byte[] EncodePng(BitmapSource image)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(image));
+        using var stream = new BoundedMemoryStream(ClipboardResourceLimits.MaxEncodedImageBytes);
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    private sealed record ClipboardReadMaterial(ClipboardPayload Payload, BitmapSource? Image = null);
 
     public async Task<string?> ReadTextAsync(CancellationToken cancellationToken = default) => (await ReadAsync(cancellationToken)).Text;
 
@@ -62,11 +87,48 @@ public sealed class WindowsSystemClipboard : ISystemClipboard
         return window is null ? IntPtr.Zero : new WindowInteropHelper(window).Handle;
     }
 
+    public Task<bool> TryReplaceTextAsync(string expectedText, uint expectedSequence, string replacement,
+        CancellationToken cancellationToken = default) => InvokeOnStaAsync(() =>
+    {
+        var owner = GetClipboardOwnerWindow();
+        if (owner == IntPtr.Zero) throw new InvalidOperationException("剪切板窗口尚未就绪。");
+        if (!NativeMethods.OpenClipboard(owner)) throw new ExternalException("系统剪切板被占用。", unchecked((int)0x800401D0));
+        try
+        {
+            if (NativeMethods.GetClipboardSequenceNumber() != expectedSequence) return false;
+            var handle = NativeMethods.GetClipboardData(NativeMethods.CfUnicodeText);
+            if (handle == IntPtr.Zero) return false;
+            var pointer = NativeMethods.GlobalLock(handle);
+            if (pointer == IntPtr.Zero) return false;
+            string? current;
+            try { current = Marshal.PtrToStringUni(pointer); }
+            finally { NativeMethods.GlobalUnlock(handle); }
+            if (!string.Equals(current, expectedText, StringComparison.Ordinal)) return false;
+            // Allocation and replacement occur while holding the same lock as the comparison.
+            if (!TryWriteTextUnderLock(replacement))
+            {
+                var restored = TryWriteTextUnderLock(expectedText);
+                throw new InvalidOperationException(restored
+                    ? "计算结果写入失败，已恢复原算式，请稍后重试。"
+                    : "计算结果写入失败，原内容恢复也失败；请重新复制。",
+                    new ExternalException("系统剪切板写入失败。", unchecked((int)0x800401D0)));
+            }
+            return true;
+        }
+        finally { NativeMethods.CloseClipboard(); }
+    }, cancellationToken);
+
     private static bool TryWriteTextDirect(string text, IntPtr ownerWindow)
     {
         // Passing NULL here makes EmptyClipboard set the owner to NULL, after which
         // SetClipboardData can fail. The app's message window is a stable owner.
         if (ownerWindow == IntPtr.Zero || !NativeMethods.OpenClipboard(ownerWindow)) return false;
+        try { return TryWriteTextUnderLock(text); }
+        finally { NativeMethods.CloseClipboard(); }
+    }
+
+    private static bool TryWriteTextUnderLock(string text)
+    {
         var block = IntPtr.Zero;
         try
         {
@@ -91,7 +153,6 @@ public sealed class WindowsSystemClipboard : ISystemClipboard
         finally
         {
             if (block != IntPtr.Zero) NativeMethods.GlobalFree(block);
-            NativeMethods.CloseClipboard();
         }
     }
 

@@ -13,6 +13,7 @@ public sealed class AppPaths
         LogsPath = Path.Combine(Root, "logs");
         BlobsPath = Path.Combine(Root, "blobs");
         ThumbnailsPath = Path.Combine(Root, "thumbnails");
+        ImportsPath = Path.Combine(Root, "imports");
     }
 
     public string Root { get; }
@@ -22,6 +23,7 @@ public sealed class AppPaths
     public string LogsPath { get; }
     public string BlobsPath { get; }
     public string ThumbnailsPath { get; }
+    public string ImportsPath { get; }
 
     public void EnsureCreated()
     {
@@ -29,5 +31,6 @@ public sealed class AppPaths
         Directory.CreateDirectory(LogsPath);
         Directory.CreateDirectory(BlobsPath);
         Directory.CreateDirectory(ThumbnailsPath);
+        Directory.CreateDirectory(ImportsPath);
     }
 }

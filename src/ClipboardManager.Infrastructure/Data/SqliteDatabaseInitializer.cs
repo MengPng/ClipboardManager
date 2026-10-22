@@ -9,7 +9,7 @@ public sealed class SqliteDatabaseInitializer(
     ILogger<SqliteDatabaseInitializer> logger,
     DatabaseSafetyBackup? safetyBackup = null) : IDatabaseInitializer
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 7;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -64,6 +64,20 @@ public sealed class SqliteDatabaseInitializer(
         {
             await ApplyVersion5Async(connection, cancellationToken);
             await ExecuteAsync(connection, "PRAGMA user_version=5;", cancellationToken);
+            version = 5;
+        }
+
+        if (version < 6)
+        {
+            await ApplyVersion6Async(connection, cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA user_version=6;", cancellationToken);
+            version = 6;
+        }
+
+        if (version < 7)
+        {
+            await ApplyVersion7Async(connection, cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA user_version=7;", cancellationToken);
         }
 
         logger.LogInformation("Local database schema is at version {Version}.", CurrentVersion);
@@ -381,6 +395,71 @@ public sealed class SqliteDatabaseInitializer(
             );
             CREATE INDEX IF NOT EXISTS ix_cloud_workspace_mappings_state
                 ON cloud_workspace_mappings(cache_state, updated_at);
+            COMMIT;
+            """;
+        await ExecuteAsync(connection, sql, cancellationToken);
+    }
+
+    private static async Task ApplyVersion6Async(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS todo_tags (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL,
+                is_preset INTEGER NOT NULL DEFAULT 0,
+                sort_key REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT NULL,
+                FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+            );
+            CREATE TABLE IF NOT EXISTS todo_items (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                is_completed INTEGER NOT NULL DEFAULT 0,
+                completed_at TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT NULL,
+                FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+            );
+            CREATE TABLE IF NOT EXISTS todo_item_tags (
+                todo_id TEXT NOT NULL,
+                tag_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                PRIMARY KEY(todo_id, tag_id),
+                FOREIGN KEY(todo_id) REFERENCES todo_items(id),
+                FOREIGN KEY(tag_id) REFERENCES todo_tags(id),
+                FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_todo_tags_name
+                ON todo_tags(workspace_id, name COLLATE NOCASE) WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS ix_todo_tags_workspace
+                ON todo_tags(workspace_id, deleted_at, sort_key);
+            CREATE INDEX IF NOT EXISTS ix_todo_items_workspace
+                ON todo_items(workspace_id, deleted_at, is_completed, created_at DESC);
+            CREATE INDEX IF NOT EXISTS ix_todo_item_tags_tag
+                ON todo_item_tags(workspace_id, tag_id);
+            COMMIT;
+            """;
+        await ExecuteAsync(connection, sql, cancellationToken);
+    }
+
+    private static async Task ApplyVersion7Async(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var exists = connection.CreateCommand();
+        exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('workspaces','todo_tags','todo_item_tags');";
+        if (Convert.ToInt32(await exists.ExecuteScalarAsync(cancellationToken)) < 3) return;
+
+        const string sql = """
+            BEGIN;
+            DELETE FROM todo_item_tags
+            WHERE tag_id IN (SELECT id FROM todo_tags WHERE is_preset=1);
+            DELETE FROM todo_tags WHERE is_preset=1;
             COMMIT;
             """;
         await ExecuteAsync(connection, sql, cancellationToken);

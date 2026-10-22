@@ -9,14 +9,19 @@ public sealed class ClipboardRestoreService(
     ClipboardHistoryService historyService,
     SelfWriteGuard selfWriteGuard)
 {
+    public async Task CopyTextAsync(string text, CancellationToken cancellationToken = default)
+    {
+        selfWriteGuard.Expect(TextContentService.ComputeHash(text));
+        try { await systemClipboard.WriteTextAsync(text, cancellationToken); }
+        catch { selfWriteGuard.Clear(); throw; }
+    }
+
     public async Task RestoreAsync(ClipboardItem item, CancellationToken cancellationToken = default)
     {
         switch (item.ItemType)
         {
             case ClipboardItemType.Text when item.TextContent is not null:
-                selfWriteGuard.Expect(TextContentService.ComputeHash(item.TextContent));
-                try { await systemClipboard.WriteTextAsync(item.TextContent, cancellationToken); }
-                catch { selfWriteGuard.Clear(); throw; }
+                await CopyTextAsync(item.TextContent, cancellationToken);
                 break;
             case ClipboardItemType.Image when item.ImagePath is not null:
                 selfWriteGuard.Expect(ClipboardPayloadType.Image, item.ContentHash);

@@ -7,6 +7,25 @@ namespace ClipboardManager.Application.Tests;
 public sealed class ClipboardRestoreServiceTests
 {
     [Fact]
+    public async Task CopyTextAsync_PreservesExactBody_AndClearsGuardOnFailure()
+    {
+        var clipboard = new FakeSystemClipboard();
+        var guard = new SelfWriteGuard();
+        var history = new FakeHistoryRepository();
+        var service = new ClipboardRestoreService(clipboard,
+            new ClipboardHistoryService(history, new WorkspaceService(), new SettingsStore()), guard);
+        const string text = "  待办内容\r\n第二行 😀  ";
+        await service.CopyTextAsync(text);
+        Assert.Equal(text, clipboard.LastWrittenText);
+        Assert.Equal(0, history.MarkUsedCount);
+        Assert.True(guard.TryConsume(ClipboardPayloadType.Text, TextContentService.ComputeHash(text)));
+        Assert.False(guard.TryConsume(ClipboardPayloadType.Text, TextContentService.ComputeHash(text)));
+        clipboard.FailNext = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CopyTextAsync(text));
+        Assert.False(guard.TryConsume(ClipboardPayloadType.Text, TextContentService.ComputeHash(text)));
+    }
+
+    [Fact]
     public async Task RestoreAsync_ArmSelfWriteGuardAcrossPayloadTypes_AndClearsOnFailure()
     {
         var clipboard = new FakeSystemClipboard();
@@ -110,10 +129,12 @@ public sealed class ClipboardRestoreServiceTests
 
     private sealed class FakeHistoryRepository : IClipboardHistoryRepository
     {
+        public int MarkUsedCount { get; private set; }
         public Task<CaptureResult> CaptureTextAsync(TextCapture capture, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<int> CleanupAsync(Guid workspaceId, DateTimeOffset olderThan, int maxActiveItems, DateTimeOffset deletedAt, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<ClipboardItem?> GetAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult<ClipboardItem?>(null);
-        public Task MarkUsedAsync(Guid workspaceId, Guid itemId, DateTimeOffset usedAt, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task MarkUsedAsync(Guid workspaceId, Guid itemId, DateTimeOffset usedAt, CancellationToken cancellationToken = default)
+        { MarkUsedCount++; return Task.CompletedTask; }
         public Task<IReadOnlyList<ClipboardItem>> SearchAsync(ClipboardQuery query, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ClipboardItem>>([]);
         public Task SetFavoriteAsync(Guid workspaceId, Guid itemId, bool isFavorite, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SetPinnedAsync(Guid workspaceId, Guid itemId, bool isPinned, CancellationToken cancellationToken = default) => Task.CompletedTask;

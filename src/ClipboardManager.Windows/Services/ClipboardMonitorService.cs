@@ -14,11 +14,13 @@ namespace ClipboardManager.Windows.Services;
 public sealed class ClipboardMonitorService(
     ISystemClipboard systemClipboard,
     ClipboardPayloadCaptureService captureService,
+    ClipboardCalculationService calculationService,
     ForegroundApplicationService foregroundApplicationService,
     IAppSettingsStore settingsStore,
+    SelectionClipboardGate selectionGate,
     ILogger<ClipboardMonitorService> logger) : IDisposable
 {
-    private readonly Channel<ClipboardSource> _events = Channel.CreateBounded<ClipboardSource>(
+    private readonly Channel<ClipboardCaptureAttribution> _events = Channel.CreateBounded<ClipboardCaptureAttribution>(
         new BoundedChannelOptions(32)
         {
             SingleReader = true,
@@ -30,6 +32,7 @@ public sealed class ClipboardMonitorService(
     private HwndSource? _source;
     private IntPtr _windowHandle;
     private bool _registered;
+    private bool _disposed;
 
     private bool _manuallyPaused;
     private DateTimeOffset? _pausedUntil;
@@ -100,6 +103,8 @@ public sealed class ClipboardMonitorService(
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _pauseTimer?.Stop();
         _pauseTimer = null;
         if (_registered)
@@ -128,9 +133,15 @@ public sealed class ClipboardMonitorService(
     {
         if (message == NativeMethods.WmClipboardUpdate)
         {
-            if (!IsPaused)
+            var sequence = NativeMethods.GetClipboardSequenceNumber();
+            if (!IsPaused && !selectionGate.Observe(sequence))
             {
-                _events.Writer.TryWrite(foregroundApplicationService.GetCurrentSource());
+                // The foreground app is diagnostic context only. Attribution and privacy are
+                // based on the clipboard owner, which can differ while another app is active.
+                _events.Writer.TryWrite(new ClipboardCaptureAttribution(
+                    sequence,
+                    foregroundApplicationService.GetClipboardOwner(),
+                    foregroundApplicationService.GetCurrentSource()));
             }
 
             handled = false;
@@ -143,14 +154,25 @@ public sealed class ClipboardMonitorService(
     {
         try
         {
-            await foreach (var source in _events.Reader.ReadAllAsync(cancellationToken))
+            await foreach (var clipboardEvent in _events.Reader.ReadAllAsync(cancellationToken))
             {
+                var source = clipboardEvent.Owner.Source;
                 try
                 {
                     // Check before touching the clipboard, not only after materializing its payload.
                     var settings = await settingsStore.LoadAsync(cancellationToken);
-                    if (!CapturePrivacyPolicy.CanRead(settings, source, DateTimeOffset.UtcNow)) continue;
+                    if (!CapturePrivacyPolicy.CanRead(settings, source, DateTimeOffset.UtcNow, clipboardEvent.Owner.IsKnown)) continue;
+                    if (IsPaused || selectionGate.Observe(clipboardEvent.Sequence) ||
+                        !clipboardEvent.MatchesCurrent(
+                            NativeMethods.GetClipboardSequenceNumber(),
+                            foregroundApplicationService.GetClipboardOwner(),
+                            foregroundApplicationService.GetCurrentSource())) continue;
                     var payload = await systemClipboard.ReadAsync(cancellationToken);
+                    if (selectionGate.Observe(clipboardEvent.Sequence) ||
+                        !clipboardEvent.MatchesCurrent(
+                            NativeMethods.GetClipboardSequenceNumber(),
+                            foregroundApplicationService.GetClipboardOwner(),
+                            foregroundApplicationService.GetCurrentSource())) continue;
                     var result = await captureService.CaptureAsync(payload, source, cancellationToken);
                     if (result.Disposition is CaptureDisposition.Created or CaptureDisposition.Merged or CaptureDisposition.Restored)
                     {
@@ -158,8 +180,10 @@ public sealed class ClipboardMonitorService(
                             "Captured clipboard payload {Disposition}; item {ItemId}; source {Source}; bytes {Bytes}.",
                             result.Disposition,
                             result.Item?.Id,
-                            source.ProcessName,
+                            source.ProcessName ?? clipboardEvent.Foreground.ProcessName,
                             result.Item?.ContentSize);
+                        if (!IsPaused && payload.Type == ClipboardPayloadType.Text)
+                            await calculationService.TryCalculateAsync(payload.Text, clipboardEvent.Sequence, source, cancellationToken);
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

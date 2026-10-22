@@ -43,8 +43,7 @@ public sealed class CollectionService(
 
     public Task<CollectionItem> AddLinkAsync(Guid workspaceId, Guid folderId, string title, string url, CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-            throw new ArgumentException("链接必须是有效的 http 或 https 地址。", nameof(url));
+        var uri = new Uri(CollectionLink.Normalize(url));
         return repository.CreateItemAsync(workspaceId, new CreateCollectionItem(folderId, CollectionItemType.Link, title, Url: uri.AbsoluteUri, ContentHash: TextContentService.ComputeHash(uri.AbsoluteUri), ContentSize: uri.AbsoluteUri.Length), cancellationToken);
     }
 

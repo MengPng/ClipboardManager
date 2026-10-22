@@ -5,6 +5,7 @@ using ClipboardManager.Domain.Models;
 using ClipboardManager.Infrastructure.Paths;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ClipboardManager.Infrastructure.Data;
 
@@ -16,6 +17,10 @@ public sealed class StorageMaintenanceService(
     private const int BackupFormatVersion = 1;
     private const string DatabaseEntry = "clipboard.db";
     private const string ManifestEntry = "manifest.json";
+    internal int MaxArchiveEntries { get; set; } = 100_000;
+    internal long MaxEntryBytes { get; set; } = 2L * 1024 * 1024 * 1024;
+    internal long MaxTotalBytes { get; set; } = 20L * 1024 * 1024 * 1024;
+    internal long MaxManifestBytes { get; set; } = 64 * 1024;
 
     public Task<StorageUsageStats> GetUsageStatsAsync(CancellationToken cancellationToken = default)
     {
@@ -41,7 +46,10 @@ public sealed class StorageMaintenanceService(
         {
             await CreateDatabaseSnapshotAsync(snapshotPath, cancellationToken);
             var schemaVersion = await ValidateDatabaseAsync(snapshotPath, cancellationToken);
-            var manifest = new BackupManifest(BackupFormatVersion, schemaVersion, DateTimeOffset.UtcNow);
+            await ValidateCandidateAsync(snapshotPath, schemaVersion, cancellationToken);
+            await ValidateMetadataAsync(paths.Root, cancellationToken);
+            var manifest = new BackupManifest(BackupFormatVersion, schemaVersion, DateTimeOffset.UtcNow,
+                Path.GetFullPath(paths.Root), ImportsIncluded: true);
             await using (var stream = new FileStream(temporaryArchive, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, true))
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: false))
             {
@@ -50,6 +58,7 @@ public sealed class StorageMaintenanceService(
                 AddOptionalFile(archive, paths.DevicePath, "device.json");
                 AddDirectory(archive, paths.BlobsPath, "blobs", temporaryArchive, fullBackupPath, cancellationToken);
                 AddDirectory(archive, paths.ThumbnailsPath, "thumbnails", temporaryArchive, fullBackupPath, cancellationToken);
+                AddDirectory(archive, paths.ImportsPath, "imports", temporaryArchive, fullBackupPath, cancellationToken);
                 var entry = archive.CreateEntry(ManifestEntry, CompressionLevel.Optimal);
                 await using var output = entry.Open();
                 await JsonSerializer.SerializeAsync(output, manifest, cancellationToken: cancellationToken);
@@ -81,18 +90,29 @@ public sealed class StorageMaintenanceService(
     {
         var validated = await ValidateAndExtractAsync(backupPath, cancellationToken);
         var rollbackRoot = Path.Combine(paths.Root, ".restore-rollback-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(rollbackRoot);
+        var retainRollback = false;
         try
         {
+            Directory.CreateDirectory(rollbackRoot);
             await SnapshotLiveStateAsync(rollbackRoot, cancellationToken);
             try
             {
-                ReplaceLiveState(validated.ExtractedRoot, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                ReplaceLiveState(validated.ExtractedRoot, validated.HasImports, cancellationToken);
                 await ValidateDatabaseAsync(paths.DatabasePath, cancellationToken);
+                await VerifyStartupAsync(paths.DatabasePath, cancellationToken);
+                await ValidateMetadataAsync(paths.Root, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
             }
-            catch
+            catch (Exception restoreError)
             {
-                RestoreRollbackState(rollbackRoot);
+                try { RestoreRollbackState(rollbackRoot); }
+                catch (Exception rollbackError)
+                {
+                    retainRollback = true;
+                    logger.LogError(rollbackError, "Restore rollback failed; recovery snapshot retained at {RollbackRoot}.", rollbackRoot);
+                    throw new AggregateException("Restore failed. Recovery snapshot retained at " + rollbackRoot, restoreError, rollbackError);
+                }
                 throw;
             }
 
@@ -101,7 +121,7 @@ public sealed class StorageMaintenanceService(
         finally
         {
             TryDeleteDirectory(validated.ExtractedRoot);
-            TryDeleteDirectory(rollbackRoot);
+            if (!retainRollback) TryDeleteDirectory(rollbackRoot);
         }
     }
 
@@ -179,19 +199,41 @@ public sealed class StorageMaintenanceService(
         {
             BackupManifest? manifest = null;
             using var archive = ZipFile.OpenRead(fullPath);
+            if (archive.Entries.Count > MaxArchiveEntries) throw new InvalidDataException("Backup has too many entries.");
+            long totalBytes = 0;
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in archive.Entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var normalized = entry.FullName.Replace('\\', '/');
-                if (string.IsNullOrEmpty(normalized) || normalized.EndsWith('/')) continue;
+                if (string.IsNullOrEmpty(normalized)) throw new InvalidDataException("Empty archive entry.");
+                if (normalized.EndsWith('/'))
+                {
+                    if (!IsAllowedEntry(normalized + "_")) throw new InvalidDataException("Unsafe archive directory.");
+                    GetContainedPath(extractedRoot, normalized.TrimEnd('/'));
+                    continue;
+                }
                 if (!seen.Add(normalized)) throw new InvalidDataException($"Duplicate archive entry: {normalized}");
                 if (!IsAllowedEntry(normalized)) throw new InvalidDataException($"Unsupported or unsafe archive entry: {normalized}");
+                var limit = normalized == ManifestEntry ? Math.Min(MaxEntryBytes, MaxManifestBytes) : MaxEntryBytes;
+                if (entry.Length > limit || entry.Length > MaxTotalBytes - totalBytes)
+                    throw new InvalidDataException("Backup exceeds extraction limits.");
                 var destination = GetContainedPath(extractedRoot, normalized);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 await using var input = entry.Open();
                 await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
-                await input.CopyToAsync(output, cancellationToken);
+                var buffer = new byte[81920];
+                long entryBytes = 0;
+                int read;
+                while ((read = await input.ReadAsync(buffer, cancellationToken)) != 0)
+                {
+                    if (read > limit - entryBytes || read > MaxTotalBytes - totalBytes)
+                        throw new InvalidDataException("Backup exceeds extraction limits.");
+                    entryBytes += read;
+                    totalBytes += read;
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
+                if (entryBytes != entry.Length) throw new InvalidDataException("Archive entry length mismatch.");
             }
             var manifestPath = Path.Combine(extractedRoot, ManifestEntry);
             if (!File.Exists(manifestPath) || !File.Exists(Path.Combine(extractedRoot, DatabaseEntry)))
@@ -203,7 +245,14 @@ public sealed class StorageMaintenanceService(
             var actualSchema = await ValidateDatabaseAsync(Path.Combine(extractedRoot, DatabaseEntry), cancellationToken);
             if (actualSchema != manifest.SchemaVersion)
                 throw new InvalidDataException("Backup manifest schema version does not match the database.");
-            return new ValidatedBackup(extractedRoot, manifest);
+            await ValidateMetadataAsync(extractedRoot, cancellationToken);
+            await ValidateCandidateAsync(Path.Combine(extractedRoot, DatabaseEntry), actualSchema, cancellationToken);
+            await RebaseManagedPathsAsync(extractedRoot, manifest.SourceRoot, cancellationToken);
+            var hasImports = manifest.ImportsIncluded || seen.Any(x => x.StartsWith("imports/", StringComparison.Ordinal));
+            return new ValidatedBackup(
+                extractedRoot,
+                manifest with { SchemaVersion = SqliteDatabaseInitializer.CurrentVersion },
+                hasImports);
         }
         catch
         {
@@ -214,11 +263,15 @@ public sealed class StorageMaintenanceService(
 
     private static bool IsAllowedEntry(string entry) =>
         entry is DatabaseEntry or ManifestEntry or "settings.json" or "device.json" ||
-        entry.StartsWith("blobs/", StringComparison.Ordinal) || entry.StartsWith("thumbnails/", StringComparison.Ordinal);
+        entry.StartsWith("blobs/", StringComparison.Ordinal) || entry.StartsWith("thumbnails/", StringComparison.Ordinal) ||
+        entry.StartsWith("imports/", StringComparison.Ordinal);
 
     private static string GetContainedPath(string root, string relative)
     {
         if (Path.IsPathRooted(relative)) throw new InvalidDataException("Archive entry is rooted.");
+        if (relative.Split('/').Any(part => part is "" or "." or ".." ||
+            part.EndsWith('.') || part.EndsWith(' ') || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+            throw new InvalidDataException("Unsafe archive entry name.");
         var fullRoot = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
         var full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
         if (!full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
@@ -246,6 +299,249 @@ public sealed class StorageMaintenanceService(
                 throw new InvalidDataException($"Unsupported SQLite schema version {version}.");
             return version;
         }
+    }
+
+    private static async Task ValidateMetadataAsync(string root, CancellationToken cancellationToken)
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var settingsPath = Path.Combine(root, "settings.json");
+        if (File.Exists(settingsPath))
+        {
+            await using var input = File.OpenRead(settingsPath);
+            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(input, options, cancellationToken)
+                ?? throw new InvalidDataException("Backup settings are empty.");
+            AppSettingsValidator.Validate(settings);
+        }
+        var devicePath = Path.Combine(root, "device.json");
+        if (File.Exists(devicePath))
+        {
+            await using var input = File.OpenRead(devicePath);
+            var device = await JsonSerializer.DeserializeAsync<DeviceIdentity>(input, options, cancellationToken);
+            if (device is null || device.DeviceId == Guid.Empty || string.IsNullOrWhiteSpace(device.DeviceName) ||
+                string.IsNullOrWhiteSpace(device.Platform) || device.CreatedAt == default)
+                throw new InvalidDataException("Backup device identity is invalid.");
+        }
+    }
+
+    private static SqliteConnection OpenCandidate(string databasePath, bool writable = false) => new(
+        new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath, Mode = writable ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadOnly,
+            Pooling = false, ForeignKeys = true
+        }.ConnectionString);
+
+    private static async Task ValidateCandidateAsync(string databasePath, int version, CancellationToken cancellationToken)
+    {
+        var expectedRoot = Path.Combine(Path.GetTempPath(), "ClipboardManager.Schema", Guid.NewGuid().ToString("N"));
+        var expectedPaths = new AppPaths(expectedRoot);
+        var candidatePaths = new AppPaths(Path.GetDirectoryName(databasePath)!);
+        var expectedFactory = new SqliteConnectionFactory(expectedPaths);
+        var candidateFactory = new SqliteConnectionFactory(candidatePaths);
+        try
+        {
+            await new SqliteDatabaseInitializer(expectedFactory, NullLogger<SqliteDatabaseInitializer>.Instance)
+                .InitializeAsync(cancellationToken);
+            await using var expected = OpenCandidate(expectedPaths.DatabasePath);
+            await expected.OpenAsync(cancellationToken);
+            // Check the claimed schema before migrations can create missing later-version tables.
+            await CheckSchemaAsync(databasePath, expected, version, cancellationToken);
+            if (version < SqliteDatabaseInitializer.CurrentVersion)
+                await new SqliteDatabaseInitializer(candidateFactory, NullLogger<SqliteDatabaseInitializer>.Instance)
+                    .InitializeAsync(cancellationToken);
+            await CheckSchemaAsync(databasePath, expected, SqliteDatabaseInitializer.CurrentVersion, cancellationToken);
+            await VerifyStartupAsync(databasePath, cancellationToken);
+            await CheckpointAsync(databasePath, cancellationToken);
+        }
+        finally
+        {
+            using (var connection = expectedFactory.Create()) SqliteConnection.ClearPool(connection);
+            using (var connection = candidateFactory.Create()) SqliteConnection.ClearPool(connection);
+            TryDeleteDirectory(expectedRoot);
+        }
+    }
+
+    private static int IntroducedVersion(string table) => table switch
+    {
+        "collection_folders" or "collection_items" => 2,
+        "sync_conflicts" or "cloud_workspaces_cache" or "cloud_members_cache" or "cloud_groups_cache" or "blob_transfers" => 4,
+        "cloud_workspace_mappings" => 5,
+        "todo_tags" or "todo_items" or "todo_item_tags" => 6,
+        _ => 1
+    };
+
+    private static string QuoteIdentifier(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
+
+    private static async Task CheckSchemaAsync(
+        string databasePath, SqliteConnection expected, int version, CancellationToken cancellationToken)
+    {
+        await using var actual = OpenCandidate(databasePath);
+        await actual.OpenAsync(cancellationToken);
+        await using (var unsafeObjects = actual.CreateCommand())
+        {
+            unsafeObjects.CommandText = "SELECT count(*) FROM sqlite_master WHERE type IN ('view','trigger');";
+            if (Convert.ToInt32(await unsafeObjects.ExecuteScalarAsync(cancellationToken)) != 0)
+                throw new InvalidDataException("Backup contains unsupported database views or triggers.");
+        }
+        var tables = new List<string>();
+        await using (var command = expected.CreateCommand())
+        {
+            command.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) tables.Add(reader.GetString(0));
+        }
+        foreach (var table in tables.Where(t => IntroducedVersion(t) <= version))
+        {
+            var expectedColumns = await ReadColumnsAsync(expected, table, cancellationToken);
+            var actualColumns = await ReadColumnsAsync(actual, table, cancellationToken);
+            foreach (var (name, signature) in expectedColumns)
+            {
+                if (table == "sync_operations" && version < 4 &&
+                    name is "next_attempt_at" or "error_code" or "lease_owner" or "lease_expires_at") continue;
+                if (!actualColumns.TryGetValue(name, out var found) || found != signature)
+                    throw new InvalidDataException($"Backup schema is missing or incompatible: {table}.{name}.");
+            }
+            foreach (var connection in new[] { expected, actual })
+            {
+                await using var query = connection.CreateCommand();
+                query.CommandText = $"SELECT * FROM {QuoteIdentifier(table)} LIMIT 0;";
+                await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            }
+            // Missing FK declarations would otherwise make foreign_key_check falsely pass.
+            var expectedKeys = await ReadForeignKeysAsync(expected, table, cancellationToken);
+            var actualKeys = await ReadForeignKeysAsync(actual, table, cancellationToken);
+            if (!expectedKeys.SequenceEqual(actualKeys))
+                throw new InvalidDataException($"Backup foreign key schema is incompatible: {table}.");
+        }
+        await CheckForeignKeysAsync(actual, cancellationToken);
+    }
+
+    private static async Task<Dictionary<string, string>> ReadColumnsAsync(
+        SqliteConnection connection, string table, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({QuoteIdentifier(table)});";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(reader.GetString(1), $"{reader.GetString(2).ToUpperInvariant()}:{reader.GetInt32(3)}:{reader.GetInt32(5)}");
+        return result;
+    }
+
+    private static async Task<string[]> ReadForeignKeysAsync(
+        SqliteConnection connection, string table, CancellationToken cancellationToken)
+    {
+        var result = new List<string>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA foreign_key_list({QuoteIdentifier(table)});";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(string.Join("|", Enumerable.Range(1, 7).Select(i => Convert.ToString(reader.GetValue(i)))));
+        return result.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+    }
+
+    private static async Task CheckForeignKeysAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA foreign_key_check;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken))
+            throw new InvalidDataException("Backup contains invalid foreign key references.");
+    }
+
+    private static async Task VerifyStartupAsync(string databasePath, CancellationToken cancellationToken)
+    {
+        await using var connection = OpenCandidate(databasePath);
+        await connection.OpenAsync(cancellationToken);
+        await CheckForeignKeysAsync(connection, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, workspace_type FROM workspaces LIMIT 1;
+            SELECT id, workspace_id, text_content, image_path, thumbnail_path, file_manifest
+                FROM clipboard_items WHERE deleted_at IS NULL ORDER BY captured_at DESC LIMIT 1;
+            SELECT id, workspace_id, folder_id, local_path FROM collection_items WHERE deleted_at IS NULL LIMIT 1;
+            SELECT id, title, is_completed FROM todo_items WHERE deleted_at IS NULL LIMIT 1;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        do { while (await reader.ReadAsync(cancellationToken)) { } }
+        while (await reader.NextResultAsync(cancellationToken));
+    }
+
+    private static async Task CheckpointAsync(string databasePath, CancellationToken cancellationToken)
+    {
+        await using var connection = OpenCandidate(databasePath, writable: true);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken) && reader.GetInt32(0) != 0)
+            throw new IOException("Candidate database checkpoint is busy.");
+    }
+
+    private async Task RebaseManagedPathsAsync(string extractedRoot, string? sourceRoot, CancellationToken cancellationToken)
+    {
+        // Legacy archives have no authoritative source root. Keep their paths rather than
+        // guessing that an external user file belongs to the application.
+        if (sourceRoot is null) return;
+        if (!Path.IsPathFullyQualified(sourceRoot)) throw new InvalidDataException("Backup source root must be absolute.");
+        var origin = Path.GetFullPath(sourceRoot);
+        string Rebase(string value)
+        {
+            if (!Path.IsPathFullyQualified(value)) return value;
+            var full = Path.GetFullPath(value);
+            foreach (var prefix in new[] { "blobs", "thumbnails", "imports" })
+            {
+                var managedRoot = Path.Combine(origin, prefix);
+                if (IsContained(managedRoot, full))
+                    return Path.Combine(Path.GetFullPath(paths.Root), prefix, Path.GetRelativePath(managedRoot, full));
+            }
+            return value;
+        }
+        await using var connection = OpenCandidate(Path.Combine(extractedRoot, DatabaseEntry), writable: true);
+        await connection.OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        foreach (var (table, columns) in new[]
+        {
+            ("clipboard_items", new[] { "image_path", "thumbnail_path", "file_manifest" }),
+            ("blobs", new[] { "local_path", "thumbnail_path" }),
+            ("collection_items", new[] { "local_path", "thumbnail_path", "file_manifest" })
+        })
+        {
+            var updates = new List<(string Id, string Column, string Value)>();
+            await using (var query = connection.CreateCommand())
+            {
+                query.Transaction = transaction;
+                query.CommandText = $"SELECT id,{string.Join(",", columns)} FROM {table};";
+                await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                    for (var i = 0; i < columns.Length; i++)
+                    {
+                        if (reader.IsDBNull(i + 1)) continue;
+                        var original = reader.GetString(i + 1);
+                        string updated;
+                        if (columns[i] == "file_manifest")
+                        {
+                            var files = JsonSerializer.Deserialize<string[]>(original)
+                                ?? throw new InvalidDataException("Backup file manifest must be an array.");
+                            if (files.Any(x => x is null)) throw new InvalidDataException("Backup file manifest contains null paths.");
+                            var mapped = files.Select(Rebase).ToArray();
+                            updated = files.SequenceEqual(mapped) ? original : JsonSerializer.Serialize(mapped);
+                        }
+                        else updated = Rebase(original);
+                        if (updated != original) updates.Add((reader.GetString(0), columns[i], updated));
+                    }
+            }
+            foreach (var update in updates)
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = $"UPDATE {table} SET {update.Column}=$value WHERE id=$id;";
+                command.Parameters.AddWithValue("$value", update.Value);
+                command.Parameters.AddWithValue("$id", update.Id);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        transaction.Commit();
+        await CheckpointAsync(Path.Combine(extractedRoot, DatabaseEntry), cancellationToken);
     }
 
     private async Task<HashSet<string>> GetReferencedManagedFilesAsync(CancellationToken cancellationToken)
@@ -320,9 +616,10 @@ public sealed class StorageMaintenanceService(
         CopyOptional(paths.DevicePath, Path.Combine(rollbackRoot, "device.json"));
         CopyDirectory(paths.BlobsPath, Path.Combine(rollbackRoot, "blobs"), cancellationToken);
         CopyDirectory(paths.ThumbnailsPath, Path.Combine(rollbackRoot, "thumbnails"), cancellationToken);
+        CopyDirectory(paths.ImportsPath, Path.Combine(rollbackRoot, "imports"), cancellationToken);
     }
 
-    private void ReplaceLiveState(string extractedRoot, CancellationToken cancellationToken)
+    private void ReplaceLiveState(string extractedRoot, bool replaceImports, CancellationToken cancellationToken)
     {
         SqliteConnection.ClearAllPools();
         paths.EnsureCreated();
@@ -331,6 +628,7 @@ public sealed class StorageMaintenanceService(
         ReplaceOptional(Path.Combine(extractedRoot, "device.json"), paths.DevicePath);
         ReplaceDirectory(Path.Combine(extractedRoot, "blobs"), paths.BlobsPath, cancellationToken);
         ReplaceDirectory(Path.Combine(extractedRoot, "thumbnails"), paths.ThumbnailsPath, cancellationToken);
+        if (replaceImports) ReplaceDirectory(Path.Combine(extractedRoot, "imports"), paths.ImportsPath, cancellationToken);
     }
 
     private void RestoreRollbackState(string rollbackRoot)
@@ -341,6 +639,7 @@ public sealed class StorageMaintenanceService(
         ReplaceOptional(Path.Combine(rollbackRoot, "device.json"), paths.DevicePath);
         ReplaceDirectory(Path.Combine(rollbackRoot, "blobs"), paths.BlobsPath, CancellationToken.None);
         ReplaceDirectory(Path.Combine(rollbackRoot, "thumbnails"), paths.ThumbnailsPath, CancellationToken.None);
+        ReplaceDirectory(Path.Combine(rollbackRoot, "imports"), paths.ImportsPath, CancellationToken.None);
     }
 
     private static void ReplaceOptional(string source, string destination)
@@ -413,6 +712,11 @@ public sealed class StorageMaintenanceService(
     private static void TryDeleteFile(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
     private static void TryDeleteDirectory(string path) { try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { } }
 
-    private sealed record BackupManifest(int BackupFormatVersion, int SchemaVersion, DateTimeOffset CreatedAtUtc);
-    private sealed record ValidatedBackup(string ExtractedRoot, BackupManifest Manifest);
+    private sealed record BackupManifest(
+        int BackupFormatVersion,
+        int SchemaVersion,
+        DateTimeOffset CreatedAtUtc,
+        string? SourceRoot = null,
+        bool ImportsIncluded = false);
+    private sealed record ValidatedBackup(string ExtractedRoot, BackupManifest Manifest, bool HasImports);
 }

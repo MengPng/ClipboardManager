@@ -32,6 +32,7 @@ public sealed class CollectionRestoreService(ISystemClipboard clipboard)
     public void OpenLink(CollectionItem item)
     {
         if (item.ItemType != CollectionItemType.Link || item.Url is null) throw new InvalidOperationException("该收藏不是链接。");
-        Process.Start(new ProcessStartInfo(item.Url) { UseShellExecute = true });
+        var address = CollectionLink.Normalize(item.Url);
+        Process.Start(new ProcessStartInfo(address) { UseShellExecute = true });
     }
 }
