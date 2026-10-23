@@ -130,8 +130,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _searchTimer.Stop();
             await RunActionAsync("刷新", () => IsTodoTabActive ? RefreshTodosAsync() : IsCollectionTabActive ? RefreshCollectionItemsAsync() : RefreshHistoryAsync());
         };
-        _captureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync()); });
-        _payloadCaptureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync()); });
+        _captureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); _collapsedPet?.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync()); });
+        _payloadCaptureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); _collapsedPet?.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync()); });
         _monitorService.PauseChanged += (_, paused) => Dispatcher.Invoke(() => UpdatePauseState(paused));
         SizeChanged += (_, _) =>
         {
@@ -151,7 +151,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         IsVisibleChanged += (_, _) =>
         {
-            if (!IsVisible && !_windowDockingService.IsTemporarilyHidden) _windowDockingService.Undock();
+            // Collapse hides this window on purpose and hands the dock to the pet.
+            // Undocking here is what left the pet frozen while the chat window moved.
+            if (!IsVisible && !_isCollapsed && !_windowDockingService.IsTemporarilyHidden)
+                _windowDockingService.Undock();
         };
         PreviewKeyDown += (_, e) =>
         {
@@ -542,27 +545,45 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _expandedMinHeight = MinHeight;
             if (_panelPet.Visibility == Visibility.Visible)
             {
-                // Pet mode: hide the panel entirely; a transparent pet-sized window
-                // stays on the desktop in its place.
-                FooterContentGrid.Children.Remove(_panelPet);
-                _collapsedPet = new Services.CollapsedPetWindow(_panelPet)
+                // Pet mode: hide the panel; the collapsed window hosts a DEDICATED
+                // pet instance (footer pet stays put) so cross-window reparenting can
+                // never break rendering or logical parenting.
+                try
                 {
-                    Left = Left,
-                    Top = Top,
-                };
-                _collapsedPet.ExpandRequested += () => Dispatcher.BeginInvoke(() => SetCollapsed(false));
-                _collapsedPet.HideRequested += () => Dispatcher.BeginInvoke(() =>
-                {
-                    // Park the panel where the pet was left so the next Alt+V
-                    // reopens at the dragged position, not the pre-collapse one.
-                    if (_collapsedPet is { } pet) { Left = pet.Left; Top = pet.Top; }
-                    _collapsedPet?.Close();
+                    _collapsedPet = new Services.CollapsedPetWindow
+                    {
+                        Left = Left,
+                        Top = Top,
+                    };
+                    _collapsedPet.SetListening(!_monitorService.IsPaused);
+                    _collapsedPet.ExpandRequested += () => Dispatcher.BeginInvoke(() => SetCollapsed(false));
+                    _collapsedPet.HideRequested += () => Dispatcher.BeginInvoke(() =>
+                    {
+                        // Park the panel where the pet was left so the next Alt+V
+                        // reopens at the dragged position, not the pre-collapse one.
+                        if (_collapsedPet is { } pet) { Left = pet.Left; Top = pet.Top; }
+                        _collapsedPet?.Close();
+                        Hide();
+                    });
+                    _collapsedPet.Closed += OnCollapsedPetClosed;
+                    // Hide() used to undock before the pet could inherit the target.
+                    // Show the pet first, then hand the live dock across.
+                    var dockedToChat = _windowDockingService.IsDocked;
                     Hide();
-                });
-                _collapsedPet.Closed += OnCollapsedPetClosed;
-                _windowDockingService.Undock();
-                Hide();
-                _collapsedPet.Show();
+                    _collapsedPet.Show();
+                    if (dockedToChat) _windowDockingService.SwapPanel(_collapsedPet);
+                }
+                catch (Exception error)
+                {
+                    Serilog.Log.Error(error, "Collapse to pet window failed; rolled back");
+                    if (_collapsedPet is { } broken)
+                    {
+                        broken.Closed -= OnCollapsedPetClosed;
+                        broken.Close();
+                    }
+                    _collapsedPet = null;
+                    _isCollapsed = false;
+                }
                 return;
             }
             // Pet disabled: fall back to the compact title-bar strip.
@@ -589,12 +610,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         // Expanding from pet mode: reopen at the pet's parking spot.
+        var inheritDock = false;
         if (_collapsedPet is { } petWindow)
         {
+            inheritDock = _windowDockingService.IsDocked;
             Left = petWindow.Left;
             Top = petWindow.Top;
             _collapsedPet = null;
-            petWindow.Close(); // OnClosed detaches the pet; Closed handler restores it to the footer.
+            petWindow.Closed -= OnCollapsedPetClosed; // Expand owns the dock handoff.
+            if (inheritDock) _windowDockingService.SwapPanel(this);
+            petWindow.Close();
         }
         ResizeMode = ResizeMode.CanResize;
         MaxWidth = double.PositiveInfinity;
@@ -633,20 +658,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void OnCollapsedPetClosed(object? sender, EventArgs e)
     {
         _collapsedPet = null;
-        RestorePetToFooter();
-    }
-
-    private void RestorePetToFooter()
-    {
-        if (FooterContentGrid.Children.Contains(_panelPet)) return;
-        _panelPet.IsHitTestVisible = false;
-        _panelPet.Cursor = null;
-        _panelPet.ToolTip = "面板宠物";
-        _panelPet.Width = 24;
-        _panelPet.Height = 26;
-        _panelPet.Margin = new Thickness(8, 0, 8, 0);
-        Grid.SetColumn(_panelPet, 1);
-        FooterContentGrid.Children.Add(_panelPet);
+        // A closed window must never stay registered as the dock panel: the
+        // target-restore path would resurrect it and crash.
+        if (_windowDockingService.IsDocked) _windowDockingService.Undock();
     }
 
     private void UpdateCompactTitleBar()
@@ -1297,6 +1311,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PauseButton.IsChecked = paused;
         PauseButton.Content = paused ? "\uE768" : "\uE769";
         _panelPet.SetListening(!paused);
+        _collapsedPet?.SetListening(!paused);
     }
 }
 

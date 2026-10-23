@@ -93,6 +93,21 @@ internal static class Program
                 throw new InvalidOperationException("The panel pet rendered an empty frame; pack URI resource resolution failed in this host.");
             if (pet.Visibility != Visibility.Visible)
                 throw new InvalidOperationException("The panel pet must stay visible when its frames load.");
+            // Same pet class hosted in the real transparent collapsed window: the
+            // visual tree must render before DWM composition can ever show it.
+            var collapsedProbe = new ClipboardManager.Windows.Services.CollapsedPetWindow { Left = 40, Top = 40 };
+            collapsedProbe.Show();
+            collapsedProbe.UpdateLayout();
+            System.Threading.Thread.Sleep(350);
+            var probeBitmap = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
+            probeBitmap.Render(collapsedProbe);
+            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.4", "layout", "CollapsedPetWindow-probe.png"));
+            var probeBytes = new byte[56 * 40 * 4];
+            probeBitmap.CopyPixels(probeBytes, 56 * 4, 0);
+            collapsedProbe.Close();
+            if (probeBytes.All(b => b == 0))
+                throw new InvalidOperationException("CollapsedPetWindow renders an empty visual tree; the pet never draws inside the collapsed host.");
+            Console.WriteLine("PASS CollapsedPetWindow visual probe");
             var output = Path.Combine(root, "artifacts", "review", "0.8.4", "layout");
             Directory.CreateDirectory(output);
             window.DataContext = new

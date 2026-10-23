@@ -185,6 +185,19 @@ public sealed class WindowDockingService : IDisposable
 
     public void Reposition() => QueuePositionUpdate();
 
+    /// <summary>
+    /// Hands the current dock target to another window without tearing down the
+    /// hooks — used when the collapsed desktop pet inherits the panel's docking,
+    /// and when the panel takes it back on expand. A fresh hook install would
+    /// lose position continuity for the same target.
+    /// </summary>
+    public void SwapPanel(Window panel)
+    {
+        _panel = panel;
+        _hiddenForTargetState = false;
+        QueuePositionUpdate();
+    }
+
     private void QueuePositionUpdate()
     {
         var panel = _panel;

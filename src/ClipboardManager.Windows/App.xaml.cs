@@ -29,6 +29,29 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Crash forensics first: the collapsed-pet flow involves real Win32 windowing,
+        // and a repro without a fingerprint is guesswork. Everything unhandled lands
+        // in the Serilog file before the process dies.
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            Log.Fatal(args.ExceptionObject as Exception, "Unhandled appdomain exception (isTerminating={IsTerminating})", args.IsTerminating);
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            Log.Fatal(args.Exception, "Unobserved task exception");
+            args.SetObserved();
+        };
+        DispatcherUnhandledException += (_, args) =>
+        {
+            Log.Fatal(args.Exception, "Dispatcher unhandled exception");
+            if (args.Exception.StackTrace?.Contains("CollapsedPetWindow") == true ||
+                args.Exception.StackTrace?.Contains("PetCompanion") == true ||
+                args.Exception.StackTrace?.Contains("SetCollapsed") == true)
+            {
+                // The desktop-pet surface must never take the whole app down; the main
+                // panel survives a broken pet gesture. Anything else still crashes loud.
+                args.Handled = true;
+            }
+        };
+
         if (TryWriteReleaseInfo(e.Args))
         {
             Shutdown();

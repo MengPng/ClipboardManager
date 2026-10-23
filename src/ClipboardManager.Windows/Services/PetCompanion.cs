@@ -109,13 +109,20 @@ public sealed class PetCompanion : System.Windows.Controls.Control
     private void EnsureFrames()
     {
         if (_frames is not null) return;
-        try { _ = Frames(); }
+        try
+        {
+            _ = Frames();
+            Serilog.Log.Information("Panel pet frames loaded: idle={Idle} sleep={Sleep} hop={Hop}",
+                _frames![0].Length, _frames[1].Length, _frames[2].Length);
+        }
         catch (Exception error)
         {
-            // Assets were not generated for this build; disappear quietly.
+            // Assets were not generated for this build; disappear quietly — but never
+            // silently: an invisible pet must leave a fingerprint in the log.
             LoadError = error;
             _assetsMissing = true;
             Visibility = Visibility.Collapsed;
+            Serilog.Log.Error(error, "Panel pet frames failed to load; pet hidden");
         }
     }
 
