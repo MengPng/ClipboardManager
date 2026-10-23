@@ -83,8 +83,8 @@ internal static class Program
             petHost.UpdateLayout();
             var petCheck = new RenderTargetBitmap(48, 52, 96, 96, PixelFormats.Pbgra32);
             petCheck.Render(petHost);
-            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.3", "layout"));
-            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.3", "layout", "PanelPet-probe.png"));
+            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.4", "layout"));
+            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.4", "layout", "PanelPet-probe.png"));
             var petBytes = new byte[48 * 52 * 4];
             petCheck.CopyPixels(petBytes, 48 * 4, 0);
             if (ClipboardManager.Windows.Services.PetCompanion.LoadError is not null)
@@ -93,7 +93,7 @@ internal static class Program
                 throw new InvalidOperationException("The panel pet rendered an empty frame; pack URI resource resolution failed in this host.");
             if (pet.Visibility != Visibility.Visible)
                 throw new InvalidOperationException("The panel pet must stay visible when its frames load.");
-            var output = Path.Combine(root, "artifacts", "review", "0.8.3", "layout");
+            var output = Path.Combine(root, "artifacts", "review", "0.8.4", "layout");
             Directory.CreateDirectory(output);
             window.DataContext = new
             {
