@@ -532,6 +532,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SetCollapsed(bool collapsed)
     {
+        if (collapsed == _isCollapsed) return;
         if (collapsed)
         {
             _isCollapsed = true;
@@ -614,7 +615,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Width = Math.Max(_expandedWidth, MinWidth);
         Height = Math.Max(_expandedHeight, MinHeight);
         Show();
-        Activate();
+        try { Activate(); }
+        catch (InvalidOperationException) { /* The window is mid-lifecycle; showing alone is enough. */ }
         _isCollapsed = false;
         UpdateCompactTitleBar();
         // Re-measure after the native window has applied the restored size.
