@@ -23,3 +23,8 @@ Thumbs.db
 .DS_Store
 .taste-skill/
 .dsh-graph/
+
+.agents/
+.claude/
+agent/
+skills-lock.json
