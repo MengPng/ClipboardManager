@@ -546,6 +546,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ExpandCollapseButton.Content = "\uE70D";
             ExpandCollapseButton.ToolTip = "展开剪切板";
             System.Windows.Automation.AutomationProperties.SetName(ExpandCollapseButton, "展开剪切板");
+            MovePetToCollapsedSurface();
         }
         else
         {
@@ -567,6 +568,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ExpandCollapseButton.Content = "\uE70E";
             ExpandCollapseButton.ToolTip = "收起为标题栏";
             System.Windows.Automation.AutomationProperties.SetName(ExpandCollapseButton, "收起剪切板");
+            RestorePetToFooter();
             _isCollapsed = false;
             UpdateCompactTitleBar();
             // Re-measure after the native window has applied the restored size.
@@ -580,6 +582,53 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }));
         }
         _windowDockingService.Reposition();
+    }
+
+    // Collapsed mode turns the window into "a pet sitting on the desktop": the pet
+    // takes the title icon's seat at 56x40 and becomes the expand affordance itself.
+    // The footer keeps the quiet 24x26 companion when expanded.
+    private void MovePetToCollapsedSurface()
+    {
+        bool petOn = _panelPet.Visibility == Visibility.Visible;
+        WindowTitleIcon.Visibility = petOn ? Visibility.Collapsed : Visibility.Visible;
+        if (!petOn) return;
+        FooterContentGrid.Children.Remove(_panelPet);
+        _panelPet.Width = 56;
+        _panelPet.Height = 40;
+        _panelPet.Margin = new Thickness(0);
+        _panelPet.ToolTip = "展开剪切板";
+        _panelPet.IsHitTestVisible = true;
+        _panelPet.Cursor = System.Windows.Input.Cursors.Hand;
+        _panelPet.MouseLeftButtonDown += PetExpand_Click;
+        OverlayHost.Children.Add(_panelPet);
+        Canvas.SetLeft(_panelPet, 2);
+        Canvas.SetTop(_panelPet, 3);
+    }
+
+    private void RestorePetToFooter()
+    {
+        WindowTitleIcon.Visibility = Visibility.Visible;
+        if (ReferenceEquals(_panelPet.Parent, OverlayHost))
+        {
+            OverlayHost.Children.Remove(_panelPet);
+            _panelPet.MouseLeftButtonDown -= PetExpand_Click;
+            _panelPet.IsHitTestVisible = false;
+            _panelPet.Cursor = null;
+            _panelPet.ToolTip = "面板宠物";
+        }
+        if (!FooterContentGrid.Children.Contains(_panelPet))
+        {
+            _panelPet.Width = 24;
+            _panelPet.Height = 26;
+            _panelPet.Margin = new Thickness(8, 0, 8, 0);
+            Grid.SetColumn(_panelPet, 1);
+            FooterContentGrid.Children.Add(_panelPet);
+        }
+    }
+
+    private void PetExpand_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_isCollapsed) ExpandCollapseButton_Click(sender, e);
     }
 
     private void UpdateCompactTitleBar()

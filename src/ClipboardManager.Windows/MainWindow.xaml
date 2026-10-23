@@ -38,7 +38,7 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Margin="12,0,4,0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Image Source="pack://application:,,,/ClipboardManager;component/Assets/AppIcon.ico"
+                    <Image x:Name="WindowTitleIcon" Source="pack://application:,,,/ClipboardManager;component/Assets/AppIcon.ico"
                            Width="16" Height="16" VerticalAlignment="Center" Stretch="Uniform" />
                     <TextBlock x:Name="WindowTitleText" Margin="6,0,0,0" Style="{StaticResource TitleTextStyle}" Text="剪切板" />
                 </StackPanel>
@@ -661,6 +661,12 @@
                                Text="Enter 使用" />
                 </Grid>
             </Border>
+
+            <!-- Collapsed-mode stage for the enlarged pet; last child so it paints
+                 above every row. The canvas itself stays hit-testable so the pet
+                 child can opt in while collapsed; empty canvas areas pass clicks
+                 through because the background is null. -->
+            <Canvas x:Name="OverlayHost" Grid.Row="0" Grid.RowSpan="4" ClipToBounds="True" />
         </Grid>
     </Border>
 </Window>
