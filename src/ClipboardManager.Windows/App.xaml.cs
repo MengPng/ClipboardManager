@@ -1,4 +1,4 @@
-﻿using ClipboardManager.Application;
+using ClipboardManager.Application;
 using ClipboardManager.Application.Services;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Infrastructure;
@@ -354,7 +354,11 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (MainWindow is ClipboardManager.Windows.MainWindow clipboardWindow) clipboardWindow.RememberPasteTarget();
+        if (MainWindow is ClipboardManager.Windows.MainWindow clipboardWindow)
+        {
+            clipboardWindow.RememberPasteTarget();
+            clipboardWindow.ExpandFromCollapse();
+        }
         var docking = _host?.Services.GetService<WindowDockingService>();
         var docked = preferChatWindowDocking && docking?.TryDockToForeground(MainWindow) == true;
         MainWindow.Show();

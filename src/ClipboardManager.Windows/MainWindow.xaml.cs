@@ -38,6 +38,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
     private bool _allowClose, _favoritesOnly, _pinnedOnly, _refreshingFolders, _isPinnedTopmost;
     private bool _isCollapsed;
+    private Services.CollapsedPetWindow? _collapsedPet;
     private double _expandedWidth = 340;
     private double _expandedHeight = 540;
     private double _expandedMinWidth = 340;
@@ -106,6 +107,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         Grid.SetColumn(_panelPet, 1);
         FooterContentGrid.Children.Add(_panelPet);
+        Closed += (_, _) => _collapsedPet?.Close();
         var selectionSettings = new SelectionAiSettingsPanel(_settingsStore, _credentialVault);
         selectionSettings.Saved += async (_, _) =>
         {
@@ -519,15 +521,43 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch { /* A settings write failure must not disrupt UI toggle. */ }
     }
 
-    private void ExpandCollapseButton_Click(object sender, RoutedEventArgs e)
+    private void ExpandCollapseButton_Click(object sender, RoutedEventArgs e) => SetCollapsed(!_isCollapsed);
+
+    /// <summary>Used by the global hotkey and the single-instance wake-up: showing the
+    /// panel while it is collapsed must restore the expanded form, not the strip.</summary>
+    public void ExpandFromCollapse()
     {
-        if (!_isCollapsed)
+        if (_isCollapsed) SetCollapsed(false);
+    }
+
+    private void SetCollapsed(bool collapsed)
+    {
+        if (collapsed)
         {
             _isCollapsed = true;
             _expandedWidth = Math.Max(ActualWidth, _expandedMinWidth);
             _expandedHeight = Math.Max(ActualHeight, _expandedMinHeight);
             _expandedMinWidth = MinWidth;
             _expandedMinHeight = MinHeight;
+            if (_panelPet.Visibility == Visibility.Visible)
+            {
+                // Pet mode: hide the panel entirely; a transparent pet-sized window
+                // stays on the desktop in its place.
+                FooterContentGrid.Children.Remove(_panelPet);
+                _collapsedPet = new Services.CollapsedPetWindow(_panelPet)
+                {
+                    Left = Left,
+                    Top = Top,
+                };
+                _collapsedPet.ExpandRequested += () => Dispatcher.BeginInvoke(() => SetCollapsed(false));
+                _collapsedPet.HideRequested += () => Dispatcher.BeginInvoke(() => { _collapsedPet?.Close(); Hide(); });
+                _collapsedPet.Closed += OnCollapsedPetClosed;
+                _windowDockingService.Undock();
+                Hide();
+                _collapsedPet.Show();
+                return;
+            }
+            // Pet disabled: fall back to the compact title-bar strip.
             MainContentRow.Height = new GridLength(0);
             FooterRow.Height = new GridLength(0);
             StatusRow.Height = new GridLength(0);
@@ -546,89 +576,68 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ExpandCollapseButton.Content = "\uE70D";
             ExpandCollapseButton.ToolTip = "展开剪切板";
             System.Windows.Automation.AutomationProperties.SetName(ExpandCollapseButton, "展开剪切板");
-            MovePetToCollapsedSurface();
+            _windowDockingService.Reposition();
+            return;
         }
-        else
+
+        // Expanding from pet mode: reopen at the pet's parking spot.
+        if (_collapsedPet is { } petWindow)
         {
-            ResizeMode = ResizeMode.CanResize;
-            MaxWidth = double.PositiveInfinity;
-            MinWidth = _expandedMinWidth;
-            MinHeight = _expandedMinHeight;
-            WindowTitleText.Visibility = Visibility.Visible;
-            ListeningStatusText.Visibility = Visibility.Visible;
-            CloseButton.Visibility = Visibility.Visible;
-            PinButton.Visibility = Visibility.Visible;
-            PauseButton.Visibility = Visibility.Visible;
-            SettingsButton.Visibility = Visibility.Visible;
-            MainContentRow.Height = new GridLength(1, GridUnitType.Star);
-            FooterRow.Height = GridLength.Auto;
-            StatusRow.Height = GridLength.Auto;
-            Width = Math.Max(_expandedWidth, MinWidth);
-            Height = Math.Max(_expandedHeight, MinHeight);
-            ExpandCollapseButton.Content = "\uE70E";
-            ExpandCollapseButton.ToolTip = "收起为标题栏";
-            System.Windows.Automation.AutomationProperties.SetName(ExpandCollapseButton, "收起剪切板");
-            RestorePetToFooter();
-            _isCollapsed = false;
-            UpdateCompactTitleBar();
-            // Re-measure after the native window has applied the restored size.
-            // The header's auto column previously only contained the expand button.
-            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
-            {
-                if (_isCollapsed) return;
-                TitleBar.InvalidateMeasure();
-                TitleBar.InvalidateArrange();
-                TitleBar.UpdateLayout();
-            }));
+            Left = petWindow.Left;
+            Top = petWindow.Top;
+            _collapsedPet = null;
+            petWindow.Close(); // OnClosed detaches the pet; Closed handler restores it to the footer.
         }
+        ResizeMode = ResizeMode.CanResize;
+        MaxWidth = double.PositiveInfinity;
+        MinWidth = _expandedMinWidth;
+        MinHeight = _expandedMinHeight;
+        WindowTitleText.Visibility = Visibility.Visible;
+        ListeningStatusText.Visibility = Visibility.Visible;
+        CloseButton.Visibility = Visibility.Visible;
+        PinButton.Visibility = Visibility.Visible;
+        PauseButton.Visibility = Visibility.Visible;
+        SettingsButton.Visibility = Visibility.Visible;
+        ExpandCollapseButton.Content = "\uE70E";
+        ExpandCollapseButton.ToolTip = "收起为标题栏";
+        System.Windows.Automation.AutomationProperties.SetName(ExpandCollapseButton, "收起剪切板");
+        MainContentRow.Height = new GridLength(1, GridUnitType.Star);
+        FooterRow.Height = GridLength.Auto;
+        StatusRow.Height = GridLength.Auto;
+        Width = Math.Max(_expandedWidth, MinWidth);
+        Height = Math.Max(_expandedHeight, MinHeight);
+        Show();
+        Activate();
+        _isCollapsed = false;
+        UpdateCompactTitleBar();
+        // Re-measure after the native window has applied the restored size.
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (_isCollapsed) return;
+            TitleBar.InvalidateMeasure();
+            TitleBar.InvalidateArrange();
+            TitleBar.UpdateLayout();
+        }));
         _windowDockingService.Reposition();
     }
 
-    // Collapsed mode turns the window into "a pet sitting on the desktop": the pet
-    // takes the title icon's seat at 56x40 and becomes the expand affordance itself.
-    // The footer keeps the quiet 24x26 companion when expanded.
-    private void MovePetToCollapsedSurface()
+    private void OnCollapsedPetClosed(object? sender, EventArgs e)
     {
-        bool petOn = _panelPet.Visibility == Visibility.Visible;
-        WindowTitleIcon.Visibility = petOn ? Visibility.Collapsed : Visibility.Visible;
-        if (!petOn) return;
-        FooterContentGrid.Children.Remove(_panelPet);
-        _panelPet.Width = 56;
-        _panelPet.Height = 40;
-        _panelPet.Margin = new Thickness(0);
-        _panelPet.ToolTip = "展开剪切板";
-        _panelPet.IsHitTestVisible = true;
-        _panelPet.Cursor = System.Windows.Input.Cursors.Hand;
-        _panelPet.MouseLeftButtonDown += PetExpand_Click;
-        OverlayHost.Children.Add(_panelPet);
-        Canvas.SetLeft(_panelPet, 2);
-        Canvas.SetTop(_panelPet, 3);
+        _collapsedPet = null;
+        RestorePetToFooter();
     }
 
     private void RestorePetToFooter()
     {
-        WindowTitleIcon.Visibility = Visibility.Visible;
-        if (ReferenceEquals(_panelPet.Parent, OverlayHost))
-        {
-            OverlayHost.Children.Remove(_panelPet);
-            _panelPet.MouseLeftButtonDown -= PetExpand_Click;
-            _panelPet.IsHitTestVisible = false;
-            _panelPet.Cursor = null;
-            _panelPet.ToolTip = "面板宠物";
-        }
-        if (!FooterContentGrid.Children.Contains(_panelPet))
-        {
-            _panelPet.Width = 24;
-            _panelPet.Height = 26;
-            _panelPet.Margin = new Thickness(8, 0, 8, 0);
-            Grid.SetColumn(_panelPet, 1);
-            FooterContentGrid.Children.Add(_panelPet);
-        }
-    }
-
-    private void PetExpand_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (_isCollapsed) ExpandCollapseButton_Click(sender, e);
+        if (FooterContentGrid.Children.Contains(_panelPet)) return;
+        _panelPet.IsHitTestVisible = false;
+        _panelPet.Cursor = null;
+        _panelPet.ToolTip = "面板宠物";
+        _panelPet.Width = 24;
+        _panelPet.Height = 26;
+        _panelPet.Margin = new Thickness(8, 0, 8, 0);
+        Grid.SetColumn(_panelPet, 1);
+        FooterContentGrid.Children.Add(_panelPet);
     }
 
     private void UpdateCompactTitleBar()
