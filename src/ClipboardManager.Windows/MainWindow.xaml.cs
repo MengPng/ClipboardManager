@@ -550,7 +550,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     Top = Top,
                 };
                 _collapsedPet.ExpandRequested += () => Dispatcher.BeginInvoke(() => SetCollapsed(false));
-                _collapsedPet.HideRequested += () => Dispatcher.BeginInvoke(() => { _collapsedPet?.Close(); Hide(); });
+                _collapsedPet.HideRequested += () => Dispatcher.BeginInvoke(() =>
+                {
+                    // Park the panel where the pet was left so the next Alt+V
+                    // reopens at the dragged position, not the pre-collapse one.
+                    if (_collapsedPet is { } pet) { Left = pet.Left; Top = pet.Top; }
+                    _collapsedPet?.Close();
+                    Hide();
+                });
                 _collapsedPet.Closed += OnCollapsedPetClosed;
                 _windowDockingService.Undock();
                 Hide();
