@@ -52,4 +52,29 @@ public sealed class SelectionAiSettingsTests
         Assert.Throws<ArgumentException>(() => SelectionAiSettings.Validate(
             config with { Templates = [website with { Url = "https://user@example.test" }] }));
     }
+
+    [Fact]
+    public void ExcludedProcessesDefaultToEmptyAndAcceptPlainNames()
+    {
+        SelectionAiSettings.Validate(new());
+        SelectionAiSettings.Validate(new() { ExcludedProcesses = ["Code", "WeChat"] });
+    }
+
+    [Theory]
+    [InlineData("C:\\apps\\Code.exe")]
+    [InlineData("apps/Code")]
+    [InlineData("app:name")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ExcludedProcessesRejectPathsAndBlankEntries(string entry) =>
+        Assert.Throws<ArgumentException>(() =>
+            SelectionAiSettings.Validate(new() { ExcludedProcesses = [entry] }));
+
+    [Fact]
+    public void ExcludedProcessesRejectMoreThanOneHundred()
+    {
+        var many = Enumerable.Range(0, 101).Select(i => $"app{i}").ToArray();
+        Assert.Throws<ArgumentException>(() => SelectionAiSettings.Validate(new() { ExcludedProcesses = many }));
+        SelectionAiSettings.Validate(new() { ExcludedProcesses = many.Take(100).ToArray() });
+    }
 }

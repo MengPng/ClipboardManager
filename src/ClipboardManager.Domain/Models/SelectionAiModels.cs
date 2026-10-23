@@ -25,6 +25,9 @@ public sealed record SelectionAiSettings
     public string Provider { get; init; } = "DeepSeek";
     public string BaseUrl { get; init; } = "https://api.deepseek.com";
     public string Model { get; init; } = "deepseek-flash";
+    // Process names (not paths) where selection AI stays inactive entirely.
+    // Empty means global: the feature activates in every application.
+    public IReadOnlyList<string> ExcludedProcesses { get; init; } = [];
     public IReadOnlyList<PromptTemplate> Templates { get; init; } =
     [
         new(new Guid("de57c176-a095-4840-9309-e149fb19e254"), "翻译", "请将以下内容翻译为简体中文，只输出译文：\n\n{text}"),
@@ -59,6 +62,9 @@ public sealed record SelectionAiSettings
             throw new ArgumentException("模型名称必须为 1–200 个字符。");
         if (string.IsNullOrWhiteSpace(settings.Hotkey))
             throw new ArgumentException("划词快捷键不能为空。");
+        if (settings.ExcludedProcesses is null || settings.ExcludedProcesses.Count > 100 ||
+            settings.ExcludedProcesses.Any(name => string.IsNullOrWhiteSpace(name) || name.Length > 100 || name.IndexOfAny(['\\', '/', ':']) >= 0))
+            throw new ArgumentException("划词排除列表最多 100 项，请填写进程名，不要填写完整路径。");
         if (settings.Templates is null || settings.Templates.Count > 50 ||
             settings.Templates.Select(p => p.Id).Distinct().Count() != settings.Templates.Count)
             throw new ArgumentException("提示词最多 50 条，且标识不能重复。");

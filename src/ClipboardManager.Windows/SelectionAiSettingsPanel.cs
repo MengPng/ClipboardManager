@@ -17,6 +17,13 @@ public sealed class SelectionAiSettingsPanel : System.Windows.Controls.UserContr
     private readonly CheckBox _hotkeyEnabled = new() { Content = "启用划词快捷键", Margin = new Thickness(0, 2, 0, 2) };
     private readonly CheckBox _floating = new() { Content = "选中文字后显示浮动操作条", Margin = new Thickness(0, 2, 0, 8) };
     private readonly TextBox _hotkey = new(), _url = new(), _model = new(), _name = new(), _targetUrl = new();
+    private readonly TextBox _excluded = new()
+    {
+        AcceptsReturn = true,
+        MinHeight = 64,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        ToolTip = "每行一个进程名",
+    };
     private readonly PasswordBox _key = new();
     private readonly ComboBox _provider = ProviderList();
     private readonly ComboBox _action = new()
@@ -109,7 +116,12 @@ public sealed class SelectionAiSettingsPanel : System.Windows.Controls.UserContr
         fields.Children.Add(_hotkeyEnabled);
         fields.Children.Add(_floating);
         Field(fields, "划词快捷键", _hotkey);
-        fields.Children.Add(SelectionAiUi.Label("拖选或双击后读取。暂停监听和排除应用同样生效。", true));
+        fields.Children.Add(SelectionAiUi.Label("拖选或双击后读取。暂停监听和捕获排除应用同样生效。", true));
+        Field(fields, "不启用划词的应用（每行一个进程名）", _excluded);
+        var excludeCurrent = SelectionAiUi.Button("排除当前前台应用", (_, _) => ExcludeCurrentApplication());
+        excludeCurrent.Margin = new Thickness(0, 4, 0, 0);
+        fields.Children.Add(excludeCurrent);
+        fields.Children.Add(SelectionAiUi.Label("默认全局启用；排除后该应用内快捷键与浮动条均不激活，也不读取所选内容。", true));
         Field(fields, "模型服务", _provider);
         Field(fields, "API Base URL", _url);
         Field(fields, "模型名称", _model);
@@ -301,6 +313,24 @@ public sealed class SelectionAiSettingsPanel : System.Windows.Controls.UserContr
         _websiteFields.Visibility = website ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    private void ExcludeCurrentApplication()
+    {
+        var processName = new ForegroundApplicationService().GetCurrentSource().ProcessName;
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            _status.Text = "未能识别当前前台应用，请手动填写进程名。";
+            return;
+        }
+        var existing = _excluded.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (existing.Any(name => string.Equals(name, processName, StringComparison.OrdinalIgnoreCase)))
+        {
+            _status.Text = $"{processName} 已在排除列表中。";
+            return;
+        }
+        _excluded.Text = string.Join(Environment.NewLine, existing.Append(processName).ToArray());
+        _status.Text = $"已添加 {processName}，保存后在该应用中划词不再激活。";
+    }
+
     private void EditBody()
     {
         var selected = SelectedIndex;
@@ -336,6 +366,7 @@ public sealed class SelectionAiSettingsPanel : System.Windows.Controls.UserContr
                 _hotkey.Text = value.Hotkey;
                 _hotkeyEnabled.IsChecked = value.HotkeyEnabled;
                 _floating.IsChecked = value.FloatingToolbarEnabled;
+                _excluded.Text = string.Join(Environment.NewLine, value.ExcludedProcesses);
                 _items.Clear();
                 _items.AddRange(value.Templates);
                 Select(_items.Count > 0 ? _items[0].Id : null, false);
@@ -371,7 +402,9 @@ public sealed class SelectionAiSettingsPanel : System.Windows.Controls.UserContr
                 Provider = (string)_provider.SelectedValue,
                 BaseUrl = _url.Text.Trim().TrimEnd('/'),
                 Model = _model.Text.Trim(),
-                Templates = _items.ToArray()
+                Templates = _items.ToArray(),
+                ExcludedProcesses = _excluded.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
             };
             SelectionAiSettings.Validate(config);
             if (config.HotkeyEnabled && HotkeyGesture.Parse(config.Hotkey) == HotkeyGesture.Parse(latest.GlobalHotkey))

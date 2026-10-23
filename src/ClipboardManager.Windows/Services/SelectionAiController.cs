@@ -13,7 +13,8 @@ namespace ClipboardManager.Windows.Services;
 
 public sealed class SelectionAiController(
     IAppSettingsStore settingsStore, ISelectionTextCapture capture,
-    ISelectionGestureMonitor gestures, SelectionAiService ai, ILogger<SelectionAiController> logger) : IDisposable
+    ISelectionGestureMonitor gestures, SelectionAiService ai, ForegroundApplicationService foreground,
+    ILogger<SelectionAiController> logger) : IDisposable
 {
     private readonly GlobalHotkeyService _hotkey = new(0x434E);
     private Window? _owner, _toolbar;
@@ -82,6 +83,14 @@ public sealed class SelectionAiController(
             var target = ClipboardManager.Windows.Interop.NativeMethods.GetForegroundWindow();
             await Task.Delay(100, _lifetime.Token);
             if (target != ClipboardManager.Windows.Interop.NativeMethods.GetForegroundWindow()) return;
+            // Per-app exclusion deactivates selection AI before any clipboard payload
+            // is read, and does so silently — the user asked for "not activated".
+            if (SelectionPrivacyPolicy.IsProcessExcluded(_settings.ExcludedProcesses,
+                    foreground.GetSourceForWindow(target).ProcessName))
+            {
+                logger.LogDebug("Selection AI skipped: foreground process is excluded");
+                return;
+            }
             var text = await capture.CaptureAsync(_owner, _lifetime.Token);
             if (string.IsNullOrWhiteSpace(text))
             {
