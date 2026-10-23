@@ -26,6 +26,7 @@ public sealed class SettingsWindow : Window
     private readonly CheckBox _paste = new() { Content = "使用记录时尝试自动粘贴（Ctrl+V）" };
     private readonly CheckBox _singleClick = new() { Content = "单击记录行直接粘贴到当前光标所在窗口" };
     private readonly CheckBox _compact = new() { Content = "紧凑列表（降低行高与缩略图尺寸，一屏显示更多记录）" };
+    private readonly CheckBox _pet = new() { Content = "在面板页脚显示小宠物（监听时眨眼、暂停时睡觉、捕获时跳一下）" };
     private readonly ComboBox _backupInterval = new() { MinWidth = 180 };
     private readonly Button _save = new() { Content = "保存", IsEnabled = false, Padding = new Thickness(20, 7, 20, 7) };
     private readonly Button _cancel = new() { Content = "取消", IsCancel = true, Padding = new Thickness(20, 7, 20, 7), Margin = new Thickness(0, 0, 8, 0) };
@@ -67,7 +68,7 @@ public sealed class SettingsWindow : Window
         AddHeading(fields, "桌面交互");
         AddField(fields, "全局呼出快捷键（例如 Alt+V、Ctrl+Shift+F2）", _hotkey);
         AddNote(fields, "快捷键修改在重启后生效；若已被其他应用占用，启动时会提示。数字主键写作 D0–D9。");
-        foreach (var box in new[] { _launch, _topmost, _hide, _paste, _singleClick, _compact }) { box.Margin = new Thickness(0, 5, 0, 5); fields.Children.Add(box); }
+        foreach (var box in new[] { _launch, _topmost, _hide, _paste, _singleClick, _compact, _pet }) { box.Margin = new Thickness(0, 5, 0, 5); fields.Children.Add(box); }
         AddNote(fields, "自动粘贴只会尝试发送到调用前窗口；失败时保留剪切板，请手动粘贴。开机启动项指向当前程序位置，移动程序后请重新保存设置。");
         AddHeading(fields, "隐私与应用排除");
         _excluded.AcceptsReturn = true; _excluded.TextWrapping = TextWrapping.Wrap; _excluded.VerticalScrollBarVisibility = ScrollBarVisibility.Auto; _excluded.MinHeight = 100;
@@ -120,6 +121,7 @@ public sealed class SettingsWindow : Window
             _paste.IsChecked = settings.EnableAutomaticPaste;
             _singleClick.IsChecked = settings.SingleClickToPaste;
             _compact.IsChecked = settings.CompactList;
+            _pet.IsChecked = settings.ShowPanelPet;
             _backupInterval.SelectedIndex = settings.AutoBackupIntervalHours switch { 24 => 1, 48 => 2, 72 => 3, _ => 0 };
             _save.IsEnabled = true;
         }
@@ -213,6 +215,7 @@ public sealed class SettingsWindow : Window
                 EnableAutomaticPaste = _paste.IsChecked == true,
                 SingleClickToPaste = _singleClick.IsChecked == true,
                 CompactList = _compact.IsChecked == true,
+                ShowPanelPet = _pet.IsChecked == true,
                 AutoBackupChoiceCompleted = true,
                 AutoBackupIntervalHours = _backupInterval.SelectedIndex switch { 1 => 24, 2 => 48, 3 => 72, _ => 0 }
             };

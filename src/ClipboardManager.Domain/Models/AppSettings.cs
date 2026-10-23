@@ -15,6 +15,7 @@ public sealed record AppSettings
     public bool SingleClickToPaste { get; init; }
     public bool CompactList { get; init; }
     public bool EnableClipboardCalculator { get; init; }
+    public bool ShowPanelPet { get; init; } = true;
     public bool IsCapturePaused { get; init; }
     public DateTimeOffset? CapturePausedUntil { get; init; }
     public IReadOnlyList<string> ExcludedProcesses { get; init; } = ["KeePass", "1Password", "Bitwarden"];

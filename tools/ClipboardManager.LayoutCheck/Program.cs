@@ -72,6 +72,27 @@ internal static class Program
             var pin = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("PinButton");
             if (pin.Visibility != Visibility.Visible || !pin.Focusable)
                 throw new InvalidOperationException("The global always-on-top toggle must remain visible and keyboard accessible.");
+            // The footer pet is added from code-behind (loose XAML here strips x:Class),
+            // so probe it directly: it must load its frames and render a non-empty cell.
+            var pet = new ClipboardManager.Windows.Services.PetCompanion { Width = 48, Height = 52 };
+            pet.SetListening(true);
+            var petHost = new Border { Width = 48, Height = 52, Background = new SolidColorBrush(Color.FromRgb(0xFA, 0xF9, 0xF5)), Child = pet };
+            // Unrooted host: manual measure/arrange, UpdateLayout alone renders nothing.
+            petHost.Measure(new Size(48, 52));
+            petHost.Arrange(new Rect(0, 0, 48, 52));
+            petHost.UpdateLayout();
+            var petCheck = new RenderTargetBitmap(48, 52, 96, 96, PixelFormats.Pbgra32);
+            petCheck.Render(petHost);
+            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.1", "layout"));
+            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.1", "layout", "PanelPet-probe.png"));
+            var petBytes = new byte[48 * 52 * 4];
+            petCheck.CopyPixels(petBytes, 48 * 4, 0);
+            if (ClipboardManager.Windows.Services.PetCompanion.LoadError is not null)
+                throw new InvalidOperationException($"Pet frame load failed: {ClipboardManager.Windows.Services.PetCompanion.LoadError.GetType().Name}: {ClipboardManager.Windows.Services.PetCompanion.LoadError.Message} | {ClipboardManager.Windows.Services.PetCompanion.LoadError}");
+            if (petBytes.All(b => b == 0))
+                throw new InvalidOperationException("The panel pet rendered an empty frame; pack URI resource resolution failed in this host.");
+            if (pet.Visibility != Visibility.Visible)
+                throw new InvalidOperationException("The panel pet must stay visible when its frames load.");
             var output = Path.Combine(root, "artifacts", "review", "0.8.1", "layout");
             Directory.CreateDirectory(output);
             window.DataContext = new
@@ -349,6 +370,11 @@ internal static class Program
     {
         var bitmap = new RenderTargetBitmap((int)size.Width * 2, (int)size.Height * 2, 192, 192, PixelFormats.Pbgra32);
         bitmap.Render(surface);
+        SavePng(bitmap, path);
+    }
+
+    private static void SavePng(BitmapSource bitmap, string path)
+    {
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
