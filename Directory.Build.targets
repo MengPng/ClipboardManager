@@ -2,7 +2,7 @@
   <PropertyGroup>
     <Product>本地剪切板管理工具</Product>
     <Company>ClipboardManager</Company>
-    <VersionPrefix>0.8.2</VersionPrefix>
-    <InformationalVersion>0.8.2-panel-pet-selection</InformationalVersion>
+    <VersionPrefix>0.8.3</VersionPrefix>
+    <InformationalVersion>0.8.3-collapsed-pet</InformationalVersion>
   </PropertyGroup>
 </Project>
