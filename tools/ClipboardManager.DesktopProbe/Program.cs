@@ -14,6 +14,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Contains("--clipboard-safety", StringComparer.OrdinalIgnoreCase)) return ClipboardSafetyProbe.Run();
+        if (args.Contains("--files-only", StringComparer.OrdinalIgnoreCase)) return ClipboardFileProbe.Run();
         if (args.Any(arg => arg is "--selection" or "--selection-target" or "--selection-ui" or "--selection-gateway")) return SelectionProbe.Run(args);
         var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -21,7 +22,7 @@ internal static class Program
             var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             application.Dispatcher.InvokeAsync(async () =>
             {
-                try { completion.SetResult(await RunProbeAsync(application)); }
+                try { completion.SetResult(await RunProbeAsync(application, args.Contains("--text-only", StringComparer.OrdinalIgnoreCase))); }
                 catch (Exception exception) { completion.SetException(exception); }
                 finally
                 {
@@ -37,7 +38,7 @@ internal static class Program
         return completion.Task.GetAwaiter().GetResult();
     }
 
-    private static async Task<int> RunProbeAsync(Application application)
+    private static async Task<int> RunProbeAsync(Application application, bool textOnly)
     {
         var originalClipboard = Clipboard.GetDataObject();
         var evidenceDirectory = Path.Combine(
@@ -60,9 +61,13 @@ internal static class Program
         try
         {
             var systemClipboard = new WindowsSystemClipboard();
-            var text = $"ClipboardManager Phase4 文本恢复探针 {Guid.NewGuid():N} 😀\r\n第二行";
-            await systemClipboard.WriteTextAsync(text);
-            Check(ReadTextWithRetry() == text, "TEXT_RESTORE");
+            for (var attempt = 1; attempt <= (textOnly ? 4 : 1); attempt++)
+            {
+                var text = $"ClipboardManager Phase4 文本恢复探针 {Guid.NewGuid():N} 😀\r\n第二行";
+                await systemClipboard.WriteTextAsync(text);
+                Check(ReadTextWithRetry() == text, textOnly ? $"TEXT_RESTORE_{attempt}" : "TEXT_RESTORE");
+            }
+            if (textOnly) return 0;
 
             var imagePath = Path.Combine(evidenceDirectory, "probe.png");
             var pixels = new byte[]

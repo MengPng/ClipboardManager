@@ -164,10 +164,60 @@ public sealed class WindowsSystemClipboard : ISystemClipboard, IClipboardTextRew
 
     public Task WriteFilesAsync(IReadOnlyList<string> files, CancellationToken cancellationToken = default) => InvokeOnStaAsync<object?>(() =>
     {
-        var list = new StringCollection(); list.AddRange(files.Where(path => File.Exists(path) || Directory.Exists(path)).ToArray());
-        if (list.Count == 0) throw new InvalidOperationException("文件均已失效。");
-        System.Windows.Clipboard.SetFileDropList(list); return null;
+        var paths = files.Where(path => File.Exists(path) || Directory.Exists(path)).ToArray();
+        if (paths.Length == 0) throw new InvalidOperationException("文件均已失效。");
+        // OleSetClipboard/Flush can collide with another process reading the clipboard
+        // immediately after WM_CLIPBOARDUPDATE. CF_HDROP is a plain global memory block,
+        // so write it during one bounded Win32 lock just like text.
+        if (!TryWriteFilesDirect(paths, GetClipboardOwnerWindow()))
+        {
+            var list = new StringCollection();
+            list.AddRange(paths);
+            System.Windows.Clipboard.SetFileDropList(list);
+        }
+        return null;
     }, cancellationToken);
+
+    private static bool TryWriteFilesDirect(IReadOnlyList<string> files, IntPtr ownerWindow)
+    {
+        if (ownerWindow == IntPtr.Zero || !NativeMethods.OpenClipboard(ownerWindow)) return false;
+        try
+        {
+            const int dropFilesHeaderBytes = 20;
+            var payload = string.Join('\0', files) + "\0\0";
+            var block = NativeMethods.GlobalAlloc(
+                NativeMethods.GmemMoveable,
+                (nuint)(dropFilesHeaderBytes + payload.Length * sizeof(char)));
+            if (block == IntPtr.Zero) return false;
+            try
+            {
+                var target = NativeMethods.GlobalLock(block);
+                if (target == IntPtr.Zero) return false;
+                try
+                {
+                    // DROPFILES: pFiles, pt.X, pt.Y, fNC, fWide. The header is 20 bytes
+                    // on both x86 and x64 and is followed by a double-null-terminated UTF-16 list.
+                    Marshal.WriteInt32(target, 0, dropFilesHeaderBytes);
+                    Marshal.WriteInt32(target, 4, 0);
+                    Marshal.WriteInt32(target, 8, 0);
+                    Marshal.WriteInt32(target, 12, 0);
+                    Marshal.WriteInt32(target, 16, 1);
+                    Marshal.Copy(payload.ToCharArray(), 0, IntPtr.Add(target, dropFilesHeaderBytes), payload.Length);
+                }
+                finally { NativeMethods.GlobalUnlock(block); }
+
+                if (!NativeMethods.EmptyClipboard()) return false;
+                if (NativeMethods.SetClipboardData(NativeMethods.CfHdrop, block) == IntPtr.Zero) return false;
+                block = IntPtr.Zero; // The clipboard owns the block once SetClipboardData succeeds.
+                return true;
+            }
+            finally
+            {
+                if (block != IntPtr.Zero) NativeMethods.GlobalFree(block);
+            }
+        }
+        finally { NativeMethods.CloseClipboard(); }
+    }
 
     private static async Task<T> InvokeOnStaAsync<T>(Func<T> operation, CancellationToken cancellationToken)
     {

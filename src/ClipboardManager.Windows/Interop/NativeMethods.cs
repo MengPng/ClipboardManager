@@ -97,6 +97,7 @@ internal static partial class NativeMethods
     public static partial IntPtr SetClipboardData(uint format, IntPtr data);
 
     public const uint CfUnicodeText = 13;
+    public const uint CfHdrop = 15;
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     public static partial IntPtr GlobalAlloc(uint flags, nuint byteCount);
