@@ -100,7 +100,12 @@ public partial class App : System.Windows.Application
                     services.AddSingleton<MainWindow>();
                     services.AddSingleton<GlobalHotkeyService>();
                     services.AddSingleton<TrayIconService>();
-                    services.AddSingleton<WindowsSystemClipboard>();
+                    services.AddSingleton(sp =>
+                    {
+                        var gate = sp.GetRequiredService<SelectionClipboardGate>();
+                        var guard = sp.GetRequiredService<SelfWriteGuard>();
+                        return new WindowsSystemClipboard(sequence => { gate.Remember(sequence); guard.Clear(); });
+                    });
                     services.AddSingleton<ISystemClipboard>(sp => sp.GetRequiredService<WindowsSystemClipboard>());
                     services.AddSingleton<IClipboardTextRewriter>(sp => sp.GetRequiredService<WindowsSystemClipboard>());
                     services.AddSingleton<ILocalAssetStore, WindowsLocalAssetStore>();

@@ -18,7 +18,7 @@ public sealed class SelectionClipboardGate
 
     public bool Observe(uint sequence)
     {
-        if (_transient.Contains(sequence)) return true;
+        lock (_transient) { if (_transient.Contains(sequence)) return true; }
         if (!_active) return false;
         var owner = SelectionNative.GetClipboardOwner();
         NativeMethods.GetWindowThreadProcessId(owner, out var process);
@@ -29,7 +29,11 @@ public sealed class SelectionClipboardGate
 
     public void Remember(uint sequence)
     {
-        if (_transient.Count >= 256) _transient.Clear();
-        _transient.Add(sequence);
+        // Observe runs on the consumer thread while Remember runs on the UI thread.
+        lock (_transient)
+        {
+            if (_transient.Count >= 256) _transient.Clear();
+            _transient.Add(sequence);
+        }
     }
 }

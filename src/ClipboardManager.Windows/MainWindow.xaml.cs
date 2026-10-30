@@ -762,10 +762,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task RestoreSelectedAsync(bool? automaticPaste)
     {
         if (SelectedItem is null) return;
-        await _restoreService.RestoreAsync(SelectedItem.Item);
+        var restoring = SelectedItem.Item;
+        await _restoreService.RestoreAsync(restoring);
         var shouldPaste = automaticPaste ?? (await _settingsStore.LoadAsync()).EnableAutomaticPaste;
         if (!_isPinnedTopmost) Hide();
-        if (shouldPaste && !await _automaticPasteService.TryPasteAsync(this))
+        if (!shouldPaste) return;
+        var pasted = await _automaticPasteService.TryPasteAsync(this);
+        // Type and outcome only, never the clipboard content.
+        Serilog.Log.Information("Auto paste of {ItemType}: sent={Sent}; reason={Reason}",
+            restoring.ItemType, pasted, _automaticPasteService.LastFailureReason);
+        if (!pasted)
             System.Windows.MessageBox.Show("内容已复制到剪切板，但未能自动粘贴，请手动按 Ctrl+V。", "自动粘贴", MessageBoxButton.OK, MessageBoxImage.Information);
     }
     private async Task DeleteSelectedAsync() { if (SelectedItem is null) return; await _historyService.DeleteAsync(SelectedItem.Item.Id); await RefreshHistoryAsync(); }

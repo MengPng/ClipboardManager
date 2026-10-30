@@ -28,6 +28,19 @@ public sealed class WindowsSystemClipboard : ISystemClipboard, IClipboardTextRew
     // dispatcher while our own read still holds the clipboard open. Serialize every access.
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
+    private readonly Action<uint>? _onSelfWrite;
+
+    public WindowsSystemClipboard() { }
+
+    /// <param name="onSelfWrite">
+    /// Receives the clipboard sequence number right after this class wrote an image or file list.
+    /// The monitor then skips that update without reading it back, so the manager does not hold
+    /// the clipboard open at the moment a chat client handles the pasted Ctrl+V.
+    /// </param>
+    public WindowsSystemClipboard(Action<uint> onSelfWrite) => _onSelfWrite = onSelfWrite;
+
+    private void NotifySelfWrite() => _onSelfWrite?.Invoke(NativeMethods.GetClipboardSequenceNumber());
+
     public async Task<ClipboardPayload> ReadAsync(CancellationToken cancellationToken = default)
     {
         var material = await InvokeOnStaAsync(ReadMaterial, cancellationToken);
@@ -165,6 +178,7 @@ public sealed class WindowsSystemClipboard : ISystemClipboard, IClipboardTextRew
         var formats = BuildImageFormats(image);
         if (!TryWriteImageDirect(formats, GetClipboardOwnerWindow()))
             System.Windows.Clipboard.SetImage(image);
+        NotifySelfWrite();
         return null;
     }, cancellationToken);
 
@@ -318,6 +332,7 @@ public sealed class WindowsSystemClipboard : ISystemClipboard, IClipboardTextRew
             list.AddRange(paths);
             System.Windows.Clipboard.SetFileDropList(list);
         }
+        NotifySelfWrite();
         return null;
     }, cancellationToken);
 
