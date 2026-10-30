@@ -100,7 +100,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // (with assembly=) or the loose parser (without it).
         _panelPet = new Services.PetCompanion
         {
-            Width = 24, Height = 26,
+            Width = 28, Height = 20,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 8, 0),
             ToolTip = "面板宠物",

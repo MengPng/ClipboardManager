@@ -74,19 +74,19 @@ internal static class Program
                 throw new InvalidOperationException("The global always-on-top toggle must remain visible and keyboard accessible.");
             // The footer pet is added from code-behind (loose XAML here strips x:Class),
             // so probe it directly: it must load its frames and render a non-empty cell.
-            var pet = new ClipboardManager.Windows.Services.PetCompanion { Width = 48, Height = 52 };
+            var pet = new ClipboardManager.Windows.Services.PetCompanion { Width = 56, Height = 40 };
             pet.SetListening(true);
-            var petHost = new Border { Width = 48, Height = 52, Background = new SolidColorBrush(Color.FromRgb(0xFA, 0xF9, 0xF5)), Child = pet };
+            var petHost = new Border { Width = 56, Height = 40, Background = new SolidColorBrush(Color.FromRgb(0xFA, 0xF9, 0xF5)), Child = pet };
             // Unrooted host: manual measure/arrange, UpdateLayout alone renders nothing.
-            petHost.Measure(new Size(48, 52));
-            petHost.Arrange(new Rect(0, 0, 48, 52));
+            petHost.Measure(new Size(56, 40));
+            petHost.Arrange(new Rect(0, 0, 56, 40));
             petHost.UpdateLayout();
-            var petCheck = new RenderTargetBitmap(48, 52, 96, 96, PixelFormats.Pbgra32);
+            var petCheck = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             petCheck.Render(petHost);
-            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.4", "layout"));
-            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.4", "layout", "PanelPet-probe.png"));
-            var petBytes = new byte[48 * 52 * 4];
-            petCheck.CopyPixels(petBytes, 48 * 4, 0);
+            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.5", "layout"));
+            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.5", "layout", "PanelPet-probe.png"));
+            var petBytes = new byte[56 * 40 * 4];
+            petCheck.CopyPixels(petBytes, 56 * 4, 0);
             if (ClipboardManager.Windows.Services.PetCompanion.LoadError is not null)
                 throw new InvalidOperationException($"Pet frame load failed: {ClipboardManager.Windows.Services.PetCompanion.LoadError.GetType().Name}: {ClipboardManager.Windows.Services.PetCompanion.LoadError.Message} | {ClipboardManager.Windows.Services.PetCompanion.LoadError}");
             if (petBytes.All(b => b == 0))
@@ -101,14 +101,14 @@ internal static class Program
             System.Threading.Thread.Sleep(350);
             var probeBitmap = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             probeBitmap.Render(collapsedProbe);
-            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.4", "layout", "CollapsedPetWindow-probe.png"));
+            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.5", "layout", "CollapsedPetWindow-probe.png"));
             var probeBytes = new byte[56 * 40 * 4];
             probeBitmap.CopyPixels(probeBytes, 56 * 4, 0);
             collapsedProbe.Close();
             if (probeBytes.All(b => b == 0))
                 throw new InvalidOperationException("CollapsedPetWindow renders an empty visual tree; the pet never draws inside the collapsed host.");
             Console.WriteLine("PASS CollapsedPetWindow visual probe");
-            var output = Path.Combine(root, "artifacts", "review", "0.8.4", "layout");
+            var output = Path.Combine(root, "artifacts", "review", "0.8.5", "layout");
             Directory.CreateDirectory(output);
             window.DataContext = new
             {

@@ -14,7 +14,7 @@
 
 ## 当前范围
 
-> 状态对齐（2026-10-22）：产品已发布至 0.7.9，0.8.0 青序结构审阅版在制。Phase 2/3 已完成，Phase 4 收尾中；下述阶段条款保留为历史基线。当前在制内容见 `docs/design/2026-10-21-*` 与 CHANGELOG「Unreleased」。
+> 状态对齐（2026-10-30）：正式发布版为 0.7.9；0.8.0–0.8.5（青序结构、暖纸赤陶、面板宠物与划词排除、收起互动、桌面宠物、夹夹形象重绘与拖拽修复）均在 CHANGELOG「Unreleased」，尚未整理为带日期的发布条目。版本源为 `Directory.Build.targets`（0.8.5 / `0.8.5-desktop-pet`）与 `release/release-contract.json`（appVersion 0.8.5，schema 7）。0.8.5 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.5/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 202 项测试通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过）；0.8.4 产物仍在 `artifacts/release/0.8.4/`。均未签名，真实桌面点验与多显示器/DPI 验收待完成。Phase 2/3 已完成，Phase 4 收尾中；下述阶段条款保留为历史基线。当前在制内容见 `docs/design/2026-10-21-*` 与 CHANGELOG「Unreleased」。
 
 ### 首期实现
 
@@ -34,6 +34,16 @@
 - 跨设备同步：客户端已实现 Tencent Remote Sync Provider、Cloud Outbox 本地队列与本地匿名身份回退。
 - 局域网分享：`Infrastructure/Lan/LocalSendLanShareService` 已实现，入口暂不开放。
 - 划词 AI 与本地 AI 网关：已实现（ADR-0004），OpenAI 兼容接口，密钥走凭据管理器。
+- 桌面宠物（0.8.2 起，0.8.4 完成收起形态）：原创像素宠物，设置内可关闭（默认开）。约束如下：
+  - 形象为原创"夹夹"（纸页 + 赤陶夹子）。帧图由 `scripts/build-pet-assets.py` 在 28×20 网格内用代码确定性绘制并精确 2 倍导出为 56×40；不得手改帧图，不得非整数缩放或非等比拉伸。
+  - 状态只映射真实运行状态：监听中=Idle、暂停=Sleeping、捕获到新内容=一次性 Hop；拖拽就绪=Carry（仅视觉反馈）。不得用宠物伪造同步、云端或团队状态。
+  - 展开面板内的宠物不可聚焦、不可命中；仅收起态的独立透明小窗（`CollapsedPetWindow`，56×40，置顶、不进任务栏、不抢焦点）可点击/拖动。
+  - 收起窗使用独立 `PetCompanion` 实例，禁止把页脚控件跨窗口挪用；帧资源为 EmbeddedResource（`Assets/Pet/idle-0..7、sleep-0..5、hop-0..5、carry-0..1`）。动画计时器仅在控件可见时运行。
+  - 交互契约：单击展开；按住约 0.3 秒后手动 delta 拖拽（禁用 `DragMove`，与控件级鼠标捕获冲突）；Esc 隐藏并记住位置；快捷键、托盘、单实例唤醒在收起态自动展开主面板；宠物关闭时回退为紧凑标题条。
+  - 收起时不得拆除聊天窗吸附：宠物继承吸附并跟随，展开后交还主面板。
+  - 资源缺失时宠物静默隐藏但必须写日志；不得影响剪切板监听主链路。
+  - 拖拽按窗口 DPI 把设备像素换算为 DIP，并限制在光标所在屏幕的工作区内（0.8.5）。
+  - 已知待办：上述 DPI 换算与屏幕限位、Carry 状态、Esc 在未获得焦点的宠物窗口上是否生效，均需在 Windows 实机（100%/125%/150% 缩放、多显示器）验收。
 - 仍未实现：团队创建、成员管理、权限校验与团队内容分发；OCR；移动端与 macOS/Linux 客户端。
 
 不得为了展示进度而提供不可用的假入口。未实现的团队界面默认隐藏。

@@ -52,7 +52,7 @@ public sealed class CollapsedPetWindow : Window
         };
         Content = new Grid { Width = 56, Height = 40, Children = { _pet } };
         _holdTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(HoldDelayMs) };
-        _holdTimer.Tick += (_, _) => { _dragArmed = true; _holdTimer.Stop(); };
+        _holdTimer.Tick += (_, _) => { _dragArmed = true; _holdTimer.Stop(); _pet.SetCarried(true); };
         _pet.MouseLeftButtonDown += OnPetDown;
         _pet.MouseMove += OnPetMove;
         _pet.MouseLeftButtonUp += OnPetUp;
@@ -94,8 +94,12 @@ public sealed class CollapsedPetWindow : Window
         var screen = PointToScreen(e.GetPosition(this));
         if (_lastDragPosition is { } last)
         {
-            Left += screen.X - last.X;
-            Top += screen.Y - last.Y;
+            // PointToScreen yields device pixels while Left/Top are DIPs: divide by the
+            // window DPI, and keep the pet inside the work area of the screen under the cursor.
+            var dpi = VisualTreeHelper.GetDpi(this);
+            var area = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point((int)screen.X, (int)screen.Y)).WorkingArea;
+            Left = Math.Clamp(Left + (screen.X - last.X) / dpi.DpiScaleX, area.Left / dpi.DpiScaleX, area.Right / dpi.DpiScaleX - Width);
+            Top = Math.Clamp(Top + (screen.Y - last.Y) / dpi.DpiScaleY, area.Top / dpi.DpiScaleY, area.Bottom / dpi.DpiScaleY - Height);
             _dragged = true;
         }
         _lastDragPosition = screen;
@@ -105,6 +109,7 @@ public sealed class CollapsedPetWindow : Window
     {
         _holdTimer.Stop();
         _pet.ReleaseMouseCapture();
+        _pet.SetCarried(false);
         var wasDragged = _dragged;
         _lastDragPosition = null;
         if (wasDragged) return;

@@ -18,7 +18,7 @@ namespace ClipboardManager.Windows.Services;
 /// </summary>
 public sealed class PetCompanion : System.Windows.Controls.Control
 {
-    public enum PetState { Idle, Sleeping, Hop }
+    public enum PetState { Idle, Sleeping, Hop, Carry }
 
     private const int FrameIntervalMs = 120;
     private const string AssetFolder = "Assets.Pet.";
@@ -26,6 +26,7 @@ public sealed class PetCompanion : System.Windows.Controls.Control
     private static readonly string[] IdleFrames = Enumerable.Range(0, 8).Select(i => $"idle-{i}.png").ToArray();
     private static readonly string[] SleepFrames = Enumerable.Range(0, 6).Select(i => $"sleep-{i}.png").ToArray();
     private static readonly string[] HopFrames = Enumerable.Range(0, 6).Select(i => $"hop-{i}.png").ToArray();
+    private static readonly string[] CarryFrames = Enumerable.Range(0, 2).Select(i => $"carry-{i}.png").ToArray();
 
     private static BitmapSource?[][]? _frames;
     private readonly DispatcherTimer _timer;
@@ -43,21 +44,44 @@ public sealed class PetCompanion : System.Windows.Controls.Control
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.NearestNeighbor);
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(FrameIntervalMs) };
         _timer.Tick += (_, _) => Advance();
+        // Animate only while actually shown: the tray app is resident, and a hidden
+        // panel or pet window must not keep an 8 fps render loop alive.
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible && !_assetsMissing) _timer.Start();
+            else _timer.Stop();
+        };
     }
 
     /// <summary>Paused => sleeping; otherwise awake and breathing.</summary>
     public void SetListening(bool listening)
     {
         var target = listening ? PetState.Idle : PetState.Sleeping;
+        if (_state == PetState.Carry) { _resumeState = target; return; }
         if (_state == target) return;
         _resumeState = target;
         EnterState(target);
     }
 
+    /// <summary>Drag armed: the pet is lifted and dangles until released.</summary>
+    public void SetCarried(bool carried)
+    {
+        if (_assetsMissing) return;
+        if (carried && _state != PetState.Carry)
+        {
+            _resumeState = _state == PetState.Sleeping ? PetState.Sleeping : PetState.Idle;
+            EnterState(PetState.Carry);
+        }
+        else if (!carried && _state == PetState.Carry)
+        {
+            EnterState(_resumeState);
+        }
+    }
+
     /// <summary>One happy hop, then back to the ambient state. Safe to call anytime.</summary>
     public void NotifyCopied()
     {
-        if (_assetsMissing || _state == PetState.Hop) return;
+        if (_assetsMissing || _state == PetState.Hop || _state == PetState.Carry) return;
         _resumeState = _state == PetState.Sleeping ? PetState.Sleeping : PetState.Idle;
         EnterState(PetState.Hop);
     }
@@ -75,7 +99,6 @@ public sealed class PetCompanion : System.Windows.Controls.Control
     {
         base.OnInitialized(e);
         EnsureFrames();
-        if (!_assetsMissing) _timer.Start();
     }
 
     private static BitmapSource?[][] Frames()
@@ -101,7 +124,7 @@ public sealed class PetCompanion : System.Windows.Controls.Control
                 }
                 return row;
             }
-            _frames = new[] { LoadAll(IdleFrames), LoadAll(SleepFrames), LoadAll(HopFrames) };
+            _frames = new[] { LoadAll(IdleFrames), LoadAll(SleepFrames), LoadAll(HopFrames), LoadAll(CarryFrames) };
         }
         return _frames;
     }
@@ -137,6 +160,7 @@ public sealed class PetCompanion : System.Windows.Controls.Control
         {
             PetState.Sleeping => rows[1],
             PetState.Hop => rows[2],
+            PetState.Carry => rows[3],
             _ => rows[0],
         };
         return row[_frameIndex % row.Length];
@@ -157,6 +181,7 @@ public sealed class PetCompanion : System.Windows.Controls.Control
         {
             PetState.Sleeping => SleepFrames.Length,
             PetState.Hop => HopFrames.Length,
+            PetState.Carry => CarryFrames.Length,
             _ => IdleFrames.Length,
         };
         if (_state == PetState.Hop && _frameIndex >= rowLength)

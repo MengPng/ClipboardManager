@@ -2,186 +2,173 @@
 # requires-python = ">=3.10"
 # dependencies = ["Pillow"]
 # ///
-"""Derive the panel-pet frame sequences from the two approved base sprites.
+"""Pet v2 "夹夹": a sheet of paper with a dog-ear, ruled lines and a terracotta clip.
 
-Inputs  (artifacts/pet/):
-  base-open.png    front-facing, eyes open,  flat #FF00FF chroma background
+Pixel art is defined in code on a 28x20 logical grid and exported at exactly 2x
+(56x40), the size of CollapsedPetWindow, so frames are never rescaled by a
+non-integer factor and the sprite is never squashed. File names and frame counts
+match the current Assets/Pet set (idle 8, sleep 6, hop 6), so the set is drop-in;
+carry-0/1 is optional (drag-armed feedback).
 
-The closed-eye variant is derived deterministically from base-open (replace each
-near-black eye blob with a thin dark lid line over body colour), because a
-separately generated closed sprite drifted in palette, proportions and pose.
-
-Outputs (src/ClipboardManager.Windows/Assets/Pet/):
-  idle-0..7.png   breathing bob + blink, loops
-  sleep-0..5.png  squashed, slow breathing, loops
-  hop-0..5.png    one-shot squash-and-stretch hop
-  contact-sheet.png under artifacts/pet/ for QA
-
-Everything is deterministic: chroma removal, despill, trim, normalize, and all
-frame transforms run from the two approved bases so identity cannot drift.
+Usage: python scripts/build-pet-assets.py   (writes Assets/Pet frames and artifacts/pet/contact-sheet.png)
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-WORK = ROOT / "artifacts" / "pet"
-OUT = ROOT / "src" / "ClipboardManager.Windows" / "Assets" / "Pet"
+FRAMES_OUT = ROOT / "src" / "ClipboardManager.Windows" / "Assets" / "Pet"
+SHEET_OUT = ROOT / "artifacts" / "pet" / "contact-sheet.png"
+GW, GH, SCALE = 28, 20, 2
+INK = (43, 38, 34, 255)
+PAPER = (252, 250, 244, 255)
+SHADE = (232, 224, 210, 255)
+LINE = (214, 203, 184, 255)
+CLIP = (217, 119, 87, 255)       # brand terracotta #D97757
+CLIPD = (184, 92, 56, 255)       # #B85C38
+BLUSH = (240, 160, 140, 255)
+WHITE = (255, 255, 255, 255)
 
-CANVAS_W, CANVAS_H = 96, 104          # 48x52 DIP at 2x
-SPRITE_HEIGHT = 72
-BASELINE_Y = CANVAS_H - 10            # feet line
-CHROMA = (255, 0, 255)
-KEY_DISTANCE = 90                     # > this counts as background
+W, X0, FEET_Y = 18, 5, 17        # body cols 5..22, feet rows 17..18, shadow row 19
+CUTS = (3, 1, 1)                 # rounded-corner pixel cuts, first rows
+EAR = 4                          # dog-ear size at top-right
 
 
-def load_sprite(path: Path) -> Image.Image:
-    img = Image.open(path).convert("RGB")
-    # The approved base is a NEAREST-upscaled 64x64 pixel grid; collapse back to
-    # the native grid with area averaging (exact for pure NEAREST upscales) so
-    # downstream scaling works on real pixel cells, not 16x blocks.
-    if img.width > 64 and img.width % 64 == 0:
-        img = img.resize((64, 64), Image.BOX)
+def draw(body_h=13, dy=0, eyes="open", mouth=None, clip_dx=0, clip_dy=0,
+         feet_dx=(0, 0), shadow=64, z=None):
+    img = Image.new("RGBA", (GW, GH), (0, 0, 0, 0))
     px = img.load()
-    w, h = img.size
-    mask = Image.new("L", (w, h), 0)
-    mp = mask.load()
-    for y in range(h):
-        for x in range(w):
-            r, g, b = px[x, y]
-            if abs(r - CHROMA[0]) + abs(g - CHROMA[1]) + abs(b - CHROMA[2]) > KEY_DISTANCE:
-                mp[x, y] = 255
-    # Drop isolated speckles, then despill: recolor translucent fringe from the
-    # nearest fully opaque pixel in the same row band.
-    mask = mask.point(lambda v: 255 if v >= 128 else 0)
-    bbox = mask.getbbox()
-    if not bbox:
-        raise SystemExit(f"{path.name}: chroma removal left an empty sprite")
-    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    src = img.load()
-    op = mask.load()
-    for y in range(h):
-        for x in range(w):
-            if op[x, y]:
-                r, g, b = src[x, y]
-                # pull chroma-adjacent pixels toward neutral so the fringe is clean
-                if r > 180 and b > 180:
-                    f = (r + b) / 2
-                    r, g, b = int(r - (r - g) * 0.0), g, int(b - (b - g) * 0.0)
-                    r = min(r, 200 + g // 4)
-                    b = min(b, 200 + g // 4)
-                out.putpixel((x, y), (r, g, b, 255))
-    sprite = out.crop(bbox)
-    # Quantize to keep the pixel-art edge crisp after rescaling.
-    ratio = SPRITE_HEIGHT / sprite.height
-    sprite = sprite.resize((max(1, round(sprite.width * ratio)), SPRITE_HEIGHT), Image.NEAREST)
-    return sprite
 
+    def put(x, y, c):
+        if 0 <= x < GW and 0 <= y < GH:
+            px[x, y] = c
 
-def derive_closed(open_sprite: Image.Image) -> Image.Image:
-    """Swap open bean eyes for thin closed lid lines without touching anything else."""
-    sprite = open_sprite.copy()
-    px = sprite.load()
-    w, h = sprite.size
-    dark = [[px[x, y][0] < 70 and px[x, y][1] < 70 and px[x, y][2] < 70 and px[x, y][3] > 0
-             for x in range(w)] for y in range(h)]
-    # Collect dark blobs; the two largest are the eyes.
-    blobs: list[list[tuple[int, int]]] = []
-    seen = [[False] * w for _ in range(h)]
-    for y in range(h):
-        for x in range(w):
-            if not dark[y][x] or seen[y][x]:
+    fy = FEET_Y - dy
+    bottom = fy - 1
+    top = bottom - body_h + 1
+
+    sw = max(4, W - 4 - 2 * dy)
+    sx = X0 + (W - sw) // 2
+    for x in range(sx, sx + sw):
+        put(x, GH - 1, (0, 0, 0, max(0, shadow - 14 * dy)))
+
+    for k, fx in enumerate((X0 + 3, X0 + 12)):
+        ox = fx + feet_dx[k]
+        for x in range(ox, ox + 3):
+            put(x, fy, INK if x in (ox, ox + 2) else SHADE)
+            put(x, fy + 1, INK)
+
+    def inside(x, y):
+        ry, rx = y - top, x - X0
+        if not (0 <= rx < W and 0 <= ry < body_h):
+            return False
+        if ry < EAR and rx >= W - EAR + ry:          # dog-ear cut
+            return False
+        for edge, cut_rows in ((ry, CUTS), (body_h - 1 - ry, CUTS)):
+            if edge < len(cut_rows) and (rx < cut_rows[edge] or W - 1 - rx < cut_rows[edge]):
+                return False
+        return True
+
+    for y in range(top, bottom + 1):
+        for x in range(X0, X0 + W):
+            if not inside(x, y):
                 continue
-            stack, cells = [(x, y)], []
-            seen[y][x] = True
-            while stack:
-                cx, cy = stack.pop()
-                cells.append((cx, cy))
-                for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
-                    if 0 <= nx < w and 0 <= ny < h and dark[ny][nx] and not seen[ny][nx]:
-                        seen[ny][nx] = True
-                        stack.append((nx, ny))
-            blobs.append(cells)
-    eyes = sorted(blobs, key=len, reverse=True)[:2]
-    for cells in eyes:
-        if len(cells) < 8:
-            continue
-        xs = [c[0] for c in cells]
-        ys = [c[1] for c in cells]
-        x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
-        # Body colour sampled just outside the blob's left edge.
-        sx = max(0, x0 - 3)
-        body = px[sx, cy]
-        lid_h = max(2, (y1 - y0 + 1) // 3)
-        lid_y0 = cy - lid_h // 2
-        for yy in range(y0, y1 + 1):
-            for xx in range(x0, x1 + 1):
-                if lid_y0 <= yy < lid_y0 + lid_h and (xx - x0) > 0 and (x1 - xx) > 0:
-                    px[xx, yy] = (body[0] // 3, body[1] // 3, body[2] // 3, 255)
-                else:
-                    px[xx, yy] = body
-    return sprite
+            ry, rx = y - top, x - X0
+            edge = any(not inside(x + a, y + b) for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+            if edge:
+                put(x, y, INK)
+            elif 1 <= ry <= EAR - 1 and rx >= W - EAR - 1 and rx <= W - EAR + ry - 2:
+                put(x, y, SHADE)                       # folded flap
+            elif bottom - y <= 2:
+                put(x, y, SHADE)
+            else:
+                put(x, y, PAPER)
+    ly = top + 9
+    if ly < bottom:
+        for x in range(X0 + 4, X0 + W - 4):
+            put(x, ly, LINE)
+
+    for e in (X0 + 5, X0 + 11):
+        if eyes == "open":
+            for x in (e, e + 1):
+                for y in (top + 4, top + 5, top + 6):
+                    put(x, y, INK)
+        elif eyes == "closed":
+            put(e, top + 5, INK); put(e + 1, top + 5, INK)
+        elif eyes == "happy":
+            put(e, top + 4, INK); put(e + 1, top + 4, INK)
+            put(e - 1, top + 5, INK); put(e + 2, top + 5, INK)
+        elif eyes == "wide":
+            for x in (e, e + 1, e + 2):
+                for y in (top + 4, top + 5, top + 6):
+                    put(x, y, INK)
+            put(e + 1, top + 5, WHITE)
+    for bx in (X0 + 3, X0 + 13):
+        put(bx, top + 7, BLUSH); put(bx + 1, top + 7, BLUSH)
+    if mouth == "open":
+        for x in (X0 + 8, X0 + 9):
+            put(x, top + 7, INK); put(x, top + 8, INK)
+    elif eyes != "closed":
+        put(X0 + 8, top + 7, INK); put(X0 + 9, top + 7, INK)
+
+    cx, cy = X0 + 3 + clip_dx, top - 2 + clip_dy
+    for r in range(4):
+        for c in range(6):
+            border = r in (0, 3) or c in (0, 5)
+            put(cx + c, cy + r, INK if border else (CLIPD if r == 2 else CLIP))
+
+    if z is not None:
+        zx, zy, alpha = z
+        for x, y in ((0, 0), (1, 0), (2, 0), (3, 0), (2, 1), (1, 2), (0, 3), (1, 3), (2, 3), (3, 3)):
+            put(zx + x, zy + y, (CLIP[0], CLIP[1], CLIP[2], alpha))
+    return img
 
 
-def place(sprite: Image.Image, dx: int = 0, dy: int = 0, sx: float = 1.0, sy: float = 1.0) -> Image.Image:
-    w = max(1, round(sprite.width * sx))
-    h = max(1, round(sprite.height * sy))
-    body = sprite.resize((w, h), Image.NEAREST)
-    frame = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
-    x = (CANVAS_W - w) // 2 + dx
-    y = BASELINE_Y - h + dy
-    frame.alpha_composite(body, (x, y))
-    return frame
-
-
-def build(open_sprite: Image.Image, closed_sprite: Image.Image) -> dict[str, list[Image.Image]]:
-    rows: dict[str, list[Image.Image]] = {}
-    # idle: 4 open frames with a 1px breathing bob, quick 2-frame blink, then settle.
-    bob = [0, 1, 1, 0]
-    rows["idle"] = [place(open_sprite, dy=bob[i % 4]) for i in range(4)]
-    rows["idle"] += [place(closed_sprite, dy=0), place(closed_sprite, dy=0),
-                     place(open_sprite, dy=0), place(open_sprite, dy=1)]
-    # sleep: closed eyes, gently breathing squash that keeps the baseline pinned.
-    breath = [0.92, 0.935, 0.95, 0.95, 0.935, 0.92]
-    rows["sleep"] = [place(closed_sprite, sy=s) for s in breath]
-    # hop: one-shot arc, stretch up / squash down, returns to rest.
-    arc = [0, -5, -9, -9, -5, 0]
-    shape = [(1.06, 0.94), (1.00, 1.00), (0.96, 1.06), (0.96, 1.06), (1.00, 1.00), (1.06, 0.94)]
-    rows["hop"] = [place(open_sprite, dy=arc[i], sx=shape[i][0], sy=shape[i][1]) for i in range(6)]
+def build():
+    rows = {}
+    idle = [dict(body_h=13), dict(body_h=12), dict(body_h=12), dict(body_h=13),
+            dict(eyes="closed"), dict(eyes="closed"),
+            dict(clip_dx=-1), dict(clip_dx=1)]
+    rows["idle"] = [draw(**p) for p in idle]
+    z_alpha = (140, 255, 255, 255, 180, 90)
+    sleep_h = (11, 11, 12, 12, 11, 11)
+    rows["sleep"] = [draw(body_h=sleep_h[i], eyes="closed", clip_dx=-1, clip_dy=1,
+                          z=(24, 8 - i, z_alpha[i])) for i in range(6)]
+    hop_dy = (0, 1, 2, 2, 1, 0)
+    hop_h = (12, 13, 13, 13, 13, 12)
+    rows["hop"] = [draw(body_h=hop_h[i], dy=hop_dy[i],
+                        eyes="happy" if 1 <= i <= 4 else "open",
+                        mouth="open" if i in (2, 3) else None) for i in range(6)]
+    rows["carry"] = [draw(dy=2, eyes="wide", mouth="open", feet_dx=(-1, 1)),
+                     draw(dy=2, eyes="wide", mouth="open", feet_dx=(1, -1))]
     return rows
 
 
-def main() -> int:
-    open_sprite = load_sprite(WORK / "base-open.png")
-    closed_sprite = derive_closed(open_sprite)
-    rows = build(open_sprite, closed_sprite)
-    OUT.mkdir(parents=True, exist_ok=True)
+def main():
+    rows = build()
+    FRAMES_OUT.mkdir(parents=True, exist_ok=True)
     for name, frames in rows.items():
-        for i, frame in enumerate(frames):
-            frame.save(OUT / f"{name}-{i}.png")
-    # Contact sheet: each row on warm paper, 4x zoom for eyeballing.
-    zoom, pad, label_h = 4, 12, 24
-    cell_w, cell_h = CANVAS_W * zoom, CANVAS_H * zoom
-    sheet_w = max(len(f) for f in rows.values()) * (cell_w + pad) + pad
-    sheet_h = len(rows) * (cell_h + pad + label_h) + pad
-    sheet = Image.new("RGB", (sheet_w, sheet_h), (250, 249, 245))
+        for i, f in enumerate(frames):
+            f.resize((GW * SCALE, GH * SCALE), Image.NEAREST).save(FRAMES_OUT / f"{name}-{i}.png")
+
+    zoom, pad = 8, 10
+    cw, ch = GW * zoom, GH * zoom
+    cols = max(len(f) for f in rows.values())
+    sheet = Image.new("RGB", (cols * (cw + pad) + pad, len(rows) * (ch + pad) + pad), (250, 249, 245))
     y = pad
     for name, frames in rows.items():
         x = pad
-        for frame in frames:
-            big = frame.resize((cell_w, cell_h), Image.NEAREST)
-            sheet.paste(big, (x, y + label_h), big)
-            x += cell_w + pad
-        y += cell_h + pad + label_h
-    sheet.save(WORK / "contact-sheet.png")
-    counts = ", ".join(f"{k}={len(v)}" for k, v in rows.items())
-    print(f"ok: {counts} -> {OUT}")
-    return 0
+        for f in frames:
+            big = f.resize((cw, ch), Image.NEAREST)
+            sheet.paste(big, (x, y), big)
+            x += cw + pad
+        y += ch + pad
+    SHEET_OUT.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(SHEET_OUT)
+    print({k: len(v) for k, v in rows.items()})
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
