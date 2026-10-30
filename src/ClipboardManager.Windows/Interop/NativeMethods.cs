@@ -96,8 +96,13 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial IntPtr SetClipboardData(uint format, IntPtr data);
 
+    [LibraryImport("user32.dll", EntryPoint = "RegisterClipboardFormatW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    public static partial uint RegisterClipboardFormat(string name);
+
     public const uint CfUnicodeText = 13;
     public const uint CfHdrop = 15;
+    public const uint CfDib = 8;
+    public const uint CfDibV5 = 17;
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     public static partial IntPtr GlobalAlloc(uint flags, nuint byteCount);

@@ -159,8 +159,151 @@ public sealed class WindowsSystemClipboard : ISystemClipboard, IClipboardTextRew
     public Task WriteImageAsync(string imagePath, CancellationToken cancellationToken = default) => InvokeOnStaAsync<object?>(() =>
     {
         var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.UriSource = new Uri(imagePath); image.EndInit(); image.Freeze();
-        System.Windows.Clipboard.SetImage(image); return null;
+        // Like text and files, write plain DIB/PNG blocks inside one bounded Win32 lock.
+        // WPF's SetImage goes through OLE and its Flush, which collides with chat clients
+        // (WeChat, WeCom) that read the clipboard right after WM_CLIPBOARDUPDATE.
+        var formats = BuildImageFormats(image);
+        if (!TryWriteImageDirect(formats, GetClipboardOwnerWindow()))
+            System.Windows.Clipboard.SetImage(image);
+        return null;
     }, cancellationToken);
+
+    internal sealed record ImageFormat(uint Format, byte[] Data, bool Required);
+
+    /// <summary>
+    /// Plain-memory clipboard formats for an image, ordered as they are set: opaque CF_DIB
+    /// (flattened on white, so apps that ignore alpha do not show black), CF_DIBV5 when the
+    /// image has transparency, then the registered "PNG" format used by browsers and chat clients.
+    /// </summary>
+    internal static IReadOnlyList<ImageFormat> BuildImageFormats(BitmapSource source)
+    {
+        if (!ClipboardResourceLimits.TryEstimateBitmapBytes(source.PixelWidth, source.PixelHeight, 32, out _))
+            throw new InvalidOperationException("图片解码后超过 64 MiB 安全限制，无法写回剪切板。");
+        var bgra = new FormatConvertedBitmap(source, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+        int width = bgra.PixelWidth, height = bgra.PixelHeight, stride = width * 4;
+        var top = new byte[stride * height];
+        bgra.CopyPixels(top, stride, 0);
+
+        var hasAlpha = false;
+        for (var offset = 3; offset < top.Length; offset += 4)
+            if (top[offset] != 255) { hasAlpha = true; break; }
+
+        // DIB rows are bottom-up.
+        byte[] BottomUp(bool keepAlpha)
+        {
+            var result = new byte[top.Length];
+            for (var y = 0; y < height; y++)
+            {
+                var from = y * stride;
+                var to = (height - 1 - y) * stride;
+                for (var x = 0; x < stride; x += 4)
+                {
+                    var alpha = top[from + x + 3];
+                    result[to + x] = keepAlpha ? top[from + x] : OverWhite(top[from + x], alpha);
+                    result[to + x + 1] = keepAlpha ? top[from + x + 1] : OverWhite(top[from + x + 1], alpha);
+                    result[to + x + 2] = keepAlpha ? top[from + x + 2] : OverWhite(top[from + x + 2], alpha);
+                    result[to + x + 3] = keepAlpha ? alpha : (byte)255;
+                }
+            }
+            return result;
+        }
+
+        var formats = new List<ImageFormat>(3);
+        if (hasAlpha)
+            formats.Add(new ImageFormat(NativeMethods.CfDibV5, WithHeader(BuildDibV5Header(width, height, top.Length), BottomUp(true)), Required: false));
+        formats.Add(new ImageFormat(NativeMethods.CfDib, WithHeader(BuildDibHeader(width, height, top.Length), BottomUp(false)), Required: true));
+
+        var pngFormat = NativeMethods.RegisterClipboardFormat("PNG");
+        if (pngFormat != 0)
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(source));
+            using var stream = new BoundedMemoryStream(ClipboardResourceLimits.MaxEncodedImageBytes);
+            encoder.Save(stream);
+            formats.Add(new ImageFormat(pngFormat, stream.ToArray(), Required: false));
+        }
+        return formats;
+    }
+
+    private static byte OverWhite(byte color, byte alpha) => (byte)((color * alpha + 255 * (255 - alpha) + 127) / 255);
+
+    private static byte[] WithHeader(byte[] header, byte[] pixels)
+    {
+        var result = new byte[header.Length + pixels.Length];
+        header.CopyTo(result, 0);
+        pixels.CopyTo(result, header.Length);
+        return result;
+    }
+
+    private static byte[] BuildDibHeader(int width, int height, int imageBytes)
+    {
+        // BITMAPINFOHEADER, 40 bytes: 32 bpp BI_RGB, bottom-up.
+        var header = new byte[40];
+        BitConverter.GetBytes(40).CopyTo(header, 0);
+        BitConverter.GetBytes(width).CopyTo(header, 4);
+        BitConverter.GetBytes(height).CopyTo(header, 8);
+        BitConverter.GetBytes((short)1).CopyTo(header, 12);
+        BitConverter.GetBytes((short)32).CopyTo(header, 14);
+        BitConverter.GetBytes(imageBytes).CopyTo(header, 20);
+        return header;
+    }
+
+    private static byte[] BuildDibV5Header(int width, int height, int imageBytes)
+    {
+        // BITMAPV5HEADER, 124 bytes: 32 bpp BI_BITFIELDS with an alpha mask, sRGB, bottom-up.
+        var header = new byte[124];
+        BitConverter.GetBytes(124).CopyTo(header, 0);
+        BitConverter.GetBytes(width).CopyTo(header, 4);
+        BitConverter.GetBytes(height).CopyTo(header, 8);
+        BitConverter.GetBytes((short)1).CopyTo(header, 12);
+        BitConverter.GetBytes((short)32).CopyTo(header, 14);
+        BitConverter.GetBytes(3).CopyTo(header, 16); // BI_BITFIELDS
+        BitConverter.GetBytes(imageBytes).CopyTo(header, 20);
+        BitConverter.GetBytes(0x00FF0000u).CopyTo(header, 40);
+        BitConverter.GetBytes(0x0000FF00u).CopyTo(header, 44);
+        BitConverter.GetBytes(0x000000FFu).CopyTo(header, 48);
+        BitConverter.GetBytes(0xFF000000u).CopyTo(header, 52);
+        BitConverter.GetBytes(0x73524742u).CopyTo(header, 56); // LCS_sRGB
+        BitConverter.GetBytes(4).CopyTo(header, 108); // LCS_GM_IMAGES
+        return header;
+    }
+
+    private static bool TryWriteImageDirect(IReadOnlyList<ImageFormat> formats, IntPtr ownerWindow)
+    {
+        if (ownerWindow == IntPtr.Zero || !NativeMethods.OpenClipboard(ownerWindow)) return false;
+        try
+        {
+            if (!NativeMethods.EmptyClipboard()) return false;
+            foreach (var format in formats)
+            {
+                var block = IntPtr.Zero;
+                try
+                {
+                    block = NativeMethods.GlobalAlloc(NativeMethods.GmemMoveable, (nuint)format.Data.Length);
+                    var target = block == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GlobalLock(block);
+                    if (target == IntPtr.Zero)
+                    {
+                        if (format.Required) return false;
+                        continue;
+                    }
+                    try { Marshal.Copy(format.Data, 0, target, format.Data.Length); }
+                    finally { NativeMethods.GlobalUnlock(block); }
+                    if (NativeMethods.SetClipboardData(format.Format, block) == IntPtr.Zero)
+                    {
+                        if (format.Required) return false;
+                        continue;
+                    }
+                    block = IntPtr.Zero; // The clipboard owns the block once SetClipboardData succeeds.
+                }
+                finally
+                {
+                    if (block != IntPtr.Zero) NativeMethods.GlobalFree(block);
+                }
+            }
+            return true;
+        }
+        finally { NativeMethods.CloseClipboard(); }
+    }
 
     public Task WriteFilesAsync(IReadOnlyList<string> files, CancellationToken cancellationToken = default) => InvokeOnStaAsync<object?>(() =>
     {
