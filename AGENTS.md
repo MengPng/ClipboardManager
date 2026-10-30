@@ -14,7 +14,7 @@
 
 ## 当前范围
 
-> 状态对齐（2026-10-30）：正式发布版为 0.7.9；0.8.0–0.8.5（青序结构、暖纸赤陶、面板宠物与划词排除、收起互动、桌面宠物、夹夹形象重绘与拖拽修复）均在 CHANGELOG「Unreleased」，尚未整理为带日期的发布条目。版本源为 `Directory.Build.targets`（0.8.5 / `0.8.5-desktop-pet`）与 `release/release-contract.json`（appVersion 0.8.5，schema 7）。0.8.5 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.5/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 202 项测试通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过）；0.8.4 产物仍在 `artifacts/release/0.8.4/`。均未签名，真实桌面点验与多显示器/DPI 验收待完成。Phase 2/3 已完成，Phase 4 收尾中；下述阶段条款保留为历史基线。当前在制内容见 `docs/design/2026-10-21-*` 与 CHANGELOG「Unreleased」。
+> 状态对齐（2026-10-30）：正式发布版为 0.7.9；0.8.0–0.8.6（青序结构、暖纸赤陶、面板宠物与划词排除、收起互动、桌面宠物、夹夹形象重绘与拖拽修复、夹夹主题与布局调整）均在 CHANGELOG「Unreleased」，尚未整理为带日期的发布条目。版本源为 `Directory.Build.targets`（0.8.6 / `0.8.6-jiajia-theme`）与 `release/release-contract.json`（appVersion 0.8.6，schema 7）。0.8.6 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.6/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 211 项测试通过，LayoutCheck 两套主题全部通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过，SHA256 复核一致），未签名。0.8.5 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.5/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 202 项测试通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过）；0.8.4 产物仍在 `artifacts/release/0.8.4/`。均未签名，真实桌面点验与多显示器/DPI 验收待完成。Phase 2/3 已完成，Phase 4 收尾中；下述阶段条款保留为历史基线。当前在制内容见 `docs/design/2026-10-21-*` 与 CHANGELOG「Unreleased」。
 
 ### 首期实现
 
@@ -45,6 +45,12 @@
   - 拖拽按窗口 DPI 把设备像素换算为 DIP，并限制在光标所在屏幕的工作区内（0.8.5）。
   - 已知待办：上述 DPI 换算与屏幕限位、Carry 状态、Esc 在未获得焦点的宠物窗口上是否生效，均需在 Windows 实机（100%/125%/150% 缩放、多显示器）验收。
 - 仍未实现：团队创建、成员管理、权限校验与团队内容分发；OCR；移动端与 macOS/Linux 客户端。
+- 界面主题（0.8.6 起）：标准暖纸（默认）与可选「夹夹」，设置 → 界面主题，保存后即时生效。约束如下：
+  - 主题只改视觉（颜色、圆角、描边、装饰显隐、主题文案），不改功能、快捷键、数据、窗口尺寸或导航顺序；布局调整（行高、图标、筛选合并等）两套主题共用。
+  - `Themes/Palette.xaml` 是标准主题；`Palette.Jiajia.xaml` 是最后合并的覆盖层（`ThemeService.Apply`），其键必须是 `Palette.xaml` 键的子集，LayoutCheck 断言。
+  - 形状差异使用 token（`RowCornerRadius`、`RowBorderThickness`、`RowCardBrush`、`NavPillRadius`、`ChipCornerRadius`、`SelectionDecorVisibility`、`EmptyPetVisibility` 等），标准取值保持既有外观。
+  - 控件模板与窗口一律以 `DynamicResource` 引用主题键（Style/BasedOn 除外）；新增控件不得硬编码颜色、圆角或文案；空状态等主题文案放在 `Copy*` 字符串资源中，由代码按键读取。
+  - 空状态宠物沿用宠物约束：112×80 为 56×40 的精确 2 倍，不可聚焦、不可命中，不得伪造状态。
 
 不得为了展示进度而提供不可用的假入口。未实现的团队界面默认隐藏。
 

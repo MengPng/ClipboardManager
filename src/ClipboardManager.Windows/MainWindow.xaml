@@ -20,7 +20,7 @@
                       UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
-    <Border x:Name="RootSurface" Background="{StaticResource WindowSurfaceBrush}">
+    <Border x:Name="RootSurface" Background="{DynamicResource WindowSurfaceBrush}">
         <Grid x:Name="WindowLayoutRoot">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -30,14 +30,14 @@
             </Grid.RowDefinitions>
 
 
-            <Grid x:Name="TitleBar" Grid.Row="0" Height="32" Background="{StaticResource WindowChromeBrush}"
+            <Grid x:Name="TitleBar" Grid.Row="0" Height="32" Background="{DynamicResource WindowChromeBrush}"
                   MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Margin="12,0,4,0" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel x:Name="TitleLeftPanel" Margin="12,0,4,0" Orientation="Horizontal" VerticalAlignment="Center">
                     <Image x:Name="WindowTitleIcon" Source="pack://application:,,,/ClipboardManager;component/Assets/AppIcon.ico"
                            Width="16" Height="16" VerticalAlignment="Center" Stretch="Uniform" />
                     <TextBlock x:Name="WindowTitleText" Margin="6,0,0,0" Style="{StaticResource TitleTextStyle}" Text="剪切板" />
@@ -45,8 +45,8 @@
 
                 <StackPanel Grid.Column="1" Margin="0,0,6,0" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock x:Name="ListeningStatusText" Margin="0,0,4,0"
-                               VerticalAlignment="Center" FontSize="{StaticResource FontSizeMeta}"
-                               Foreground="{StaticResource SuccessBrush}" TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" FontSize="{DynamicResource FontSizeMeta}"
+                               Foreground="{DynamicResource SuccessBrush}" TextTrimming="CharacterEllipsis"
                                Text="● 监听" />
                     <ToggleButton x:Name="PauseButton" Width="24" Style="{StaticResource IconToggleButtonStyle}"
                                   Click="PauseButton_Click" Content="&#xE769;"
@@ -65,7 +65,7 @@
                 </StackPanel>
             </Grid>
 
-            <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom" Background="{StaticResource SeparatorBrush}" />
+            <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom" Background="{DynamicResource SeparatorBrush}" />
 
             <Grid Grid.Row="2" Margin="12,8,12,0">
                 <Grid.RowDefinitions>
@@ -101,8 +101,14 @@
                                  Tag="搜索正文或来源应用" TextChanged="SearchBox_TextChanged" />
                     </Grid>
 
-                    <WrapPanel Grid.Row="1" Margin="0,0,0,12"
-                               HorizontalAlignment="Left">
+                    <Grid Grid.Row="1" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="HistoryCountText" Grid.Column="1" Margin="8,0,2,0" VerticalAlignment="Center"
+                               Style="{StaticResource MetaTextStyle}" Text="0 条" />
+                    <WrapPanel HorizontalAlignment="Left">
                         <RadioButton x:Name="AllFilterButton" Style="{StaticResource FilterChipStyle}"
                                      GroupName="HistoryFilter" IsChecked="True"
                                      Click="AllFilterButton_Click" Content="全部" />
@@ -119,11 +125,13 @@
                                      GroupName="HistoryFilter" Click="FavoriteFilterButton_Click" Content="快速收藏"
                                      Visibility="Collapsed" />
                     </WrapPanel>
+                    </Grid>
 
                     <Grid Grid.Row="2">
                         <ListBox x:Name="HistoryList"
                                      ItemsSource="{Binding Items}"
                                      SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                                     ItemContainerStyle="{StaticResource HistoryRowItemStyle}"
                                      SelectionChanged="HistoryList_SelectionChanged"
                                      MouseDoubleClick="HistoryList_MouseDoubleClick"
                                      ContextMenuOpening="HistoryList_ContextMenuOpening">
@@ -132,66 +140,69 @@
                                 </ListBox.ContextMenu>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Grid Margin="{Binding DataContext.RowMargin, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                            </Grid.RowDefinitions>
+                                        <Grid Margin="{Binding DataContext.HistoryRowPadding, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
 
-                                            <Border Grid.RowSpan="2" Margin="0,1,8,0" VerticalAlignment="Top"
-                                                    Width="32" Height="32"
-                                                    Background="{StaticResource ThumbnailBackdropBrush}"
-                                                    CornerRadius="{StaticResource RadiusSmall}"
+                                            <!-- 类型图标：文本 Aa、链接图标、文件扩展名徽标；图片与其它文件用缩略图/系统图标。仅显示层判断。 -->
+                                            <Border Margin="0,0,10,0" VerticalAlignment="Center"
+                                                    Width="{Binding DataContext.HistoryIconSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                    Height="{Binding DataContext.HistoryIconSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                    Background="{DynamicResource ThumbnailBackdropBrush}"
+                                                    CornerRadius="{DynamicResource RadiusSmall}"
                                                     Padding="0">
                                                 <Grid>
-                                                    <TextBlock Text="&#xE8A5;" FontFamily="{StaticResource IconFontFamily}"
-                                                               Foreground="{StaticResource LabelSecondaryBrush}" FontSize="16"
-                                                               VerticalAlignment="Center" HorizontalAlignment="Center">
-                                                        <TextBlock.Style>
-                                                            <Style TargetType="TextBlock">
-                                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding PreviewVisibility}" Value="Collapsed">
-                                                                        <Setter Property="Visibility" Value="Visible" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </TextBlock.Style>
-                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding IconText}" FontFamily="{Binding IconFontFamily}"
+                                                               FontSize="{Binding IconFontSize}" FontWeight="{Binding IconFontWeight}"
+                                                               Foreground="{DynamicResource LabelSecondaryBrush}"
+                                                               Visibility="{Binding IconVisibility}"
+                                                               VerticalAlignment="Center" HorizontalAlignment="Center" />
                                                     <Image Source="{Binding Preview}" Stretch="{Binding PreviewStretch}" />
                                                 </Grid>
                                             </Border>
 
-                                            <TextBlock Grid.Column="1" Text="{Binding PreviewText}" TextWrapping="{Binding PreviewWrapping}" TextTrimming="CharacterEllipsis"
-                                                       MaxHeight="{Binding DataContext.PreviewMaxHeight, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
-
-                                            <StackPanel Grid.Column="2" Margin="8,0,0,0" Orientation="Horizontal" VerticalAlignment="Top">
-                                                <TextBlock Margin="0,0,5,0" FontFamily="{StaticResource IconFontFamily}"
-                                                           FontSize="{StaticResource FontSizeCaption}"
-                                                           Foreground="{StaticResource AccentBrandBrush}" Text="{Binding PinnedMark}" />
-                                                <TextBlock FontFamily="{StaticResource IconFontFamily}"
-                                                           FontSize="{StaticResource FontSizeCaption}"
-                                                           Foreground="{StaticResource DangerBrush}" Text="{Binding FavoriteMark}" />
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding PreviewText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Margin="0,2,0,0" Text="{Binding Metadata}" TextTrimming="CharacterEllipsis">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource MetaTextStyle}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource RowSelectedMetaBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                             </StackPanel>
 
-                                            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0"
-                                                       Style="{StaticResource MetaTextStyle}" Text="{Binding Metadata}"
-                                                       TextTrimming="CharacterEllipsis" />
-                                            <Border Grid.Row="2" Grid.ColumnSpan="3" Height="1" Margin="{Binding DataContext.HistorySeparatorMargin, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                                                    Background="{StaticResource SeparatorBrush}" />
+                                            <StackPanel Grid.Column="2" Margin="8,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Margin="0,0,5,0" FontFamily="{DynamicResource IconFontFamily}"
+                                                           FontSize="{DynamicResource FontSizeCaption}"
+                                                           Foreground="{DynamicResource AccentBrandBrush}" Text="{Binding PinnedMark}" />
+                                                <TextBlock FontFamily="{DynamicResource IconFontFamily}"
+                                                           FontSize="{DynamicResource FontSizeCaption}"
+                                                           Foreground="{DynamicResource DangerBrush}" Text="{Binding FavoriteMark}" />
+                                            </StackPanel>
+
+                                            <Border Grid.ColumnSpan="3" Height="1" VerticalAlignment="Bottom"
+                                                    Visibility="{DynamicResource RowSeparatorVisibility}"
+                                                    Background="{DynamicResource SeparatorBrush}" />
                                         </Grid>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                            <TextBlock x:Name="EmptyStateText" Text="还没有历史，复制内容试试"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                                       Foreground="{StaticResource LabelTertiaryBrush}" IsHitTestVisible="False" />
+                            <!-- 空状态：夹夹（PetCompanion 112×80，2 倍整数）在代码里插入到本面板，文案由主题提供（Copy* 键）。 -->
+                            <StackPanel x:Name="EmptyStatePanel" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        IsHitTestVisible="False" Visibility="Collapsed">
+                                <Grid x:Name="EmptyPetHost" Width="112" Height="80" Margin="0,0,0,12" />
+                                <TextBlock x:Name="EmptyStateText" Text="还没有历史，复制内容试试" TextAlignment="Center"
+                                           TextWrapping="Wrap" MaxWidth="260"
+                                           Foreground="{DynamicResource LabelSecondaryBrush}" />
+                            </StackPanel>
                         </Grid>
                     </Grid>
 
@@ -212,7 +223,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Grid Grid.Row="0">
+                        <Grid Grid.Row="0" Visibility="Collapsed">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
@@ -220,7 +231,7 @@
                             <TextBlock x:Name="TodoDateText" VerticalAlignment="Center"
                                        Style="{StaticResource TitleTextStyle}" Text="待办" />
                         </Grid>
-                        <WrapPanel Grid.Row="1" Margin="0,8,0,0" VerticalAlignment="Center">
+                        <WrapPanel Grid.Row="1" Margin="0" VerticalAlignment="Center">
                             <RadioButton x:Name="TodoAllStatsButton" IsChecked="True"
                                          Style="{StaticResource FilterChipStyle}" GroupName="TodoTopFilter"
                                          Click="TodoAllStatsButton_Click" Content="全部" />
@@ -230,7 +241,7 @@
                             <RadioButton x:Name="TodoCompletedFilterButton" Style="{StaticResource FilterChipStyle}"
                                          GroupName="TodoTopFilter"
                                          Click="TodoCompletedFilterButton_Click" Content="已完成" />
-                            <Border Width="1" Height="18" Margin="4,3,8,3" Background="{StaticResource SeparatorBrush}" />
+                            <Border Width="1" Height="18" Margin="4,3,8,3" Background="{DynamicResource SeparatorBrush}" />
                             <RadioButton x:Name="TodoMonthStatsButton"
                                          Style="{StaticResource FilterChipStyle}" GroupName="TodoTopFilter"
                                          Click="TodoMonthStatsButton_Click" Content="本月" />
@@ -253,72 +264,63 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <Border Grid.Row="0" Margin="0,0,0,8" Padding="0"
-                                Background="Transparent">
-                            <Grid><UniformGrid x:Name="TodoSummaryCards" Columns="4">
-                                <ToggleButton x:Name="TodoCompletedSummaryButton" Margin="2" Padding="5,6"
+                        <!-- 统计：一行小胶囊，点击下钻、再次点击取消筛选（逻辑不变）；"导出明细"紧随"完成率"之后。
+                             胶囊放不下时（如"本月完成"）在左侧列内换行，不会挤掉导出按钮。 -->
+                        <Grid Grid.Row="0" Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <WrapPanel x:Name="TodoSummaryCards" VerticalAlignment="Center">
+                                <ToggleButton x:Name="TodoCompletedSummaryButton"
                                               AutomationProperties.Name="完成统计"
                                               ToolTip="查看当前范围内已完成待办；再次点击取消筛选"
-                                              Style="{StaticResource TodoTagToggleStyle}"
+                                              Style="{StaticResource TodoStatPillStyle}"
                                               Click="TodoCompletedSummaryButton_Click">
-                                    <StackPanel HorizontalAlignment="Center">
-                                        <TextBlock x:Name="TodoCompletedLabel" HorizontalAlignment="Center"
-                                                   Style="{StaticResource MetaTextStyle}" Text="完成" />
-                                        <TextBlock x:Name="TodoTodayCompletedText" HorizontalAlignment="Center"
-                                                   FontSize="16" FontWeight="SemiBold" Text="0" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="TodoCompletedLabel" Text="完成" />
+                                        <TextBlock x:Name="TodoTodayCompletedText" Margin="4,0,0,0" FontWeight="SemiBold" Text="0" />
                                     </StackPanel>
                                 </ToggleButton>
-                                <ToggleButton x:Name="TodoPendingSummaryButton" Margin="2" Padding="5,6"
+                                <ToggleButton x:Name="TodoPendingSummaryButton"
                                               AutomationProperties.Name="待完成统计"
                                               ToolTip="查看当前范围内待完成待办；再次点击取消筛选"
-                                              Style="{StaticResource TodoTagToggleStyle}"
+                                              Style="{StaticResource TodoStatPillStyle}"
                                               Click="TodoPendingSummaryButton_Click">
-                                    <StackPanel HorizontalAlignment="Center">
-                                        <TextBlock x:Name="TodoPendingLabel" HorizontalAlignment="Center"
-                                                   Style="{StaticResource MetaTextStyle}" Text="待完成" />
-                                        <TextBlock x:Name="TodoPendingText" HorizontalAlignment="Center"
-                                                   FontSize="16" FontWeight="SemiBold" Text="0" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="TodoPendingLabel" Text="待完成" />
+                                        <TextBlock x:Name="TodoPendingText" Margin="4,0,0,0" FontWeight="SemiBold" Text="0" />
                                     </StackPanel>
                                 </ToggleButton>
-                                <ToggleButton x:Name="TodoCreatedSummaryButton" Margin="2" Padding="5,6"
+                                <ToggleButton x:Name="TodoCreatedSummaryButton"
                                               AutomationProperties.Name="新增统计"
                                               ToolTip="查看当前范围内新增待办；再次点击取消筛选"
-                                              Style="{StaticResource TodoTagToggleStyle}"
+                                              Style="{StaticResource TodoStatPillStyle}"
                                               Click="TodoCreatedSummaryButton_Click">
-                                    <StackPanel HorizontalAlignment="Center">
-                                        <TextBlock x:Name="TodoCreatedLabel" HorizontalAlignment="Center"
-                                                   Style="{StaticResource MetaTextStyle}" Text="新增" />
-                                        <TextBlock x:Name="TodoTodayCreatedText" HorizontalAlignment="Center"
-                                                   FontSize="16" FontWeight="SemiBold" Text="0" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="TodoCreatedLabel" Text="新增" />
+                                        <TextBlock x:Name="TodoTodayCreatedText" Margin="4,0,0,0" FontWeight="SemiBold" Text="0" />
                                     </StackPanel>
                                 </ToggleButton>
-                                <ToggleButton x:Name="TodoRateSummaryButton" Margin="2" Padding="5,6"
+                                <ToggleButton x:Name="TodoRateSummaryButton"
                                               AutomationProperties.Name="完成率统计"
                                               ToolTip="查看当前范围内用于计算完成率的待办；再次点击取消筛选"
-                                              Style="{StaticResource TodoTagToggleStyle}"
+                                              Style="{StaticResource TodoStatPillStyle}"
                                               Click="TodoRateSummaryButton_Click">
-                                    <StackPanel HorizontalAlignment="Center">
-                                        <TextBlock x:Name="TodoRateLabel" HorizontalAlignment="Center"
-                                                   Style="{StaticResource MetaTextStyle}" Text="完成率" />
-                                        <TextBlock x:Name="TodoCompletionRateText" HorizontalAlignment="Center"
-                                                   FontSize="16" FontWeight="SemiBold" Text="0%" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="TodoRateLabel" Text="完成率" />
+                                        <TextBlock x:Name="TodoCompletionRateText" Margin="4,0,0,0" FontWeight="SemiBold" Text="0%" />
                                     </StackPanel>
                                 </ToggleButton>
-                            </UniformGrid>
-<Grid IsHitTestVisible="False">
-<Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-<Line Grid.ColumnSpan="4" X2="1" Stretch="Fill" Height="1" VerticalAlignment="Top" Stroke="{StaticResource BorderStrongBrush}" StrokeDashArray="3,3" />
-<Line Grid.ColumnSpan="4" X2="1" Stretch="Fill" Height="1" VerticalAlignment="Bottom" Stroke="{StaticResource BorderStrongBrush}" StrokeDashArray="3,3" />
-<Line Grid.Column="0" Y2="1" Stretch="Fill" Width="1" HorizontalAlignment="Right" Stroke="{StaticResource BorderStrongBrush}" StrokeDashArray="3,3" />
-<Line Grid.Column="1" Y2="1" Stretch="Fill" Width="1" HorizontalAlignment="Right" Stroke="{StaticResource BorderStrongBrush}" StrokeDashArray="3,3" />
-<Line Grid.Column="2" Y2="1" Stretch="Fill" Width="1" HorizontalAlignment="Right" Stroke="{StaticResource BorderStrongBrush}" StrokeDashArray="3,3" />
-</Grid></Grid>
-</Border>
+                            </WrapPanel>
+                            <Button Grid.Column="1" Margin="4,0,0,4" Padding="8,2" VerticalAlignment="Top" FontSize="12"
+                                    Click="ExportTodoDetailsButton_Click" Content="导出明细"
+                                    ToolTip="导出全部待办及标签明细" AutomationProperties.Name="导出明细" />
+                        </Grid>
 
                         <Grid Grid.Row="1" Height="0" />
 
                         <DockPanel Grid.Row="2" Margin="0,0,0,6">
-                            <Button DockPanel.Dock="Left" Margin="0,0,6,6" Padding="9,3" FontSize="13" Click="ExportTodoDetailsButton_Click" Content="导出明细" ToolTip="导出全部待办及标签明细" />
                             <ItemsControl ItemsSource="{Binding TodoTagChoices}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
@@ -361,7 +363,7 @@
                                                 <WrapPanel Grid.Column="1" VerticalAlignment="Center">
                                                     <TextBlock Margin="0,0,6,2" VerticalAlignment="Center"
                                                                Text="{Binding OverdueText}"
-                                                               Foreground="{StaticResource DangerBrush}"
+                                                               Foreground="{DynamicResource DangerBrush}"
                                                                FontSize="10" FontWeight="SemiBold"
                                                                Visibility="{Binding OverdueVisibility}" />
                                                     <TextBlock Margin="0,0,0,2" VerticalAlignment="Center"
@@ -376,7 +378,7 @@
                                 </ListBox>
                                 <TextBlock x:Name="TodoEmptyStateText" Text="还没有待办，请在下方添加一条"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           Foreground="{StaticResource LabelTertiaryBrush}" IsHitTestVisible="False" />
+                                           Foreground="{DynamicResource LabelTertiaryBrush}" IsHitTestVisible="False" />
                             </Grid>
 
                         <Grid Grid.Row="4" Margin="0,8,0,0">
@@ -404,10 +406,10 @@
                     </Grid.RowDefinitions>
 
                     <Border x:Name="ConfigSpaceNotice" Grid.Row="0" Margin="0,0,0,9" Padding="10,6"
-                            Background="{StaticResource AccentSoftBrush}"
-                            CornerRadius="{StaticResource RadiusMedium}" Visibility="Collapsed">
-                        <TextBlock Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap"
-                                   FontSize="{StaticResource FontSizeCaption}"
+                            Background="{DynamicResource AccentSoftBrush}"
+                            CornerRadius="{DynamicResource RadiusMedium}" Visibility="Collapsed">
+                        <TextBlock Foreground="{DynamicResource AccentBrush}" TextWrapping="Wrap"
+                                   FontSize="{DynamicResource FontSizeCaption}"
                                    Text="本地团队配置仅保存在本机；切换云端后显示当前云团队的本地镜像。" />
                     </Border>
 
@@ -485,8 +487,8 @@
                                                 <Border Margin="0,0,10,0" VerticalAlignment="Top"
                                                         Width="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                                                         Height="{Binding DataContext.ThumbnailSize, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                                                        Background="{StaticResource ThumbnailBackdropBrush}"
-                                                        CornerRadius="{StaticResource RadiusSmall}"
+                                                        Background="{DynamicResource ThumbnailBackdropBrush}"
+                                                        CornerRadius="{DynamicResource RadiusSmall}"
                                                         Padding="{Binding ThumbnailPadding}"
                                                         Visibility="{Binding ThumbnailVisibility}">
                                                     <Image Source="{Binding Thumbnail}" Stretch="{Binding ThumbnailStretch}" />
@@ -494,7 +496,7 @@
                                                 <StackPanel Grid.Column="1">
                                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                                     <TextBlock Margin="0,2,0,0" Text="{Binding Preview}"
-                                                               Foreground="{StaticResource LabelSecondaryBrush}"
+                                                               Foreground="{DynamicResource LabelSecondaryBrush}"
                                                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                                                Visibility="{Binding PreviewVisibility}" />
                                                     <TextBlock Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}" Text="{Binding TypeText}" />
@@ -505,7 +507,7 @@
                                 </ListBox>
                                 <TextBlock x:Name="CollectionEmptyStateText" Text="这个文件夹还没有内容"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           Foreground="{StaticResource LabelTertiaryBrush}" IsHitTestVisible="False" />
+                                           Foreground="{DynamicResource LabelTertiaryBrush}" IsHitTestVisible="False" />
                             </Grid>
 
                             
@@ -532,7 +534,7 @@
                                  TextChanged="CalculatorExpressionBox_TextChanged" />
                         <TextBox x:Name="CalculatorResultBox" Margin="0,7,0,0" IsReadOnly="True"
                                  FontSize="20" Text="输入算式后按 Enter" AutomationProperties.Name="计算结果" />
-                        <TextBlock x:Name="CalculatorErrorText" Margin="0,4,0,0" Foreground="{StaticResource WarningBrush}"
+                        <TextBlock x:Name="CalculatorErrorText" Margin="0,4,0,0" Foreground="{DynamicResource WarningBrush}"
                                    TextWrapping="Wrap" />
                         <WrapPanel Margin="0,6,0,0">
                             <Button Content="计算" Click="CalculateButton_Click" Margin="0,0,5,5" Padding="10,5" />
@@ -566,7 +568,7 @@
         <TextBlock Text="最近计算（本次运行）" VerticalAlignment="Center" Style="{StaticResource MetaTextStyle}" />
     </DockPanel>
     <Border Grid.Row="1" Height="1" Margin="0,0,0,6"
-            Background="{StaticResource BorderStrongBrush}" Opacity="0.55" />
+            Background="{DynamicResource BorderStrongBrush}" Opacity="0.55" />
     <Grid Grid.Row="2" MinHeight="90" MaxHeight="180">
         <ListBox ItemsSource="{Binding Calculations}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
@@ -589,14 +591,14 @@
                             <Button Content="复制结果" Click="CopyRecentCalculation_Click" Margin="0,0,4,0" Padding="6,3" />
                             <Button Content="删除" Click="DeleteCalculation_Click" Padding="6,3" />
                         </WrapPanel>
-                        <Border Grid.Row="3" Height="1" Background="{StaticResource SeparatorBrush}" />
+                        <Border Grid.Row="3" Height="1" Background="{DynamicResource SeparatorBrush}" />
                     </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
         <TextBlock x:Name="CalculationEmptyText" Text="还没有计算记录" IsHitTestVisible="False"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
-                   Foreground="{StaticResource LabelTertiaryBrush}" />
+                   Foreground="{DynamicResource LabelTertiaryBrush}" />
     </Grid>
 </Grid>
                   </Grid>
@@ -633,20 +635,20 @@
                                                 <TextBlock FontWeight="SemiBold" Text="{Binding Alias}" />
                                                 <TextBlock Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}" Text="{Binding Detail}" />
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource SuccessBrush}" Text="可发送" />
+                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{DynamicResource SuccessBrush}" Text="可发送" />
                                         </Grid>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
                             <TextBlock x:Name="LanEmptyText" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                       Foreground="{StaticResource LabelTertiaryBrush}" Text="尚未发现设备" IsHitTestVisible="False" />
+                                       Foreground="{DynamicResource LabelTertiaryBrush}" Text="尚未发现设备" IsHitTestVisible="False" />
                     </Grid>
                 </Grid>
 
             </Grid>
 
-            <Border Grid.Row="3" Margin="0,4,0,0" Padding="10,6" Background="{StaticResource ChromeBrush}"
-                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
+            <Border Grid.Row="3" Margin="0,4,0,0" Padding="10,4" Background="{DynamicResource ChromeBrush}"
+                    BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="0,1,0,0">
                 <Grid x:Name="FooterContentGrid">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />

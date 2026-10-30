@@ -49,5 +49,24 @@ public sealed class JsonAppSettingsStoreTests : IDisposable
         Assert.Equal(until, (await new JsonAppSettingsStore(new AppPaths(_root)).LoadAsync()).CapturePausedUntil);
     }
 
+    [Fact]
+    public async Task Theme_DefaultsToStandard_AndRoundTripsAcrossRestart()
+    {
+        var store = new JsonAppSettingsStore(new AppPaths(_root));
+        var original = await store.LoadAsync();
+        Assert.Equal("standard", original.Theme);
+        await store.SaveAsync(original with { Theme = "jiajia" });
+        Assert.Equal("jiajia", (await new JsonAppSettingsStore(new AppPaths(_root)).LoadAsync()).Theme);
+    }
+
+    [Fact]
+    public async Task InvalidTheme_IsRejected_AndPreservesPreviousTheme()
+    {
+        var store = new JsonAppSettingsStore(new AppPaths(_root));
+        await store.SaveAsync(new AppSettings { Theme = "jiajia" });
+        await Assert.ThrowsAsync<ArgumentException>(() => store.SaveAsync(new AppSettings { Theme = "neon" }));
+        Assert.Equal("jiajia", (await store.LoadAsync()).Theme);
+    }
+
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

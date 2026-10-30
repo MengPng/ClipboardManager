@@ -12,6 +12,7 @@ public static class AppSettingsValidator
         if (settings.MaxTextBytes is < 1 or > 16 * 1024 * 1024) throw new ArgumentException("文本上限必须在 1 字节至 16 MB 之间。");
         if (settings.MaxPersistedImageBytes is < 1 or > 100 * 1024 * 1024) throw new ArgumentException("图片上限必须在 1 字节至 100 MB 之间。");
         if (settings.MaxImageCacheBytes < settings.MaxPersistedImageBytes) throw new ArgumentException("图片缓存上限不得小于单张图片上限。");
+        if (settings.Theme is not ("standard" or "jiajia")) throw new ArgumentException("界面主题只能是标准或夹夹。");
         if (settings.ExcludedProcesses is null || settings.ExcludedProcesses.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException("应用排除列表不得包含空项。");
         if (string.IsNullOrWhiteSpace(settings.GlobalHotkey)) throw new ArgumentException("呼出快捷键不能为空。");

@@ -2,9 +2,15 @@
 
 一款面向 Windows 的 Local-first（本地优先）剪切板历史工具。它首先提供稳定、快速、隐私友好的本地使用体验，并从架构上为账号系统、个人多设备云同步和团队共享剪切板预留扩展能力。
 
-## 0.8.5 桌面宠物「夹夹」（当前开发版本，未正式发布）
+## 0.8.6 夹夹主题与布局调整（当前开发版本，未正式发布）
 
-当前版本号为 **0.8.5**（`0.8.5-desktop-pet`），数据库保持 schema 7。0.8.0–0.8.5 的变更均记录在 [CHANGELOG](CHANGELOG.md) 的「Unreleased」中；正式发布版仍为 0.7.9。
+当前版本号为 **0.8.6**（`0.8.6-jiajia-theme`），数据库保持 schema 7。新增可切换的界面主题「夹夹」（设置 → 界面主题，默认仍为标准暖纸）：覆盖层 `Themes/Palette.Jiajia.xaml` 用 token 描述形状差异（白卡片描边行、胶囊页签与筛选、选中行的偏移阴影/夹子/折角、空状态里的夹夹与主题文案），标准主题取值保持 0.8.5 现状。同时两套主题共用一组布局调整：历史行高 56、类型图标、`HH:mm` 时间、条数上移到筛选行、页脚变薄；待办页统计改为一行小胶囊并与导出同排，状态与范围筛选合并一行。功能、快捷键、数据、窗口尺寸与导航顺序不变，列表仍虚拟化。
+
+已验证：Release 构建 0 警告 0 错误，211 项自动测试与 LayoutCheck（两套主题 × 5 页 × 3 尺寸，另含三种空状态，输出在 `artifacts/review/0.8.6/layout/{standard,jiajia}/`）通过。与设计稿仍有差距：页脚「夹夹」徽标、气泡、空状态提示行未做；真实桌面 100%/125%/150% 缩放、多显示器与 MSI 安装升级仍待验收，产物未签名。
+
+## 0.8.5 桌面宠物「夹夹」
+
+0.8.5 版本数据库保持 schema 7。0.8.0–0.8.6 的变更均记录在 [CHANGELOG](CHANGELOG.md) 的「Unreleased」中；正式发布版仍为 0.7.9。
 
 0.8.5 将宠物重绘为原创的"夹夹"（带折角与横格线的纸页，头顶赤陶夹子），新增按住拖动时的"被拎起"状态，并修复非 100% DPI 下拖拽错位、可拖出屏幕、隐藏后动画仍运行的问题。**0.8.5 已编译、通过自动化测试并完成打包**（`artifacts/release/0.8.5/`）。以下为 0.8.4 起的桌面宠物能力：
 
@@ -189,6 +195,7 @@ Windows 下可运行 `dotnet run --project tools/ClipboardManager.LayoutCheck --
 
 - 所有颜色、字体、圆角与行距集中在 [`Themes/Palette.xaml`](./src/ClipboardManager.Windows/Themes/Palette.xaml)，控件模板集中在 [`Themes/Controls.xaml`](./src/ClipboardManager.Windows/Themes/Controls.xaml)。两者按顺序合并进 `App.xaml`。
 - 界面代码不得内联画刷。需要换主题或做暗色时只应改调色板，不应逐个控件修改。
+- 主题只改视觉（颜色、圆角、描边、装饰显隐、文案），不改功能或布局结构；`Palette.Jiajia.xaml` 的键必须是 `Palette.xaml` 的子集（LayoutCheck 断言）。形状差异用 token（如 `RowCornerRadius`、`SelectionDecorVisibility`），控件一律以 `DynamicResource` 引用，新增控件不得硬编码颜色或形状。
 - 亚克力只使用有文档的 `DwmSetWindowAttribute`；不支持时（Windows 10 或调用被拒）降级为不透明背景，不调用未公开的 `SetWindowCompositionAttribute`。
 
 不同内容类型使用不同的记录预览：

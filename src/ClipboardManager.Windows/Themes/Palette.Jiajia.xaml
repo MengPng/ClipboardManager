@@ -1,0 +1,83 @@
+<!-- 夹夹主题：只覆盖与标准主题不同的键，须作为最后一个合并字典加载（见 ThemeService）。
+     与 Palette.xaml 同名同类型；可访问性：次要文字 #6F6258、三级文字 #78695E 在奶油/白底上均 ≥ 4.5:1。 -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <SolidColorBrush x:Key="LabelPrimaryBrush" Color="#FF2B2622" />
+    <SolidColorBrush x:Key="LabelSecondaryBrush" Color="#FF6F6258" />
+    <SolidColorBrush x:Key="LabelTertiaryBrush" Color="#FF78695E" />
+
+    <SolidColorBrush x:Key="WindowVibrancyBrush" Color="#FFFFF1E6" />
+    <SolidColorBrush x:Key="WindowFallbackBrush" Color="#FFFFF1E6" />
+    <SolidColorBrush x:Key="WindowSurfaceBrush" Color="#FFFFF9F2" />
+    <SolidColorBrush x:Key="WindowChromeBrush" Color="#FFFFF1E6" />
+
+    <SolidColorBrush x:Key="SegmentedTrackBrush" Color="#FFF6E4D6" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFF9F2" />
+    <SolidColorBrush x:Key="SurfaceOpaqueBrush" Color="#FFFFF9F2" />
+    <SolidColorBrush x:Key="ChromeBrush" Color="#FFFFF1E6" />
+
+    <SolidColorBrush x:Key="SeparatorBrush" Color="#FFEAD9CC" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#FFEAD9CC" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#FFC9B3A2" />
+
+    <SolidColorBrush x:Key="ControlFillBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="ControlFillHoverBrush" Color="#FFFBE9DD" />
+    <SolidColorBrush x:Key="ControlFillPressedBrush" Color="#FFF6D9C8" />
+    <SolidColorBrush x:Key="ControlFillDisabledBrush" Color="#FFF8EFE6" />
+    <SolidColorBrush x:Key="HoverOverlayBrush" Color="#102B2622" />
+    <SolidColorBrush x:Key="PressedOverlayBrush" Color="#202B2622" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="#FFFDE7DD" />
+    <SolidColorBrush x:Key="SelectionInactiveBrush" Color="#FFF6E4D6" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#FFFBDCCF" />
+    <SolidColorBrush x:Key="ThumbnailBackdropBrush" Color="#FFFFF1E6" />
+
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#FFD3BBA9" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#FFA88F7C" />
+
+    <SolidColorBrush x:Key="PopoverBrush" Color="#FFFFF9F2" />
+    <SolidColorBrush x:Key="TooltipBrush" Color="#FF2B2622" />
+
+    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FFFFF9F2" />
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#FF2B2622" />
+
+    <CornerRadius x:Key="RadiusSmall">8</CornerRadius>
+    <CornerRadius x:Key="RadiusMedium">12</CornerRadius>
+    <CornerRadius x:Key="RadiusLarge">16</CornerRadius>
+    <CornerRadius x:Key="RadiusPill">999</CornerRadius>
+
+    <!-- 形状 token（标准值见 Palette.xaml） -->
+    <CornerRadius x:Key="RowCornerRadius">12</CornerRadius>
+    <Thickness x:Key="RowBorderThickness">1.5</Thickness>
+    <Thickness x:Key="RowCardInset">0,4,0,4</Thickness>
+    <SolidColorBrush x:Key="RowCardBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="RowBorderBrush" Color="#FFD9C3B3" />
+    <SolidColorBrush x:Key="RowSelectedBorderBrush" Color="#FF2B2622" />
+    <SolidColorBrush x:Key="RowHoverBrush" Color="#FFFFF1E6" />
+    <SolidColorBrush x:Key="RowSelectedMetaBrush" Color="#FF6F6258" />
+    <Visibility x:Key="RowSeparatorVisibility">Collapsed</Visibility>
+    <Visibility x:Key="SelectionDecorVisibility">Visible</Visibility>
+    <SolidColorBrush x:Key="SelectionDecorBrush" Color="#FF2B2622" />
+    <Visibility x:Key="EmptyPetVisibility">Visible</Visibility>
+
+    <CornerRadius x:Key="NavPillRadius">18</CornerRadius>
+    <Thickness x:Key="NavPillBorderThickness">1.5</Thickness>
+    <SolidColorBrush x:Key="NavPillBorderBrush" Color="#FF2B2622" />
+    <Thickness x:Key="NavBottomBorderThickness">0</Thickness>
+    <SolidColorBrush x:Key="NavMarkBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="NavSelectedBackgroundBrush" Color="#FFFBDCCF" />
+    <SolidColorBrush x:Key="NavSelectedForegroundBrush" Color="#FF2B2622" />
+
+    <CornerRadius x:Key="ChipCornerRadius">14</CornerRadius>
+    <SolidColorBrush x:Key="ChipCheckedBackgroundBrush" Color="#FFFBDCCF" />
+    <SolidColorBrush x:Key="ChipMarkBrush" Color="#00FFFFFF" />
+
+    <CornerRadius x:Key="SearchCornerRadius">16</CornerRadius>
+    <SolidColorBrush x:Key="SearchFillBrush" Color="#FFFFFFFF" />
+
+    <sys:String x:Key="CopyEmptyHistory">夹夹在等你复制点什么</sys:String>
+    <sys:String x:Key="CopyPausedHistory">已暂停监听，夹夹在打盹</sys:String>
+    <sys:String x:Key="CopyNoResults">夹夹没找到，换个关键词试试？</sys:String>
+
+</ResourceDictionary>

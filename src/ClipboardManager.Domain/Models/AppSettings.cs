@@ -16,6 +16,7 @@ public sealed record AppSettings
     public bool CompactList { get; init; }
     public bool EnableClipboardCalculator { get; init; }
     public bool ShowPanelPet { get; init; } = true;
+    public string Theme { get; init; } = "standard";
     public bool IsCapturePaused { get; init; }
     public DateTimeOffset? CapturePausedUntil { get; init; }
     public IReadOnlyList<string> ExcludedProcesses { get; init; } = ["KeePass", "1Password", "Bitwarden"];

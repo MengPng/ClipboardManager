@@ -24,6 +24,22 @@ public sealed class AppSettingsValidatorTests
         Assert.Throws<ArgumentException>(() => AppSettingsValidator.Validate(new AppSettings { CloudApiBaseUrl = "http://example.test" }));
 
     [Fact]
+    public void DefaultTheme_IsStandard() => Assert.Equal("standard", new AppSettings().Theme);
+
+    [Theory]
+    [InlineData("standard")]
+    [InlineData("jiajia")]
+    public void KnownThemes_AreAccepted(string theme) => AppSettingsValidator.Validate(new AppSettings { Theme = theme });
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Jiajia")]
+    [InlineData("neon")]
+    [InlineData(null)]
+    public void UnknownTheme_IsRejected(string? theme) =>
+        Assert.Throws<ArgumentException>(() => AppSettingsValidator.Validate(new AppSettings { Theme = theme! }));
+
+    [Fact]
     public void HttpsCloudEndpoint_IsAccepted() =>
         AppSettingsValidator.Validate(new AppSettings { CloudApiBaseUrl = "https://cloud.example.test" });
 }

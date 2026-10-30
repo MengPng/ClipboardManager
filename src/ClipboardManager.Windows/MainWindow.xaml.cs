@@ -60,6 +60,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Guid? _lastOpenedFolderMappingId;
     private long _lastOpenedFolderMappingTick;
     private readonly Services.PetCompanion _panelPet;
+    private readonly Services.PetCompanion _emptyPet;
+    private bool _emptyPaused;
     // Positions of the selected folder's items in its unfiltered order, used to decide
     // whether 上移/下移 are at a boundary. Null while a search narrows the list.
     private List<Guid>? _folderItemOrder;
@@ -102,11 +104,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             Width = 28, Height = 20,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 8, 0),
+            Margin = new Thickness(0),
             ToolTip = "面板宠物",
         };
-        Grid.SetColumn(_panelPet, 1);
-        FooterContentGrid.Children.Add(_panelPet);
+        // 夹夹住在标题栏左上角，取代蓝色应用图标；宠物关闭时恢复应用图标。
+        TitleLeftPanel.Children.Insert(0, _panelPet);
+        WindowTitleIcon.Visibility = Visibility.Collapsed;
+        // 空状态里的夹夹：同一套帧图，112×80 即 56×40 的精确 2 倍；是否出现由主题 token 决定。
+        _emptyPet = new Services.PetCompanion { Width = 112, Height = 80 };
+        EmptyPetHost.Children.Add(_emptyPet);
+        EmptyPetHost.SetResourceReference(VisibilityProperty, "EmptyPetVisibility");
         Closed += (_, _) => _collapsedPet?.Close();
         var selectionSettings = new SelectionAiSettingsPanel(_settingsStore, _credentialVault);
         selectionSettings.Saved += async (_, _) =>
@@ -253,9 +260,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _teamWorkspaceId == workspaceId ? TeamSpaceName : PersonalSpaceName;
 
     public Thickness RowMargin => _compactList ? CompactRowMargin : RelaxedRowMargin;
-    public Thickness HistorySeparatorMargin => new(0, 8, 0, 0);
     public double ThumbnailSize => _compactList ? 28d : 34d;
-    public double PreviewMaxHeight => _compactList ? 18d : 36d;
+
+    // History rows are single-line: a fixed pitch (56 relaxed) keeps about 5.5 rows visible at 340x540.
+    public double HistoryRowHeight => _compactList ? 48d : 56d;
+    public double HistoryIconSize => _compactList ? 26d : 30d;
+    public Thickness HistoryRowPadding => new(10, 0, 10, 0);
 
     public async Task InitializeAsync(BootstrapContext context, CancellationToken cancellationToken = default)
     {
@@ -270,7 +280,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await _cloudModeService.SetModeAsync(AppMode.Local, cancellationToken);
         ApplySpaceLayout();
         UpdatePauseState(CapturePrivacyPolicy.IsPaused(context.Settings, DateTimeOffset.UtcNow));
+        ThemeService.Apply(context.Settings.Theme);
         _panelPet.Visibility = context.Settings.ShowPanelPet ? Visibility.Visible : Visibility.Collapsed;
+        _emptyPet.Visibility = _panelPet.Visibility;
+        WindowTitleIcon.Visibility = context.Settings.ShowPanelPet ? Visibility.Collapsed : Visibility.Visible;
         UpdatePinVisualState(context.Settings.AlwaysOnTop);
         ApplyDensity(context.Settings.CompactList);
         await RefreshHistoryAsync(cancellationToken);
@@ -302,6 +315,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var selectionAi = IsSelectionAiTabActive;
         HistoryPanel.Visibility = !config && !lan && !todo && !calculator && !selectionAi ? Visibility.Visible : Visibility.Collapsed;
         CalculatorPanel.Visibility = calculator ? Visibility.Visible : Visibility.Collapsed;
+        // 历史页的条数在筛选条右侧（HistoryCountText），页脚只留快捷提示；其它页页脚计数不变。
+        CountText.Visibility = HistoryPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         ShortcutHintText.Text = calculator ? "Enter 计算" : selectionAi ? "保存后应用" : todo ? "本机待办" : "Enter 使用";
         ShortcutHintText.ToolTip = "Ctrl+F 搜索 · Delete 删除 · Ctrl+D 存入配置 · Ctrl+P 记录置顶 · Esc 隐藏";
         TodoPanel.Visibility = todo ? Visibility.Visible : Visibility.Collapsed;
@@ -338,9 +353,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (request.IsCancellationRequested || version != _historyVersion) return;
             Items.Clear(); foreach (var item in records) Items.Add(new HistoryItemViewModel(item));
             SelectedItem = Items.FirstOrDefault(x => x.Item.Id == selectedId) ?? Items.FirstOrDefault();
-            if (IsHistoryTabActive) CountText.Text = $"{Items.Count} 条历史";
-            EmptyStateText.Text = string.IsNullOrWhiteSpace(search) ? (_monitorService.IsPaused ? "监听已暂停" : "还没有历史，复制内容试试") : "没有匹配的记录";
-            EmptyStateText.Visibility = Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            HistoryCountText.Text = $"{Items.Count} 条";
+            _emptyPaused = _monitorService.IsPaused;
+            UpdateEmptyState();
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }
         catch (Exception) when (version != _historyVersion) { /* A superseded query must not show stale errors. */ }
@@ -694,9 +709,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_compactList == compact) return;
         _compactList = compact;
         Changed(nameof(RowMargin));
-        Changed(nameof(HistorySeparatorMargin));
         Changed(nameof(ThumbnailSize));
-        Changed(nameof(PreviewMaxHeight));
+        Changed(nameof(HistoryRowHeight));
+        Changed(nameof(HistoryIconSize));
     }
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -726,6 +741,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             UpdatePauseState(CapturePrivacyPolicy.IsPaused(settings, DateTimeOffset.UtcNow));
             UpdatePinVisualState(settings.AlwaysOnTop);
             ApplyDensity(settings.CompactList);
+            ThemeService.Apply(settings.Theme);
+            _panelPet.Visibility = settings.ShowPanelPet ? Visibility.Visible : Visibility.Collapsed;
+            _emptyPet.Visibility = _panelPet.Visibility;
+            WindowTitleIcon.Visibility = settings.ShowPanelPet ? Visibility.Collapsed : Visibility.Visible;
             await RefreshHistoryAsync();
         });
     }
@@ -1311,7 +1330,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PauseButton.IsChecked = paused;
         PauseButton.Content = paused ? "\uE768" : "\uE769";
         _panelPet.SetListening(!paused);
+        _emptyPet.SetListening(!paused);
         _collapsedPet?.SetListening(!paused);
+        _emptyPaused = paused;
+        UpdateEmptyState();
+    }
+
+    /// <summary>Empty-state copy comes from the active theme's Copy* keys, never from literals here.</summary>
+    private void UpdateEmptyState()
+    {
+        string Copy(string key) => TryFindResource(key) as string ?? string.Empty;
+        EmptyStateText.Text = !string.IsNullOrWhiteSpace(SearchBox.Text) ? Copy("CopyNoResults")
+            : _emptyPaused ? Copy("CopyPausedHistory") : Copy("CopyEmptyHistory");
+        EmptyStatePanel.Visibility = Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 }
 
@@ -1323,9 +1354,24 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
     private ImageSource? _preview;
     private bool _previewResolved;
 
+    // Display-only classification: it never touches the data model or the filter categories,
+    // so a link still belongs to the 文本 filter.
+    private static readonly System.Windows.Media.FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
+    private static readonly System.Windows.Media.FontFamily LabelFont = new("Microsoft YaHei UI, Segoe UI Variable Text, Segoe UI");
+    private static readonly Dictionary<string, string> FileBadges = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".xls"] = "XLS", [".xlsx"] = "XLS", [".xlsm"] = "XLS", [".csv"] = "XLS",
+        [".doc"] = "DOC", [".docx"] = "DOC",
+        [".ppt"] = "PPT", [".pptx"] = "PPT",
+        [".pdf"] = "PDF",
+        [".zip"] = "ZIP", [".rar"] = "ZIP", [".7z"] = "ZIP",
+        [".txt"] = "TXT"
+    };
+    private bool? _isLink;
+    private string? _fileBadge;
+    private bool _fileBadgeResolved;
+
     public ClipboardItem Item { get; } = item;
-    public TextWrapping PreviewWrapping => Item.ItemType is ClipboardItemType.Files or ClipboardItemType.ImageFile
-        ? TextWrapping.NoWrap : TextWrapping.Wrap;
     public string PreviewText => Item.ItemType switch
     {
         ClipboardItemType.Image => TypeText,
@@ -1350,12 +1396,53 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
             {
                 ClipboardItemType.Image => ListPreviewProvider.LoadThumbnail(Item.ThumbnailPath ?? Item.ImagePath),
                 ClipboardItemType.ImageFile when Files.Length > 0 => ListPreviewProvider.LoadThumbnail(Files[0]) ?? ListPreviewProvider.LoadFileIcon(Files[0]),
-                ClipboardItemType.Files when Files.Length > 0 => ListPreviewProvider.LoadFileIcon(Files[0]),
+                ClipboardItemType.Files when Files.Length > 0 && FileBadge is null => ListPreviewProvider.LoadFileIcon(Files[0]),
                 _ => null
             };
             return _preview;
         }
     }
+
+    private bool IsLink => _isLink ??= Item.ItemType == ClipboardItemType.Text && LooksLikeLink(Item.TextContent ?? Item.PreviewText);
+
+    private string? FileBadge
+    {
+        get
+        {
+            if (_fileBadgeResolved) return _fileBadge;
+            _fileBadgeResolved = true;
+            if (Item.ItemType != ClipboardItemType.Files || Files.Length == 0) return null;
+            string? badge = null;
+            foreach (var file in Files)
+            {
+                if (!FileBadges.TryGetValue(Path.GetExtension(file), out var next) || (badge is not null && badge != next)) return null;
+                badge = next;
+            }
+
+            return _fileBadge = badge;
+        }
+    }
+
+    private static bool LooksLikeLink(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var value = text.Trim();
+        if (value.Length > 2048) return false;
+        if (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return false;
+        return !value.Any(char.IsWhiteSpace);
+    }
+
+    private bool UsesLabelIcon => (Item.ItemType == ClipboardItemType.Text && !IsLink) || FileBadge is not null;
+    public string IconText => Item.ItemType switch
+    {
+        ClipboardItemType.Text => IsLink ? "" : "Aa",
+        ClipboardItemType.Files when FileBadge is { } badge => badge,
+        _ => ""
+    };
+    public System.Windows.Media.FontFamily IconFontFamily => UsesLabelIcon ? LabelFont : IconFont;
+    public double IconFontSize => FileBadge is not null ? 9d : UsesLabelIcon ? 13d : 16d;
+    public FontWeight IconFontWeight => UsesLabelIcon ? FontWeights.SemiBold : FontWeights.Normal;
+    public Visibility IconVisibility => UsesLabelIcon || IsLink || Preview is null ? Visibility.Visible : Visibility.Collapsed;
 
     public Visibility PreviewVisibility => Item.ItemType == ClipboardItemType.Text ? Visibility.Collapsed : Visibility.Visible;
     public Stretch PreviewStretch => Item.ItemType is ClipboardItemType.Image or ClipboardItemType.ImageFile ? Stretch.UniformToFill : Stretch.Uniform;
@@ -1376,7 +1463,7 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
             return ListPreviewProvider.LoadTypeName(Item.ImagePath ?? Item.ThumbnailPath) ?? "图片";
         if (Item.ItemType == ClipboardItemType.ImageFile)
             return Files.Length > 0 ? ListPreviewProvider.LoadTypeName(Files[0]) ?? "图片" : "图片";
-        if (Item.ItemType != ClipboardItemType.Files) return "文本";
+        if (Item.ItemType != ClipboardItemType.Files) return IsLink ? "链接" : "文本";
         if (Files.Length == 0) return "文件";
         var extensions = Files.Select(Path.GetExtension).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         if (extensions > 1) return "多种文件";
@@ -1413,7 +1500,9 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
             if (missing > 0) parts.Add(missing == Files.Length ? "已失效" : $"{missing} 项已失效");
         }
 
-        parts.Add(Item.CapturedAt.ToLocalTime().ToString("MM-dd HH:mm"));
+        // Today's items show the clock time only; older ones keep the date.
+        var captured = Item.CapturedAt.ToLocalTime();
+        parts.Add(captured.Date == DateTime.Now.Date ? captured.ToString("HH:mm") : captured.ToString("MM-dd HH:mm"));
         return string.Join(" · ", parts);
     }
 }

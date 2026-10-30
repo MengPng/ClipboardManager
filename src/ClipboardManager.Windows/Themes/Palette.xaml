@@ -84,6 +84,48 @@
     <CornerRadius x:Key="RadiusLarge">10</CornerRadius>
     <CornerRadius x:Key="RadiusPill">3</CornerRadius>
 
+    <!-- 形状 token：标准主题取值即 0.8.5 的现状；夹夹主题在 Palette.Jiajia.xaml 覆盖。
+         控件模板只引用这些键（DynamicResource），不再按主题写死形状。 -->
+
+    <!-- 历史行：标准 = 透明底 + 左缘 2px 选中条 + 发线分隔；夹夹 = 白卡片描边，无发线。 -->
+    <CornerRadius x:Key="RowCornerRadius">6</CornerRadius>
+    <Thickness x:Key="RowBorderThickness">2,0,0,0</Thickness>
+    <Thickness x:Key="RowCardInset">0</Thickness>
+    <SolidColorBrush x:Key="RowCardBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="RowBorderBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="RowSelectedBorderBrush" Color="#FFD97757" />
+    <SolidColorBrush x:Key="RowHoverBrush" Color="#101F1E1C" />
+    <SolidColorBrush x:Key="RowSelectedMetaBrush" Color="#FFA39F94" />
+    <Visibility x:Key="RowSeparatorVisibility">Visible</Visibility>
+    <!-- 选中行的偏移阴影、夹子与折角；只在夹夹主题显示。 -->
+    <Visibility x:Key="SelectionDecorVisibility">Collapsed</Visibility>
+    <SolidColorBrush x:Key="SelectionDecorBrush" Color="#FF1F1E1C" />
+    <!-- 历史页空状态里的夹夹（还需"显示小宠物"开启）。 -->
+    <Visibility x:Key="EmptyPetVisibility">Collapsed</Visibility>
+
+    <!-- 顶部页签：标准 = 沙色圆角块 + 赤陶下划线 + 底部发线；夹夹 = 描边胶囊，无下划线。 -->
+    <CornerRadius x:Key="NavPillRadius">6</CornerRadius>
+    <Thickness x:Key="NavPillBorderThickness">0</Thickness>
+    <SolidColorBrush x:Key="NavPillBorderBrush" Color="#00FFFFFF" />
+    <Thickness x:Key="NavBottomBorderThickness">0,0,0,1</Thickness>
+    <SolidColorBrush x:Key="NavMarkBrush" Color="#FFD97757" />
+    <SolidColorBrush x:Key="NavSelectedBackgroundBrush" Color="#FFF0E9DE" />
+    <SolidColorBrush x:Key="NavSelectedForegroundBrush" Color="#FFD97757" />
+
+    <!-- 筛选条：标准 = 墨色下划线；夹夹 = 选中为填充胶囊。键盘焦点仍用下划线显示。 -->
+    <CornerRadius x:Key="ChipCornerRadius">0</CornerRadius>
+    <SolidColorBrush x:Key="ChipCheckedBackgroundBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="ChipMarkBrush" Color="#FF1F1E1C" />
+
+    <!-- 搜索框。 -->
+    <CornerRadius x:Key="SearchCornerRadius">4</CornerRadius>
+    <SolidColorBrush x:Key="SearchFillBrush" Color="#FFFAF9F5" />
+
+    <!-- 主题文案：由主题提供，代码按键读取，不在窗口里散落硬编码。 -->
+    <sys:String x:Key="CopyEmptyHistory">还没有历史，复制内容试试</sys:String>
+    <sys:String x:Key="CopyPausedHistory">监听已暂停</sys:String>
+    <sys:String x:Key="CopyNoResults">没有匹配的记录</sys:String>
+
     <Thickness x:Key="RowMarginRelaxed">12,8,12,8</Thickness>
     <Thickness x:Key="RowMarginCompact">12,5,12,5</Thickness>
 

@@ -22,6 +22,34 @@ internal static class Program
                 app.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(
                     File.ReadAllText(Path.Combine(root, "src/ClipboardManager.Windows/Themes", file))));
 
+            // Theme override layers may only redefine keys the standard palette already owns,
+            // and must parse; a typo here would silently fall back to the standard value.
+            var themeDir = Path.Combine(root, "src/ClipboardManager.Windows/Themes");
+            var jiajia = (ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(themeDir, "Palette.Jiajia.xaml")));
+            var standardKeys = ((ResourceDictionary)app.Resources.MergedDictionaries[0]).Keys.Cast<object>().ToHashSet();
+            var unknown = jiajia.Keys.Cast<object>().Where(key => !standardKeys.Contains(key)).ToArray();
+            if (unknown.Length > 0)
+                throw new InvalidOperationException("Palette.Jiajia.xaml defines keys absent from Palette.xaml: " + string.Join(", ", unknown));
+            // Shape and copy tokens: the standard palette owns every one (with 0.8.5 values) and
+            // the jiajia layer overrides all of them, so a template never resolves a missing key.
+            var shapeTokens = new[]
+            {
+                "RowCornerRadius", "RowBorderThickness", "RowCardInset", "RowCardBrush", "RowBorderBrush", "RowSelectedBorderBrush",
+                "RowHoverBrush", "RowSelectedMetaBrush", "RowSeparatorVisibility", "SelectionDecorVisibility", "SelectionDecorBrush",
+                "EmptyPetVisibility", "NavPillRadius", "NavPillBorderThickness", "NavPillBorderBrush", "NavBottomBorderThickness",
+                "NavMarkBrush", "NavSelectedBackgroundBrush", "NavSelectedForegroundBrush", "ChipCornerRadius",
+                "ChipCheckedBackgroundBrush", "ChipMarkBrush", "SearchCornerRadius", "SearchFillBrush", "RadiusPill",
+                "CopyEmptyHistory", "CopyPausedHistory", "CopyNoResults"
+            };
+            var missingStandard = shapeTokens.Where(key => !standardKeys.Contains(key)).ToArray();
+            var missingJiajia = shapeTokens.Where(key => !jiajia.Contains(key)).ToArray();
+            if (missingStandard.Length > 0 || missingJiajia.Length > 0)
+                throw new InvalidOperationException("Theme tokens missing. standard: " + string.Join(", ", missingStandard) + " jiajia: " + string.Join(", ", missingJiajia));
+            var standardRow = (ResourceDictionary)app.Resources.MergedDictionaries[0];
+            if (!Equals(standardRow["SelectionDecorVisibility"], Visibility.Collapsed) || !Equals(jiajia["SelectionDecorVisibility"], Visibility.Visible) ||
+                !Equals(standardRow["RowBorderThickness"], new Thickness(2, 0, 0, 0)))
+                throw new InvalidOperationException("Standard theme must keep the 0.8.5 row shape (left bar, no decor); jiajia must show the selection decor.");
+
             var document = XDocument.Load(Path.Combine(root, "src/ClipboardManager.Windows/MainWindow.xaml"));
             XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
             var presentation = document.Root!.Name.Namespace;
@@ -32,15 +60,20 @@ internal static class Program
                 throw new InvalidOperationException("The compact shell must default to 340x540 DIP with a 340x450 DIP minimum.");
             var historyList = document.Descendants(presentation + "ListBox")
                 .Single(element => element.Attribute(x + "Name")?.Value == "HistoryList");
+            // Each history row keeps exactly one separator: a theme-switched hairline inside the row
+            // (standard) or the card outline (jiajia). The row has a fixed pitch from HistoryRowHeight.
             var separator = historyList.Descendants(presentation + "Border")
-                .Single(element => element.Attribute("Grid.Row")?.Value == "2" &&
-                                   element.Attribute("Height")?.Value == "1");
-            var separatorRow = separator.Parent!
-                .Element(presentation + "Grid.RowDefinitions")!
-                .Elements(presentation + "RowDefinition")
-                .ElementAt(2);
-            if (separatorRow.Attribute("Height")?.Value != "Auto")
-                throw new InvalidOperationException("History separator must use an auto-sized row so its top margin cannot consume the 1px line.");
+                .Single(element => element.Attribute("Height")?.Value == "1");
+            if (separator.Attribute("Visibility")?.Value != "{DynamicResource RowSeparatorVisibility}" ||
+                separator.Attribute("VerticalAlignment")?.Value != "Bottom")
+                throw new InvalidOperationException("History separator must be the bottom hairline driven by RowSeparatorVisibility, not a second line beside the card outline.");
+            var rowGrid = historyList.Descendants(presentation + "DataTemplate").Single().Elements(presentation + "Grid").Single();
+            // The pitch is pinned on the container (HistoryRowItemStyle) so the card inset sits inside it.
+            if (rowGrid.Attribute("Height") is not null ||
+                !File.ReadAllText(Path.Combine(root, "src", "ClipboardManager.Windows", "Themes", "Controls.xaml")).Contains("<Setter Property=\"Height\" Value=\"{Binding DataContext.HistoryRowHeight"))
+                throw new InvalidOperationException("History rows must take their fixed pitch from HistoryRowHeight on the item container.");
+            if (historyList.Attribute("ItemContainerStyle")?.Value != "{StaticResource HistoryRowItemStyle}")
+                throw new InvalidOperationException("History rows must use the token-driven HistoryRowItemStyle.");
             var calculatorPanel = document.Descendants(presentation + "ScrollViewer")
                 .Single(element => element.Attribute(x + "Name")?.Value == "CalculatorPanel");
             var calculatorTemplates = calculatorPanel.Descendants(presentation + "DataTemplate").ToArray();
@@ -83,8 +116,8 @@ internal static class Program
             petHost.UpdateLayout();
             var petCheck = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             petCheck.Render(petHost);
-            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.5", "layout"));
-            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.5", "layout", "PanelPet-probe.png"));
+            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.6", "layout"));
+            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.6", "layout", "PanelPet-probe.png"));
             var petBytes = new byte[56 * 40 * 4];
             petCheck.CopyPixels(petBytes, 56 * 4, 0);
             if (ClipboardManager.Windows.Services.PetCompanion.LoadError is not null)
@@ -101,29 +134,51 @@ internal static class Program
             System.Threading.Thread.Sleep(350);
             var probeBitmap = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             probeBitmap.Render(collapsedProbe);
-            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.5", "layout", "CollapsedPetWindow-probe.png"));
+            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.6", "layout", "CollapsedPetWindow-probe.png"));
             var probeBytes = new byte[56 * 40 * 4];
             probeBitmap.CopyPixels(probeBytes, 56 * 4, 0);
             collapsedProbe.Close();
             if (probeBytes.All(b => b == 0))
                 throw new InvalidOperationException("CollapsedPetWindow renders an empty visual tree; the pet never draws inside the collapsed host.");
             Console.WriteLine("PASS CollapsedPetWindow visual probe");
-            var output = Path.Combine(root, "artifacts", "review", "0.8.5", "layout");
+            var output = Path.Combine(root, "artifacts", "review", "0.8.6", "layout");
             Directory.CreateDirectory(output);
+            // Rows are the production view-models, so the icon, link, badge and time rules under
+            // test are the shipped ones. The xlsx exists on disk so the row is not marked as stale.
+            var sampleDir = Path.Combine(output, "_sample");
+            Directory.CreateDirectory(sampleDir);
+            var sampleFile = Path.Combine(sampleDir, "发布检查记录.xlsx");
+            File.WriteAllBytes(sampleFile, []);
+            static ClipboardItem SampleItem(ClipboardItemType type, string preview, string source, DateTime at, string? manifest = null) => new()
+            {
+                Id = Guid.NewGuid(), WorkspaceId = Guid.Empty, DeviceId = Guid.Empty, ItemType = type, ContentHash = preview,
+                TextContent = type == ClipboardItemType.Text ? preview : null, PreviewText = preview, SourceApp = source,
+                CreatedAt = at, UpdatedAt = at, CapturedAt = at, FileManifest = manifest
+            };
+            var sampleRows = new[]
+            {
+                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "本周产品检查清单", "记事本", DateTime.Today.AddHours(14).AddMinutes(32))),
+                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "https://clipboard.netkaize.com/design/v2", "Edge", DateTime.Today.AddHours(14).AddMinutes(29))),
+                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Files, "发布检查记录.xlsx", "资源管理器", DateTime.Today.AddHours(14).AddMinutes(4),
+                    System.Text.Json.JsonSerializer.Serialize(new[] { sampleFile }))),
+                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "长文本示例：核对搜索、配置、待办、计算与划词的完整操作路径，并确认单行省略号不会撑开行高。", "记事本", DateTime.Today.AddHours(13).AddMinutes(10))),
+                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "本地优先，让每一次复制都安心。", "微信", DateTime.Today.AddDays(-1).AddHours(9).AddMinutes(41))),
+                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "季度复盘会议纪要", "记事本", DateTime.Today.AddDays(-1).AddHours(9).AddMinutes(12)))
+            };
+            if (sampleRows[0].IconText != "Aa" || sampleRows[1].IconText != "\uE71B" || sampleRows[2].IconText != "XLS" ||
+                !sampleRows[1].Metadata.StartsWith("链接 · ") || !sampleRows[0].Metadata.StartsWith("文本 · "))
+                throw new InvalidOperationException($"History type icons: {sampleRows[0].IconText}/{sampleRows[1].IconText}/{sampleRows[2].IconText} | {sampleRows[1].Metadata}");
+            if (!sampleRows[0].Metadata.EndsWith(" · 14:32") || sampleRows[0].Metadata.Contains("今天") ||
+                !System.Text.RegularExpressions.Regex.IsMatch(sampleRows[4].Metadata, @" · \d\d-\d\d \d\d:\d\d$"))
+                throw new InvalidOperationException($"History time format: {sampleRows[0].Metadata} | {sampleRows[4].Metadata}");
             window.DataContext = new
             {
                 RowMargin = new Thickness(10, 9, 10, 9),
                 ThumbnailSize = 34d,
-                PreviewMaxHeight = 36d,
-                HistorySeparatorMargin = new Thickness(0, 8, 0, 0),
-                Items = new[]
-                {
-                    new PreviewRow("本周产品检查清单", "文本 · 记事本 · 今天 14:32"),
-                    new PreviewRow("本地优先，让每一次复制都安心。", "文本 · 微信 · 今天 14:29"),
-                    new PreviewRow("发布检查记录.xlsx", "文件 · Excel · 今天 14:04"),
-                    new PreviewRow("https://clipboard.netkaize.com", "文本 · Edge · 今天 13:32"),
-                    new PreviewRow("长文本示例：核对搜索、配置、待办、计算与划词的完整操作路径。", "文本 · 记事本 · 今天 13:10")
-                }
+                HistoryRowHeight = 56d,
+                HistoryIconSize = 30d,
+                HistoryRowPadding = new Thickness(10, 0, 10, 0),
+                Items = sampleRows
             };
             var surface = (FrameworkElement)window.Content;
             var tabs = (FrameworkElement)window.FindName("MainTabs");
@@ -134,7 +189,14 @@ internal static class Program
             var panels = new[] { "HistoryPanel", "TodoPanel", "ConfigPanel", "CalculatorPanel", "SelectionAiPanel" }
                 .Select(name => (FrameworkElement)window.FindName(name)).ToArray();
             window.Show();
-            ((TextBlock)window.FindName("EmptyStateText")).Visibility = Visibility.Collapsed;
+            // Same wiring MainWindow's constructor does in code (loose XAML has no code-behind).
+            var emptyPet = new ClipboardManager.Windows.Services.PetCompanion { Width = 112, Height = 80 };
+            var emptyHost = (Grid)window.FindName("EmptyPetHost");
+            emptyHost.Children.Add(emptyPet);
+            emptyHost.SetResourceReference(UIElement.VisibilityProperty, "EmptyPetVisibility");
+            var emptyPanel = (FrameworkElement)window.FindName("EmptyStatePanel");
+            emptyPanel.Visibility = Visibility.Collapsed;
+            ((TextBlock)window.FindName("HistoryCountText")).Text = $"{sampleRows.Length} 条";
             ((TextBlock)window.FindName("CountText")).Text = "5 条历史";
             for (var cycle = 0; cycle < 3; cycle++)
             {
@@ -160,11 +222,20 @@ internal static class Program
                 if (bounds.Right > surface.ActualWidth || bounds.Width < 1)
                     throw new InvalidOperationException("Title controls overflow after collapse/expand.");
             }
+            // Pass 1 renders the standard palette; pass 2 merges the jiajia override layer last
+            // (same as ThemeService.Apply) and runs every layout assertion again.
+            foreach (var themed in new[] { false, true })
             foreach (var size in new[] { new Size(340, 540), new Size(340, 450), new Size(520, 700) })
             foreach (var active in panels)
             {
+                if (themed && !app.Resources.MergedDictionaries.Contains(jiajia))
+                    app.Resources.MergedDictionaries.Add(jiajia);
+                var renderDir = Path.Combine(output, themed ? "jiajia" : "standard");
+                Directory.CreateDirectory(renderDir);
                 foreach (var panel in panels)
                     panel.Visibility = panel == active ? Visibility.Visible : Visibility.Collapsed;
+                // The history page shows its count beside the filters; the footer count is for the other pages.
+                count.Visibility = active.Name == "HistoryPanel" ? Visibility.Collapsed : Visibility.Visible;
                 window.Width = size.Width;
                 window.Height = size.Height;
                 surface.Measure(size);
@@ -175,11 +246,16 @@ internal static class Program
                 var listeningBounds = Bounds(listening, surface);
                 var settingsBounds = Bounds(settings, surface);
                 var contentBounds = Bounds(active, surface);
-                var footerBounds = Bounds(count, surface);
+                var footerGrid = (FrameworkElement)window.FindName("FooterContentGrid");
+                var footerBounds = Bounds(footerGrid, surface);
                 var hintBounds = Bounds((FrameworkElement)window.FindName("ShortcutHintText"), surface);
-                if (footerBounds.Left < 0 || footerBounds.Right > hintBounds.Left ||
-                    hintBounds.Right > size.Width || hintBounds.Width < 1)
-                    throw new InvalidOperationException($"Footer count and shortcut overlap: {footerBounds}, {hintBounds}");
+                var countBounds = count.Visibility == Visibility.Visible ? Bounds(count, surface) : Rect.Empty;
+                if (hintBounds.Right > size.Width || hintBounds.Width < 1 ||
+                    (count.Visibility == Visibility.Visible && (countBounds.Left < 0 || countBounds.Right > hintBounds.Left)))
+                    throw new InvalidOperationException($"Footer count and shortcut overlap: {countBounds}, {hintBounds}");
+                // P1: the footer is thinner now that the history count moved up beside the filters.
+                if (((FrameworkElement)footerGrid.Parent).ActualHeight > 30.5)
+                    throw new InvalidOperationException($"Footer must be at most 30 DIP tall: {((FrameworkElement)footerGrid.Parent).ActualHeight}");
                 var visibleTabs = navigation.Items.Cast<TabItem>().Where(tab => tab.Visibility == Visibility.Visible).ToArray();
                 var tabWidths = visibleTabs.Select(tab => tab.ActualWidth).ToArray();
                 if (tabWidths.Max() - tabWidths.Min() > 1 ||
@@ -199,9 +275,53 @@ internal static class Program
                     if (buttons.Any(button => Equals(button.Content, "标签管理")) ||
                         exportBounds.Left < 0 || exportBounds.Right > size.Width || exportBounds.Width < 1)
                         throw new InvalidOperationException("Todo tag management must be removed and export must remain visible.");
-                    var lines = Descendants(active).OfType<System.Windows.Shapes.Line>().ToArray();
-                    if (lines.Length != 5 || lines.Any(line => line.ActualWidth < 1 || line.ActualHeight < 1))
-                        throw new InvalidOperationException("Todo summary dashed separators have invalid rendered dimensions.");
+                    // P1 todo page: no duplicate "待办" heading, state and range filters on one row,
+                    // four stat pills on one row followed by the export button; drill-down names unchanged.
+                    var dateHeading = (FrameworkElement)window.FindName("TodoDateText");
+                    if (dateHeading.IsVisible)
+                        throw new InvalidOperationException("The todo page must not repeat the tab name as a heading.");
+                    var pillNames = new[]
+                    {
+                        ("TodoCompletedSummaryButton", "完成统计"), ("TodoPendingSummaryButton", "待完成统计"),
+                        ("TodoCreatedSummaryButton", "新增统计"), ("TodoRateSummaryButton", "完成率统计")
+                    };
+                    var pills = pillNames.Select(item => (System.Windows.Controls.Primitives.ToggleButton)window.FindName(item.Item1)).ToArray();
+                    if (pills.Select((pill, index) => System.Windows.Automation.AutomationProperties.GetName(pill) != pillNames[index].Item2).Any(bad => bad))
+                        throw new InvalidOperationException("Todo stat pills must keep their automation names.");
+                    var filterButtons = new[] { "TodoAllStatsButton", "TodoActiveFilterButton", "TodoCompletedFilterButton", "TodoMonthStatsButton", "TodoYearStatsButton" }
+                        .Select(name => Bounds((FrameworkElement)window.FindName(name), surface)).ToArray();
+                    if (filterButtons.Max(b => b.Top) - filterButtons.Min(b => b.Top) > 1 || filterButtons.Max(b => b.Right) > size.Width - 12 + 1)
+                        throw new InvalidOperationException($"Todo state and range filters must share one unclipped row: {string.Join(" ", filterButtons)}");
+                    void AssertPills(string stage, bool oneRow)
+                    {
+                        surface.UpdateLayout();
+                        var rects = pills.Select(pill => Bounds(pill, surface)).ToList();
+                        var exportRect = Bounds(export, surface);
+                        rects.Add(exportRect);
+                        for (var i = 0; i < rects.Count; i++)
+                        {
+                            if (rects[i].Left < 12 - 1 || rects[i].Right > size.Width - 12 + 1 || rects[i].Bottom > contentBounds.Bottom)
+                                throw new InvalidOperationException($"Todo summary {stage} clipped at {size}: item {i} {rects[i]}");
+                            for (var j = i + 1; j < rects.Count; j++)
+                                if (rects[i].IntersectsWith(new Rect(rects[j].X + 0.5, rects[j].Y + 0.5, rects[j].Width - 1, rects[j].Height - 1)))
+                                    throw new InvalidOperationException($"Todo summary {stage} overlaps at {size}: {i} {rects[i]} / {j} {rects[j]}");
+                        }
+
+                        if (oneRow && (rects.Max(r => r.Top) - rects.Min(r => r.Top) > 8 || exportRect.Left < rects[3].Right))
+                            throw new InvalidOperationException($"Todo summary pills and export must read as one row: {string.Join(" ", rects)}");
+                    }
+                    AssertPills("default", oneRow: true);
+                    // Worst case: period-prefixed labels and a full one-decimal rate may wrap a pill, but never clip or overlap.
+                    var labelTexts = new[] { "TodoCompletedLabel", "TodoCreatedLabel" }.Select(name => (TextBlock)window.FindName(name)).ToArray();
+                    var valueTexts = new[] { "TodoTodayCompletedText", "TodoPendingText", "TodoTodayCreatedText", "TodoCompletionRateText" }.Select(name => (TextBlock)window.FindName(name)).ToArray();
+                    var oldLabels = labelTexts.Select(text => text.Text).ToArray();
+                    var oldValues = valueTexts.Select(text => text.Text).ToArray();
+                    labelTexts[0].Text = "本月完成"; labelTexts[1].Text = "本月新增";
+                    valueTexts[0].Text = "128"; valueTexts[1].Text = "128"; valueTexts[2].Text = "256"; valueTexts[3].Text = "83.3%";
+                    AssertPills("worst-case", oneRow: false);
+                    for (var i = 0; i < labelTexts.Length; i++) labelTexts[i].Text = oldLabels[i];
+                    for (var i = 0; i < valueTexts.Length; i++) valueTexts[i].Text = oldValues[i];
+                    surface.UpdateLayout();
                 }
                 if (tabBounds.Top < titleBounds.Bottom - 1 ||
                     contentBounds.Top < tabBounds.Bottom - 1 ||
@@ -210,6 +330,57 @@ internal static class Program
                     listeningBounds.Right > size.Width || settingsBounds.Right > size.Width)
                     throw new InvalidOperationException(
                         $"{active.Name} {size}: title={titleBounds}, listening={listeningBounds}, settings={settingsBounds}, tabs={tabBounds}, content={contentBounds}, footer={footerBounds}");
+                if (active.Name == "HistoryPanel")
+                {
+                    var historyBox = (ListBox)window.FindName("HistoryList");
+                    historyBox.SelectedIndex = 0;
+                    surface.UpdateLayout();
+                    var historyBounds = Bounds(historyBox, surface);
+                    var countRect = Bounds((FrameworkElement)window.FindName("HistoryCountText"), surface);
+                    var searchRect = Bounds((FrameworkElement)window.FindName("SearchBox"), surface);
+                    var chipRects = new[] { "AllFilterButton", "TextFilterButton", "ImageFilterButton", "FileFilterButton" }
+                        .Select(name => Bounds((FrameworkElement)window.FindName(name), surface)).ToArray();
+                    if (countRect.Right > size.Width - 12 + 1 || countRect.Left < chipRects.Max(r => r.Right) ||
+                        chipRects.Max(r => r.Top) - chipRects.Min(r => r.Top) > 1 || searchRect.Right > size.Width - 12 + 1 ||
+                        historyBounds.Bottom > contentBounds.Bottom + 1)
+                        throw new InvalidOperationException($"History filter row clipped at {size}: count={countRect}, chips={string.Join(" ", chipRects)}, search={searchRect}, list={historyBounds}");
+                    var realized = Enumerable.Range(0, historyBox.Items.Count)
+                        .Select(index => historyBox.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem)
+                        .Where(container => container is not null).Cast<ListBoxItem>().ToArray();
+                    if (realized.Length < 2)
+                        throw new InvalidOperationException($"History list must realize rows at {size}: {realized.Length}");
+                    foreach (var container in realized)
+                    {
+                        if (Math.Abs(container.ActualHeight - 56) > 0.5)
+                            throw new InvalidOperationException($"History row pitch must be 56 DIP at {size}: {container.ActualHeight}");
+                        var rowText = Descendants(container).OfType<TextBlock>().First(text => text.Text == ((ClipboardManager.Windows.HistoryItemViewModel)container.DataContext).PreviewText);
+                        if (rowText.ActualHeight > 22)
+                            throw new InvalidOperationException($"History preview must stay on one line at {size}: {rowText.ActualHeight} for '{rowText.Text}'");
+                        var rowIcon = Descendants(container).OfType<Border>().First(border => border.Width == 30);
+                        if (rowIcon.ActualWidth != 30 || rowIcon.ActualHeight != 30)
+                            throw new InvalidOperationException($"History type icon must be 30x30: {rowIcon.ActualWidth}x{rowIcon.ActualHeight}");
+                        var hairline = Descendants(container).OfType<Border>().Single(border => border.Height == 1);
+                        if (hairline.IsVisible == themed)
+                            throw new InvalidOperationException($"Row separator must be a hairline in standard only (themed={themed}, visible={hairline.IsVisible}).");
+                    }
+
+                    // Selection decor (shadow, clip, fold) belongs to the jiajia theme only.
+                    var selectedRow = realized[0];
+                    foreach (var part in new[] { "Shadow", "Clip", "Fold" })
+                    {
+                        var element = (FrameworkElement)selectedRow.Template.FindName(part, selectedRow);
+                        if (element.IsVisible != themed)
+                            throw new InvalidOperationException($"Selection decor '{part}' visibility must follow the theme (themed={themed}, visible={element.IsVisible}).");
+                        if (realized.Length > 1 && ((FrameworkElement)realized[1].Template.FindName(part, realized[1])).IsVisible)
+                            throw new InvalidOperationException($"Unselected rows must not show selection decor '{part}'.");
+                    }
+
+                    if (size.Width == 340 && size.Height == 540 && historyBox.ActualHeight / 56 < 5.4)
+                        throw new InvalidOperationException($"340x540 must show about 5.5 history rows: viewport {historyBox.ActualHeight} DIP");
+                    if (size.Width == 340 && size.Height == 450 && historyBox.ActualHeight < 56 * 2)
+                        throw new InvalidOperationException($"340x450 must keep two full history rows: viewport {historyBox.ActualHeight} DIP");
+                    Console.WriteLine($"  history viewport {historyBox.ActualHeight:F0} DIP = {historyBox.ActualHeight / 56:F2} rows at {size}");
+                }
                 if (active.Name == "ConfigPanel")
                 {
                     var search = (FrameworkElement)window.FindName("CollectionSearchBox");
@@ -226,7 +397,7 @@ internal static class Program
                     if (!save.IsEnabled || saveBounds.Width < 50 || saveBounds.Bottom > contentBounds.Bottom + 1)
                         throw new InvalidOperationException("Selection settings must load and keep its save action inside the content area.");
                 }
-                Console.WriteLine($"PASS {active.Name} {size}: content={contentBounds}, footerY={footerBounds.Top:F0}");
+                Console.WriteLine($"PASS {(themed ? "jiajia" : "standard")} {active.Name} {size}: content={contentBounds}, footerY={footerBounds.Top:F0}");
                 navigation.SelectedItem = active.Name switch
                 {
                     "TodoPanel" => window.FindName("TodoTab"),
@@ -253,7 +424,55 @@ internal static class Program
                 var list = (ListBox)window.FindName("HistoryList");
                 if (active.Name == "HistoryPanel") list.SelectedIndex = 0;
                 surface.UpdateLayout();
-                SaveRender(surface, size, Path.Combine(output, $"{active.Name}-{size.Width}x{size.Height}.png"));
+                SaveRender(surface, size, Path.Combine(renderDir, $"{active.Name}-{size.Width}x{size.Height}.png"));
+
+                if (active.Name == "HistoryPanel")
+                {
+                    // Empty history: the jiajia theme shows the 112x80 pet and its own copy; standard shows text only.
+                    var populated = window.DataContext;
+                    window.DataContext = new
+                    {
+                        RowMargin = new Thickness(10, 9, 10, 9), ThumbnailSize = 34d, HistoryRowHeight = 56d,
+                        HistoryIconSize = 30d, HistoryRowPadding = new Thickness(10, 0, 10, 0),
+                        Items = Array.Empty<ClipboardManager.Windows.HistoryItemViewModel>()
+                    };
+                    var emptyText = (TextBlock)window.FindName("EmptyStateText");
+                    foreach (var (variant, copyKey, paused) in new[]
+                    {
+                        ("empty", "CopyEmptyHistory", false), ("paused", "CopyPausedHistory", true), ("noresults", "CopyNoResults", false)
+                    })
+                    {
+                        emptyText.Text = (string)app.FindResource(copyKey);
+                        emptyPanel.Visibility = Visibility.Visible;
+                        emptyPet.SetListening(!paused);
+                        ((TextBlock)window.FindName("HistoryCountText")).Text = "0 条";
+                        surface.UpdateLayout();
+                        var expectedCopy = themed
+                            ? copyKey switch { "CopyEmptyHistory" => "夹夹在等你复制点什么", "CopyPausedHistory" => "已暂停监听，夹夹在打盹", _ => "夹夹没找到，换个关键词试试？" }
+                            : copyKey switch { "CopyEmptyHistory" => "还没有历史，复制内容试试", "CopyPausedHistory" => "监听已暂停", _ => "没有匹配的记录" };
+                        if (emptyText.Text != expectedCopy)
+                            throw new InvalidOperationException($"Empty copy for {variant} must come from the theme: '{emptyText.Text}' != '{expectedCopy}'");
+                        if (emptyHost.IsVisible != themed)
+                            throw new InvalidOperationException($"Empty-state pet visibility must follow the theme (themed={themed}, visible={emptyHost.IsVisible}).");
+                        if (themed && (Math.Abs(emptyHost.ActualWidth - 112) > 0.5 || Math.Abs(emptyHost.ActualHeight - 80) > 0.5 ||
+                                       Math.Abs(emptyPet.ActualWidth - 112) > 0.5 || Math.Abs(emptyPet.ActualHeight - 80) > 0.5))
+                            throw new InvalidOperationException($"Empty-state pet must be an exact 2x of 56x40: {emptyPet.ActualWidth}x{emptyPet.ActualHeight}");
+                        if (emptyPet.Focusable || emptyPet.IsHitTestVisible && emptyPanel.IsHitTestVisible)
+                            throw new InvalidOperationException("Empty-state pet must be non-focusable and non-hit-testable.");
+                        var emptyBounds = Bounds(emptyPanel, surface);
+                        var emptyTextBounds = Bounds(emptyText, surface);
+                        var emptyArea = Bounds((FrameworkElement)window.FindName("HistoryList"), surface);
+                        if (emptyBounds.Left < 0 || emptyBounds.Right > size.Width || emptyBounds.Top < emptyArea.Top - 1 ||
+                            emptyBounds.Bottom > emptyArea.Bottom + 1 || emptyTextBounds.Width < 1)
+                            throw new InvalidOperationException($"Empty state is clipped at {size} ({variant}): panel={emptyBounds}, list={emptyArea}");
+                        SaveRender(surface, size, Path.Combine(renderDir, $"HistoryPanel-{variant}-{size.Width}x{size.Height}.png"));
+                    }
+                    emptyPanel.Visibility = Visibility.Collapsed;
+                    emptyPet.SetListening(true);
+                    window.DataContext = populated;
+                    ((TextBlock)window.FindName("HistoryCountText")).Text = $"{sampleRows.Length} 条";
+                    surface.UpdateLayout();
+                }
             }
             window.Close();
             return 0;
@@ -394,17 +613,6 @@ internal static class Program
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
-    }
-
-    public sealed record PreviewRow(string PreviewText, string Metadata)
-    {
-        public Visibility PreviewVisibility => Visibility.Collapsed;
-        public ImageSource? Preview => null;
-        public Stretch PreviewStretch => Stretch.Uniform;
-        public Thickness PreviewPadding => default;
-        public TextWrapping PreviewWrapping => TextWrapping.Wrap;
-        public string FavoriteMark => "";
-        public string PinnedMark => "";
     }
 
     private sealed class PreviewSettings(AppSettings? initial = null) : IAppSettingsStore

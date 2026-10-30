@@ -26,8 +26,9 @@ public sealed class SettingsWindow : Window
     private readonly CheckBox _paste = new() { Content = "使用记录时尝试自动粘贴（Ctrl+V）" };
     private readonly CheckBox _singleClick = new() { Content = "单击记录行直接粘贴到当前光标所在窗口" };
     private readonly CheckBox _compact = new() { Content = "紧凑列表（降低行高与缩略图尺寸，一屏显示更多记录）" };
-    private readonly CheckBox _pet = new() { Content = "在面板页脚显示小宠物（监听时眨眼、暂停时睡觉、捕获时跳一下）" };
+    private readonly CheckBox _pet = new() { Content = "在标题栏显示小宠物（监听时眨眼、暂停时睡觉、捕获时跳一下）" };
     private readonly ComboBox _backupInterval = new() { MinWidth = 180 };
+    private readonly ComboBox _theme = new() { MinWidth = 180, ItemsSource = new[] { "标准（暖纸）", "夹夹（二次元）" } };
     private readonly Button _save = new() { Content = "保存", IsEnabled = false, Padding = new Thickness(20, 7, 20, 7) };
     private readonly Button _cancel = new() { Content = "取消", IsCancel = true, Padding = new Thickness(20, 7, 20, 7), Margin = new Thickness(0, 0, 8, 0) };
     private bool _saving;
@@ -50,6 +51,7 @@ public sealed class SettingsWindow : Window
         AddField(fields, "历史图片缓存额度（字节，不小于单图上限）", _cacheBytes);
         AddNote(fields, "1 MiB = 1048576 字节。收藏及其附件不因普通历史清理而删除；调低额度不会立即清空现有记录。");
         AddField(fields, "自动备份周期", _backupInterval);
+        AddField(fields, "界面主题（保存后立即生效）", _theme);
         _backupInterval.ItemsSource = new[] { "关闭", "每 24 小时", "每 48 小时", "每 72 小时" };
         if (_storage is not null)
         {
@@ -122,6 +124,7 @@ public sealed class SettingsWindow : Window
             _singleClick.IsChecked = settings.SingleClickToPaste;
             _compact.IsChecked = settings.CompactList;
             _pet.IsChecked = settings.ShowPanelPet;
+            _theme.SelectedIndex = settings.Theme == "jiajia" ? 1 : 0;
             _backupInterval.SelectedIndex = settings.AutoBackupIntervalHours switch { 24 => 1, 48 => 2, 72 => 3, _ => 0 };
             _save.IsEnabled = true;
         }
@@ -216,6 +219,7 @@ public sealed class SettingsWindow : Window
                 SingleClickToPaste = _singleClick.IsChecked == true,
                 CompactList = _compact.IsChecked == true,
                 ShowPanelPet = _pet.IsChecked == true,
+                Theme = _theme.SelectedIndex == 1 ? "jiajia" : "standard",
                 AutoBackupChoiceCompleted = true,
                 AutoBackupIntervalHours = _backupInterval.SelectedIndex switch { 1 => 24, 2 => 48, 3 => 72, _ => 0 }
             };
