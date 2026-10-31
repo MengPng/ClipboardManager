@@ -21,6 +21,7 @@ param(
     [string]$RemoteRoot = "/var/www/download",
     [switch]$IncludeMsi,
     [switch]$PageOnly,
+    [switch]$FirstRelease,
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 $root = Split-Path -Parent $PSScriptRoot
 $sshArgs = if ($SshKey) { @('-i', $SshKey) } else { @() }
+if ($env:CM_DEPLOY_BIND) { $sshArgs += @('-o', "BindAddress=$env:CM_DEPLOY_BIND") }
 
 if ($PageOnly) {
     if (-not $SshTarget) { throw "上传需要 -SshTarget 或环境变量 CM_DEPLOY_SSH。" }
@@ -97,11 +99,24 @@ foreach ($key in $entry.Keys) { $latest[$key] = $entry[$key] }
 # releases.json 以服务器上的现有内容为准：替换同版本条目并放到最前。
 # 用 System.Text.Json 读写，避免 ConvertFrom-Json 把日期字符串转成 DateTime。
 $history = [System.Text.Json.Nodes.JsonArray]::new()
-$response = Invoke-WebRequest "${BaseUrl}releases.json" -SkipHttpErrorCheck -Headers @{ 'Cache-Control' = 'no-cache' }
-if ($response.StatusCode -eq 200) {
-    $history = [System.Text.Json.Nodes.JsonNode]::Parse([string]$response.Content).AsArray()
-} elseif ($response.StatusCode -ne 404) {
-    throw "读取现有 releases.json 失败：HTTP $($response.StatusCode)"
+if ($FirstRelease) {
+    if (-not $DryRun) { throw "-FirstRelease 仅适用于首次发布预演，正式发布仍须读取线上版本记录。" }
+    Write-Output "首次发布预演：假定没有历史版本，未读取线上 releases.json。"
+} else {
+    if ($env:CM_DEPLOY_BIND) {
+        $httpResult = & curl.exe --silent --show-error --noproxy '*' --interface $env:CM_DEPLOY_BIND --write-out "`n%{http_code}" "${BaseUrl}releases.json"
+        $status = [int]$httpResult[-1]
+        $content = ($httpResult | Select-Object -SkipLast 1) -join "`n"
+    } else {
+        $response = Invoke-WebRequest "${BaseUrl}releases.json" -SkipHttpErrorCheck -Headers @{ 'Cache-Control' = 'no-cache' }
+        $status = $response.StatusCode
+        $content = [string]$response.Content
+    }
+    if ($status -eq 200) {
+        $history = [System.Text.Json.Nodes.JsonNode]::Parse($content).AsArray()
+    } elseif ($status -ne 404) {
+        throw "读取现有 releases.json 失败：HTTP $status"
+    }
 }
 for ($i = $history.Count - 1; $i -ge 0; $i--) {
     if ([string]$history[$i]['version'] -eq $Version) { $history.RemoveAt($i) }
@@ -132,6 +147,10 @@ scp @sshArgs (Join-Path $stage "releases.json") "${SshTarget}:$RemoteRoot/releas
 scp @sshArgs (Join-Path $stage "latest.json") "${SshTarget}:$RemoteRoot/latest.json.tmp"
 ssh @sshArgs $SshTarget "mv '$RemoteRoot/releases.json.tmp' '$RemoteRoot/releases.json' && mv '$RemoteRoot/latest.json.tmp' '$RemoteRoot/latest.json'"
 
-$check = Invoke-RestMethod "${BaseUrl}latest.json" -Headers @{ 'Cache-Control' = 'no-cache' }
+$check = if ($env:CM_DEPLOY_BIND) {
+    (& curl.exe --fail --silent --show-error --noproxy '*' --interface $env:CM_DEPLOY_BIND "${BaseUrl}latest.json") | ConvertFrom-Json
+} else {
+    Invoke-RestMethod "${BaseUrl}latest.json" -Headers @{ 'Cache-Control' = 'no-cache' }
+}
 if ($check.version -ne $Version) { throw "上传后 latest.json 仍为 $($check.version)，请检查 nginx 配置与 $RemoteRoot。" }
 Write-Output "已发布 $Version → $BaseUrl"
