@@ -84,9 +84,8 @@
                     <TabItem x:Name="PersonalSpaceTab" Header="配置" Tag="&#xE77B;" />
                     <TabItem x:Name="TodoTab" Header="待办" Tag="&#xE9D5;" />
                     <TabItem x:Name="CalculatorTab" Header="计算" Tag="&#xE8EF;" />
-                    <TabItem x:Name="SelectionAiTab" Header="划词" Tag="&#xE8D4;" />
                     <TabItem x:Name="TeamSpaceTab" Header="团队" Tag="&#xE716;" Visibility="Collapsed" />
-                    <TabItem x:Name="LanShareTab" Header="共享" Tag="&#xE968;" Visibility="Collapsed" />
+                    <TabItem x:Name="ShareTab" Header="共享" Tag="&#xE968;" />
                 </TabControl>
 
                 <Grid x:Name="HistoryPanel" Grid.Row="1">
@@ -105,10 +104,12 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="HistoryCountText" Grid.Column="1" Margin="8,0,2,0" VerticalAlignment="Center"
+                    <!-- 筛选胶囊居中；条数放在右侧列，左右两列等宽，保证胶囊真正居中。 -->
+                    <TextBlock x:Name="HistoryCountText" Grid.Column="2" Margin="8,0,2,0" HorizontalAlignment="Right" VerticalAlignment="Center"
                                Style="{StaticResource MetaTextStyle}" Text="0 条" />
-                    <WrapPanel HorizontalAlignment="Left">
+                    <WrapPanel Grid.Column="1" HorizontalAlignment="Center">
                         <RadioButton x:Name="AllFilterButton" Style="{StaticResource FilterChipStyle}"
                                      GroupName="HistoryFilter" IsChecked="True"
                                      Click="AllFilterButton_Click" Content="全部" />
@@ -117,6 +118,8 @@
                                      Visibility="Collapsed" />
                         <RadioButton x:Name="TextFilterButton" Style="{StaticResource FilterChipStyle}"
                                      GroupName="HistoryFilter" Click="TextFilterButton_Click" Content="文本" />
+                        <RadioButton x:Name="LinkFilterButton" Style="{StaticResource FilterChipStyle}"
+                                     GroupName="HistoryFilter" Click="LinkFilterButton_Click" Content="链接" />
                         <RadioButton x:Name="ImageFilterButton" Style="{StaticResource FilterChipStyle}"
                                      GroupName="HistoryFilter" Click="ImageFilterButton_Click" Content="图片" />
                         <RadioButton x:Name="FileFilterButton" Style="{StaticResource FilterChipStyle}"
@@ -180,6 +183,17 @@
                                             </StackPanel>
 
                                             <StackPanel Grid.Column="2" Margin="8,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <!-- 仅提示模式：短单行算式在行尾显示 = 结果；显示时计算，不入库，不改剪切板。 -->
+                                                <Border Margin="0,0,6,0" Padding="8,1" MaxWidth="132" VerticalAlignment="Center"
+                                                        Visibility="{Binding CalculationHintVisibility}" ToolTip="{Binding CalculationHintToolTip}"
+                                                        Background="{DynamicResource AccentSoftBrush}"
+                                                        BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1"
+                                                        CornerRadius="{DynamicResource RadiusPill}">
+                                                    <TextBlock Text="{Binding CalculationHintText}" TextTrimming="CharacterEllipsis"
+                                                               FontSize="{DynamicResource FontSizeCaption}" FontWeight="SemiBold"
+                                                               Typography.NumeralAlignment="Tabular"
+                                                               Foreground="{DynamicResource LabelPrimaryBrush}" />
+                                                </Border>
                                                 <TextBlock Margin="0,0,5,0" FontFamily="{DynamicResource IconFontFamily}"
                                                            FontSize="{DynamicResource FontSizeCaption}"
                                                            Foreground="{DynamicResource AccentBrandBrush}" Text="{Binding PinnedMark}" />
@@ -265,12 +279,8 @@
                         </Grid.RowDefinitions>
 
                         <!-- 统计：一行小胶囊，点击下钻、再次点击取消筛选（逻辑不变）；"导出明细"紧随"完成率"之后。
-                             胶囊放不下时（如"本月完成"）在左侧列内换行，不会挤掉导出按钮。 -->
+                             四枚胶囊与"导出明细"同在一个换行面板里，常规数值下一排放下，极端数值才折行，不裁切。 -->
                         <Grid Grid.Row="0" Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
                             <WrapPanel x:Name="TodoSummaryCards" VerticalAlignment="Center">
                                 <ToggleButton x:Name="TodoCompletedSummaryButton"
                                               AutomationProperties.Name="完成统计"
@@ -312,10 +322,11 @@
                                         <TextBlock x:Name="TodoCompletionRateText" Margin="4,0,0,0" FontWeight="SemiBold" Text="0%" />
                                     </StackPanel>
                                 </ToggleButton>
-                            </WrapPanel>
-                            <Button Grid.Column="1" Margin="4,0,0,4" Padding="8,2" VerticalAlignment="Top" FontSize="12"
+                                <Button x:Name="TodoExportDetailsButton" Margin="0,0,0,4" Padding="6,2" MinHeight="0"
+                                        FontSize="{DynamicResource FontSizeMeta}"
                                     Click="ExportTodoDetailsButton_Click" Content="导出明细"
                                     ToolTip="导出全部待办及标签明细" AutomationProperties.Name="导出明细" />
+                            </WrapPanel>
                         </Grid>
 
                         <Grid Grid.Row="1" Height="0" />
@@ -433,6 +444,9 @@
                                             <DockPanel Margin="8,6">
                                                 <TextBlock DockPanel.Dock="Right" Style="{StaticResource MetaTextStyle}"
                                                            VerticalAlignment="Center" Text="{Binding CountText}" />
+                                                <TextBlock DockPanel.Dock="Right" Margin="6,0" Style="{StaticResource MetaTextStyle}"
+                                                           VerticalAlignment="Center" Text="订阅" ToolTip="订阅得到的文件夹，内容只读"
+                                                           Visibility="{Binding ManagedMarkVisibility}" />
                                                 <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                                             </DockPanel>
                                         </DataTemplate>
@@ -500,7 +514,7 @@
                                                                Foreground="{DynamicResource LabelSecondaryBrush}"
                                                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                                                                Visibility="{Binding PreviewVisibility}" />
-                                                    <TextBlock Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}" Text="{Binding TypeText}" />
+                                                    <TextBlock Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}" Text="{Binding MetaText}" />
                                                 </StackPanel>
                                             </Grid>
                                         </DataTemplate>
@@ -517,132 +531,392 @@
 
                 </Grid>
 
-                <ScrollViewer x:Name="CalculatorPanel" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                  <Grid>
+                <Grid x:Name="CalculatorPanel" Grid.Row="1" Visibility="Collapsed">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" MinHeight="0" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <StackPanel Margin="0,0,0,8">
-                        <CheckBox x:Name="ClipboardCalculatorCheckBox" Content="自动计算剪切板算式"
-                                  Click="ClipboardCalculatorCheckBox_Click" />
-                        <TextBlock Margin="0,5,0,8" TextWrapping="Wrap" Style="{StaticResource MetaTextStyle}"
-                                   Text="开启后，复制 1+1 将变为 1+1=2。仅处理单行纯算式；暂停和应用排除仍生效。" />
-                        <TextBox x:Name="CalculatorExpressionBox" MaxLength="512" MinHeight="36"
-                                 ToolTip="输入算式，例如 (1250+380)/3，按 Enter 计算"
-                                 AutomationProperties.Name="计算算式" KeyDown="CalculatorExpressionBox_KeyDown"
-                                 TextChanged="CalculatorExpressionBox_TextChanged" />
-                        <TextBox x:Name="CalculatorResultBox" Margin="0,7,0,0" IsReadOnly="True"
-                                 FontSize="20" Text="输入算式后按 Enter" AutomationProperties.Name="计算结果" />
-                        <TextBlock x:Name="CalculatorErrorText" Margin="0,4,0,0" Foreground="{DynamicResource WarningBrush}"
-                                   TextWrapping="Wrap" />
-                        <WrapPanel Margin="0,6,0,0">
-                            <Button Content="计算" Click="CalculateButton_Click" Margin="0,0,5,5" Padding="10,5" />
-                            <Button x:Name="CopyCalculatorValueButton" Content="复制结果" IsEnabled="False"
-                                    Click="CopyCalculatorValueButton_Click" Margin="0,0,5,5" Padding="10,5" />
-                            <Button x:Name="CopyCalculatorEquationButton" Content="复制算式与结果" IsEnabled="False"
-                                    Click="CopyCalculatorEquationButton_Click" Margin="0,0,0,5" Padding="10,5" />
-                        </WrapPanel>
-                    </StackPanel>
-                    <UniformGrid Grid.Row="1" Columns="4" Margin="0,0,0,8">
-                        <Button Content="7" Click="CalculatorKey_Click" /><Button Content="8" Click="CalculatorKey_Click" />
-                        <Button Content="9" Click="CalculatorKey_Click" /><Button Content="÷" Click="CalculatorKey_Click" />
-                        <Button Content="4" Click="CalculatorKey_Click" /><Button Content="5" Click="CalculatorKey_Click" />
-                        <Button Content="6" Click="CalculatorKey_Click" /><Button Content="×" Click="CalculatorKey_Click" />
-                        <Button Content="1" Click="CalculatorKey_Click" /><Button Content="2" Click="CalculatorKey_Click" />
-                        <Button Content="3" Click="CalculatorKey_Click" /><Button Content="−" Click="CalculatorKey_Click" />
-                        <Button Content="0" Click="CalculatorKey_Click" /><Button Content="." Click="CalculatorKey_Click" />
-                        <Button Content="(" Click="CalculatorKey_Click" /><Button Content=")" Click="CalculatorKey_Click" />
-                        <Button Content="清空" Click="CalculatorKey_Click" /><Button Content="退格" Click="CalculatorKey_Click" />
-                        <Button Content="=" Click="CalculatorKey_Click" /><Button Content="+" Click="CalculatorKey_Click" />
-                    </UniformGrid>
-                    <Grid Grid.Row="2">
-    <Grid.RowDefinitions>
-        <RowDefinition Height="Auto" />
-        <RowDefinition Height="Auto" />
-        <RowDefinition Height="*" />
-    </Grid.RowDefinitions>
-    <DockPanel Margin="0,0,0,6">
-        <Button Content="清空记录" DockPanel.Dock="Right" HorizontalAlignment="Right"
-                Click="ClearCalculationsButton_Click" Padding="8,4" />
-        <TextBlock Text="最近计算（本次运行）" VerticalAlignment="Center" Style="{StaticResource MetaTextStyle}" />
-    </DockPanel>
-    <Border Grid.Row="1" Height="1" Margin="0,0,0,6"
-            Background="{DynamicResource BorderStrongBrush}" Opacity="0.55" />
-    <Grid Grid.Row="2" MinHeight="90" MaxHeight="180">
-        <ListBox ItemsSource="{Binding Calculations}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
-            <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <Grid Margin="6,5,6,0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Text="{Binding ResultText}" FontSize="18" FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock Grid.Row="1" Margin="0,2,0,0" Text="{Binding Expression}"
-                                   Style="{StaticResource MetaTextStyle}" TextTrimming="CharacterEllipsis" />
-                        <WrapPanel Grid.Row="2" Margin="0,5,0,5">
-                            <Button Content="复用" Click="ReuseCalculation_Click" Margin="0,0,4,0" Padding="6,3" />
-                            <Button Content="复制原算式" Click="CopyOriginalCalculation_Click" Margin="0,0,4,0" Padding="6,3" />
-                            <Button Content="复制结果" Click="CopyRecentCalculation_Click" Margin="0,0,4,0" Padding="6,3" />
-                            <Button Content="删除" Click="DeleteCalculation_Click" Padding="6,3" />
-                        </WrapPanel>
-                        <Border Grid.Row="3" Height="1" Background="{DynamicResource SeparatorBrush}" />
-                    </Grid>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
-        <TextBlock x:Name="CalculationEmptyText" Text="还没有计算记录" IsHitTestVisible="False"
-                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                   Foreground="{DynamicResource LabelTertiaryBrush}" />
-    </Grid>
-</Grid>
-                  </Grid>
-                </ScrollViewer>
 
-                <Grid x:Name="SelectionAiPanel" Grid.Row="1" Visibility="Collapsed">
-                    <ContentControl x:Name="SelectionAiSettingsHost" />
+                    <!-- 剪切板里的算式怎么处理：关闭 / 仅提示结果（默认，不改写剪切板）/ 直接改写（旧行为）。 -->
+                    <Grid Margin="2,0,2,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="剪切板里的算式：" VerticalAlignment="Center" Style="{StaticResource MetaTextStyle}" />
+                        <ComboBox x:Name="ClipboardCalculatorModeBox" Grid.Column="1" MinHeight="26" Padding="8,2"
+                                  AutomationProperties.Name="剪切板算式模式"
+                                  ToolTip="仅提示结果：历史里在算式行尾显示 = 结果，不改写剪切板；直接改写：复制 1+1 变为 1+1=2"
+                                  SelectionChanged="ClipboardCalculatorModeBox_SelectionChanged">
+                            <ComboBoxItem Content="关闭" Tag="Off" />
+                            <ComboBoxItem Content="仅提示结果" Tag="Hint" />
+                            <ComboBoxItem Content="直接改写" Tag="Rewrite" />
+                        </ComboBox>
+                        <TextBlock x:Name="CalculatorTapeCountText" Grid.Column="2" HorizontalAlignment="Right"
+                                   VerticalAlignment="Center" Style="{StaticResource MetaTextStyle}" />
+                    </Grid>
+
+                    <!-- 纸带：最近 30 条，只在内存里；最新一条紧贴输入框。点行复用，悬停显示 复制 / 复用 / 删除；键盘用 Enter 复用、Delete 删除，右键菜单同样可用。 -->
+                    <Grid Grid.Row="1">
+                        <ListBox x:Name="CalculatorTapeList" ItemsSource="{Binding Calculations}"
+                                 VerticalAlignment="Bottom" Background="Transparent" BorderThickness="0" Padding="0"
+                                 ItemContainerStyle="{StaticResource TapeRowItemStyle}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 AutomationProperties.Name="计算纸带"
+                                 MouseLeftButtonUp="CalculatorTape_MouseLeftButtonUp"
+                                 KeyDown="CalculatorTape_KeyDown"
+                                 ContextMenuOpening="CalculatorTape_ContextMenuOpening">
+                            <ListBox.ContextMenu>
+                                <ContextMenu />
+                            </ListBox.ContextMenu>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Height="34">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Expression}" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource LabelSecondaryBrush}"
+                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding Expression}" />
+                                        <!-- 操作盖在算式右端，不另占一列：窄窗口下结果始终完整可见。 -->
+                                        <Border x:Name="Actions" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                Padding="6,0,0,0" Background="Transparent" Visibility="Collapsed">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="复制" Style="{StaticResource TapeActionButtonStyle}"
+                                                        Click="CopyRecentCalculation_Click" />
+                                                <Button Content="复用" Style="{StaticResource TapeActionButtonStyle}"
+                                                        Click="ReuseCalculation_Click" />
+                                                <Button Content="×" Style="{StaticResource TapeActionButtonStyle}"
+                                                        AutomationProperties.Name="删除" ToolTip="删除这条记录"
+                                                        Click="DeleteCalculation_Click" />
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" MaxWidth="190"
+                                                   Text="{Binding DisplayText}" ToolTip="{Binding FullValueText}"
+                                                   FontSize="{DynamicResource FontSizeTitle}" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Typography.NumeralAlignment="Tabular" />
+                                    </Grid>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True">
+                                            <Setter TargetName="Actions" Property="Visibility" Value="Visible" />
+                                            <Setter TargetName="Actions" Property="Background" Value="{DynamicResource RowHoverBrush}" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock x:Name="CalculationEmptyText" Text="还没有计算记录" IsHitTestVisible="False"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource LabelTertiaryBrush}" />
+                    </Grid>
+
+                    <!-- 当前输入 + 实时结果：输入框、退格、键盘开关；下面一行是 = 结果 与"复制结果"。 -->
+                    <Border Grid.Row="2" Margin="0,4,0,0" Padding="12,2,8,8"
+                            Background="{DynamicResource SurfaceBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1"
+                            CornerRadius="{DynamicResource RadiusMedium}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="CalculatorExpressionBox" MaxLength="512" VerticalContentAlignment="Center"
+                                         Style="{StaticResource CalculatorInputTextBoxStyle}"
+                                         ToolTip="输入算式，例如 (1250+380)/3；Enter 记录并继续，Ctrl+Enter 复制结果，↑ 调出上一条"
+                                         AutomationProperties.Name="计算算式"
+                                         PreviewKeyDown="CalculatorExpressionBox_PreviewKeyDown"
+                                         PreviewTextInput="CalculatorExpressionBox_PreviewTextInput"
+                                         TextChanged="CalculatorExpressionBox_TextChanged" />
+                                <Button Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="&#xE750;"
+                                        AutomationProperties.Name="退格" ToolTip="退格" Tag="back"
+                                        Click="CalculatorKey_Click" />
+                                <ToggleButton x:Name="CalculatorKeypadToggle" Grid.Column="2" Content="&#xE765;"
+                                              Style="{StaticResource IconToggleButtonStyle}"
+                                              AutomationProperties.Name="小键盘" ToolTip="展开或收起小键盘（记住上次状态）"
+                                              Checked="CalculatorKeypadToggle_Changed" Unchecked="CalculatorKeypadToggle_Changed" />
+                            </Grid>
+                            <Border Grid.Row="1" Height="1" Background="{DynamicResource SeparatorBrush}" />
+                            <Grid Grid.Row="2" Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="CalculatorResultText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                           Typography.NumeralAlignment="Tabular" AutomationProperties.Name="计算结果"><Run x:Name="CalculatorResultRun" /><Run x:Name="CalculatorExpandedRun" FontSize="{DynamicResource FontSizeCaption}" Foreground="{DynamicResource LabelTertiaryBrush}" /></TextBlock>
+                                <Button x:Name="CopyCalculatorUppercaseButton" Grid.Column="1" Margin="10,0,0,0" Padding="10,0" Height="32"
+                                        Content="大写" IsEnabled="False"
+                                        AutomationProperties.Name="复制大写金额"
+                                        ToolTip="复制报销单大写金额，如 壹仟贰佰叁拾肆元伍角整，并记到纸带（Ctrl+Shift+Enter）"
+                                        Click="CopyCalculatorUppercaseButton_Click" />
+                                <Button x:Name="CopyCalculatorValueButton" Grid.Column="2" Margin="6,0,0,0" Padding="12,0" Height="32"
+                                        Content="复制结果" IsEnabled="False" Style="{StaticResource PrimaryButtonStyle}"
+                                        ToolTip="复制结果并记到纸带（Ctrl+Enter）" Click="CopyCalculatorValueButton_Click" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <!-- 小键盘：默认收起，4×5。"( )" 一次插入一对括号，"=" 同 Enter。 -->
+                    <UniformGrid x:Name="CalculatorKeypad" Grid.Row="3" Columns="4" Rows="5" Margin="-2,2,-2,0" Visibility="Collapsed">
+                        <Button Content="清空" Tag="clear" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="⌫" Tag="back" AutomationProperties.Name="退格键" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="%" Tag="%" AutomationProperties.Name="百分号" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="÷" Tag="÷" AutomationProperties.Name="除" Style="{StaticResource KeypadOperatorKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="7" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="8" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="9" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="×" Tag="×" AutomationProperties.Name="乘" Style="{StaticResource KeypadOperatorKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="4" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="5" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="6" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="−" Tag="-" AutomationProperties.Name="减" Style="{StaticResource KeypadOperatorKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="1" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="2" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="3" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="+" Tag="+" AutomationProperties.Name="加" Style="{StaticResource KeypadOperatorKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="( )" Tag="()" AutomationProperties.Name="括号" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="0" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="." Tag="." AutomationProperties.Name="小数点" Style="{StaticResource KeypadKeyStyle}" Click="CalculatorKey_Click" />
+                        <Button Content="=" Tag="enter" AutomationProperties.Name="等于" Style="{StaticResource KeypadPrimaryKeyStyle}" Click="CalculatorKey_Click" />
+                    </UniformGrid>
                 </Grid>
 
-                <Grid x:Name="LanSharePanel" Grid.Row="1" Visibility="Collapsed">
+                <!-- 共享页：发布 / 订阅两段。颜色、圆角全部来自主题 token；行按钮的 Click 在代码里取行的 DataContext。 -->
+                <Grid x:Name="SharePanel" Grid.Row="1" Visibility="Collapsed">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid Margin="2,0,2,10">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="附近设备" />
-                            <TextBlock x:Name="LanStatusText" Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}"
-                                       Text="点击刷新发现同一局域网内的 LocalSend 设备" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal">
-                            <Button Margin="0,0,7,0" Padding="12,6" Click="RefreshLanDevicesButton_Click" Content="刷新设备" />
-                            <Button Padding="12,6" Click="OpenLanSettingsButton_Click" Content="共享设置" />
-                        </StackPanel>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <WrapPanel>
+                            <RadioButton x:Name="SharePublishChip" Style="{StaticResource FilterChipStyle}"
+                                         GroupName="ShareSegment" IsChecked="True" Content="发布"
+                                         Click="SharePublishChip_Click" AutomationProperties.Name="发布段" />
+                            <RadioButton x:Name="ShareSubscribeChip" Style="{StaticResource FilterChipStyle}"
+                                         GroupName="ShareSegment" Content="订阅"
+                                         Click="ShareSubscribeChip_Click" AutomationProperties.Name="订阅段" />
+                        </WrapPanel>
+                        <TextBlock x:Name="ShareStatusText" Grid.Column="1" Margin="8,0,2,0" VerticalAlignment="Center"
+                                   HorizontalAlignment="Right" TextTrimming="CharacterEllipsis"
+                                   Style="{StaticResource MetaTextStyle}" Text="未监听" />
                     </Grid>
+
                     <Grid Grid.Row="1">
-                            <ListBox x:Name="LanDeviceList" ItemsSource="{Binding LanDevices}">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Margin="10,8">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <StackPanel>
-                                                <TextBlock FontWeight="SemiBold" Text="{Binding Alias}" />
-                                                <TextBlock Margin="0,3,0,0" Style="{StaticResource MetaTextStyle}" Text="{Binding Detail}" />
-                                            </StackPanel>
-                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{DynamicResource SuccessBrush}" Text="可发送" />
+                        <!-- 发布 -->
+                        <ScrollViewer x:Name="SharePublishScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Margin="0,0,4,8">
+                                <TextBlock Margin="2,0,0,6" Style="{StaticResource SecondaryTextStyle}" Text="我发布的配置" />
+                                <ItemsControl x:Name="PublishedList" ItemsSource="{Binding PublishedRows}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource ShareCardStyle}">
+                                                <StackPanel>
+                                                    <DockPanel>
+                                                        <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0" FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource AccentBrandStrongBrush}" Text="{Binding VersionText}" />
+                                                        <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding Name}"
+                                                                   ToolTip="{Binding Name}" />
+                                                    </DockPanel>
+                                                    <TextBlock Margin="0,2,0,6" Style="{StaticResource MetaTextStyle}" TextWrapping="Wrap"
+                                                               Text="{Binding Detail}" />
+                                                    <WrapPanel>
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0,0,6,4" Content="发布新版本"
+                                                                Click="PublishNewVersion_Click" AutomationProperties.Name="发布新版本" />
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0,0,6,4" Content="停止发布"
+                                                                Click="StopPublishing_Click" AutomationProperties.Name="停止发布" />
+                                                        <CheckBox Margin="0,0,0,4" VerticalAlignment="Center" Content="改动后自动发布"
+                                                                  IsChecked="{Binding AutoPublish, Mode=OneWay}" Click="AutoPublishCheck_Click"
+                                                                  ToolTip="配置文件夹改动后 60 秒内没有新改动，才发布新版本" />
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock x:Name="SharePublishEmptyText" Margin="2,0,0,8" Style="{StaticResource MetaTextStyle}"
+                                           TextWrapping="Wrap" Text="还没有发布。默认一次发布个人的全部配置（可取消勾选部分文件夹），作为同一个版本；订阅方只读，不会改动你的配置。" />
+                                <Button x:Name="SharePublishNewButton" HorizontalAlignment="Left" Margin="0,0,0,14" Padding="12,5"
+                                        Style="{StaticResource PrimaryButtonStyle}" Content="发布配置…"
+                                        Click="SharePublishNewButton_Click" />
+
+                                <TextBlock Margin="2,0,0,6" Style="{StaticResource SecondaryTextStyle}" Text="配对订阅设备" />
+                                <Border Style="{StaticResource ShareCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock x:Name="ShareLocalAddressText" Style="{StaticResource MetaTextStyle}" TextWrapping="Wrap"
+                                                   Text="本机地址未知" />
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="SharePairingCodeText" VerticalAlignment="Center" FontWeight="SemiBold"
+                                                       FontSize="{DynamicResource FontSizeTitle}" Typography.NumeralAlignment="Tabular"
+                                                       AutomationProperties.Name="配对码" Text="——" />
+                                            <Button x:Name="ShareIssueCodeButton" Grid.Column="1" Padding="12,4"
+                                                    Content="生成配对码" Click="ShareIssueCodeButton_Click" />
                                         </Grid>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                            <TextBlock x:Name="LanEmptyText" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                       Foreground="{DynamicResource LabelTertiaryBrush}" Text="尚未发现设备" IsHitTestVisible="False" />
+                                        <TextBlock x:Name="SharePairingHintText" Margin="0,4,0,0" Style="{StaticResource MetaTextStyle}"
+                                                   TextWrapping="Wrap" Text="对方在“订阅”页输入本机地址和配对码；码 5 分钟有效，输错 5 次作废。" />
+                                        <Button x:Name="ShareCopyFirewallButton" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                                Style="{StaticResource TapeActionButtonStyle}" Content="复制防火墙放行命令"
+                                                Click="ShareCopyFirewallButton_Click"
+                                                ToolTip="在管理员 PowerShell 里运行，放行 TCP/UDP 53318" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="2,10,0,6" Style="{StaticResource SecondaryTextStyle}" Text="已配对的订阅设备" />
+                                <ItemsControl x:Name="SubscriberList" ItemsSource="{Binding SubscriberRows}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource ShareCardStyle}">
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Style="{StaticResource TapeActionButtonStyle}" Margin="8,0,0,0"
+                                                            VerticalAlignment="Center" Content="移除" Click="RemoveSubscriber_Click"
+                                                            AutomationProperties.Name="移除订阅设备" />
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding Name}" />
+                                                        <TextBlock Margin="0,2,0,0" Style="{StaticResource MetaTextStyle}"
+                                                                   TextTrimming="CharacterEllipsis" Text="{Binding Detail}" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock x:Name="ShareSubscriberEmptyText" Margin="2,0,0,0" Style="{StaticResource MetaTextStyle}"
+                                           Text="还没有设备订阅你的配置" />
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <!-- 订阅 -->
+                        <ScrollViewer x:Name="ShareSubscribeScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Margin="0,0,4,8">
+                                <TextBlock Margin="2,0,0,6" Style="{StaticResource SecondaryTextStyle}" Text="我的订阅" />
+                                <ItemsControl x:Name="SubscriptionList" ItemsSource="{Binding SubscriptionRows}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource ShareCardStyle}">
+                                                <StackPanel>
+                                                    <DockPanel>
+                                                        <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0" FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource AccentBrandStrongBrush}" Text="{Binding VersionText}" />
+                                                        <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding Name}"
+                                                                   ToolTip="{Binding Name}" />
+                                                    </DockPanel>
+                                                    <TextBlock Margin="0,2,0,0" Style="{StaticResource MetaTextStyle}" TextTrimming="CharacterEllipsis"
+                                                               Text="{Binding Detail}" ToolTip="{Binding Detail}" />
+                                                    <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Text="{Binding StatusText}">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{DynamicResource LabelSecondaryBrush}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsProblem}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Margin="0,2,0,6" Style="{StaticResource MetaTextStyle}" Text="{Binding OptionsText}" />
+                                                    <WrapPanel>
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0,0,6,4" Content="检查更新"
+                                                                Click="CheckSubscription_Click" AutomationProperties.Name="检查更新" />
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0,0,6,4" Content="更新"
+                                                                Visibility="{Binding UpdateButtonVisibility}" Click="UpdateSubscription_Click"
+                                                                AutomationProperties.Name="更新到最新版本" />
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0,0,6,4" Content="回退"
+                                                                IsEnabled="{Binding CanRollback}" Click="RollbackSubscription_Click"
+                                                                AutomationProperties.Name="回退到上一版本" />
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0,0,0,4" Content="设置…"
+                                                                Click="SubscriptionSettings_Click" AutomationProperties.Name="订阅设置" />
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock x:Name="ShareSubscriptionEmptyText" Margin="2,0,0,12" Style="{StaticResource MetaTextStyle}"
+                                           TextWrapping="Wrap" Text="还没有订阅。配对一台发布设备后，可以订阅它发布的配置。" />
+
+                                <TextBlock Margin="2,0,0,6" Style="{StaticResource SecondaryTextStyle}" Text="附近的发布者" />
+                                <ItemsControl x:Name="PublisherList" ItemsSource="{Binding PublisherRows}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource ShareCardStyle}">
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Style="{StaticResource TapeActionButtonStyle}" Margin="8,0,0,0"
+                                                            VerticalAlignment="Center" Content="{Binding ActionText}" Click="PublisherAction_Click" />
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding DeviceName}" />
+                                                        <TextBlock Margin="0,2,0,0" Style="{StaticResource MetaTextStyle}"
+                                                                   TextTrimming="CharacterEllipsis" Text="{Binding Detail}" ToolTip="{Binding Detail}" />
+                                                        <TextBlock Margin="0,2,0,0" Style="{StaticResource MetaTextStyle}"
+                                                                   TextTrimming="CharacterEllipsis" Text="{Binding PublicationsText}"
+                                                                   ToolTip="{Binding PublicationsText}" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock x:Name="SharePublisherEmptyText" Margin="2,0,0,8" Style="{StaticResource MetaTextStyle}"
+                                           TextWrapping="Wrap" Text="没有发现附近的发布者。网络屏蔽组播时，请在下面手动输入对方的 IP:端口。" />
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="ShareManualAddressBox" Style="{StaticResource SearchTextBoxStyle}"
+                                             Tag="IP:端口，如 192.168.1.20:53318" Margin="0,0,6,0"
+                                             AutomationProperties.Name="发布者地址"
+                                             KeyDown="ShareManualAddressBox_KeyDown" />
+                                    <Button x:Name="ShareManualConnectButton" Grid.Column="1" Padding="12,4" Content="连接"
+                                            Click="ShareManualConnectButton_Click" />
+                                </Grid>
+
+                                <TextBlock Margin="2,0,0,6" Style="{StaticResource SecondaryTextStyle}" Text="已配对的发布设备" />
+                                <ItemsControl x:Name="PairedPublisherList" ItemsSource="{Binding PairedPublisherRows}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource ShareCardStyle}">
+                                                <StackPanel>
+                                                    <TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding Name}" />
+                                                    <TextBlock Margin="0,2,0,6" Style="{StaticResource MetaTextStyle}"
+                                                               TextTrimming="CharacterEllipsis" Text="{Binding Detail}" ToolTip="{Binding Detail}" />
+                                                    <WrapPanel>
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0,0,6,0" Content="浏览发布"
+                                                                Click="BrowsePublisher_Click" AutomationProperties.Name="浏览发布" />
+                                                        <Button Style="{StaticResource TapeActionButtonStyle}" Margin="0" Content="移除配对"
+                                                                Click="RemovePublisher_Click" AutomationProperties.Name="移除配对" />
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock x:Name="SharePairedEmptyText" Margin="2,0,0,0" Style="{StaticResource MetaTextStyle}"
+                                           Text="还没有配对过发布设备" />
+                            </StackPanel>
+                        </ScrollViewer>
                     </Grid>
                 </Grid>
 

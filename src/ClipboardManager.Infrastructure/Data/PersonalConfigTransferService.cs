@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
@@ -7,10 +8,10 @@ using ClipboardManager.Infrastructure.Paths;
 
 namespace ClipboardManager.Infrastructure.Data;
 
-public sealed class PersonalConfigTransferService(
+public sealed partial class PersonalConfigTransferService(
     AppPaths paths,
     ICollectionRepository repository,
-    IStorageMaintenanceService storageMaintenance) : IPersonalConfigTransferService
+    IStorageMaintenanceService storageMaintenance) : IPersonalConfigTransferService, IConfigPackageService
 {
     private const int FormatVersion = 1;
     private const string ManifestEntryName = "manifest.json";
@@ -24,6 +25,10 @@ public sealed class PersonalConfigTransferService(
     private const int MaxAssetCount = 100_000;
     private const int MaxAssetReferences = 200_000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly PackageLimits LocalLimits = new(MaxPackageBytes, long.MaxValue, false);
+    // 仅网络接收路径使用：200 MB 总量、50 MB 单文件、清单条数与文本/链接/图片头的额外校验。
+    private static readonly PackageLimits NetworkLimits = new(
+        ConfigSyncPolicy.MaxPackageBytes, ConfigSyncPolicy.MaxFileBytes, true);
 
     public async Task<PersonalConfigExportResult> ExportAsync(Guid personalWorkspaceId, string packagePath, CancellationToken cancellationToken = default)
     {
@@ -43,7 +48,9 @@ public sealed class PersonalConfigTransferService(
         {
             await using var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, true);
             using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
-            var folders = await repository.GetFoldersAsync(personalWorkspaceId, cancellationToken);
+            // 订阅产生的受管文件夹不属于“我的配置”，个人导出不带走别人发布的内容。
+            var folders = (await repository.GetFoldersAsync(personalWorkspaceId, cancellationToken))
+                .Where(folder => folder.ManagedSubscriptionId is null).ToList();
             for (var folderIndex = 0; folderIndex < folders.Count; folderIndex++)
             {
                 var folder = folders[folderIndex];
@@ -98,7 +105,7 @@ public sealed class PersonalConfigTransferService(
 
     public async Task<PersonalConfigImportPreview> InspectAsync(string packagePath, CancellationToken cancellationToken = default)
     {
-        var (archive, manifest) = await OpenAndValidateAsync(packagePath, cancellationToken);
+        var (archive, manifest) = await OpenAndValidateAsync(packagePath, LocalLimits, cancellationToken);
         using (archive)
         {
         return new PersonalConfigImportPreview(manifest.FormatVersion, manifest.CreatedAtUtc,
@@ -109,7 +116,7 @@ public sealed class PersonalConfigTransferService(
 
     public async Task<PersonalConfigImportResult> ImportAsync(Guid personalWorkspaceId, string packagePath, CancellationToken cancellationToken = default)
     {
-        var (archive, manifest) = await OpenAndValidateAsync(packagePath, cancellationToken);
+        var (archive, manifest) = await OpenAndValidateAsync(packagePath, LocalLimits, cancellationToken);
         using (archive)
         {
             paths.EnsureCreated();
@@ -228,7 +235,8 @@ public sealed class PersonalConfigTransferService(
         return asset;
     }
 
-    private static async Task<(ZipArchive Archive, PackageManifest Manifest)> OpenAndValidateAsync(string packagePath, CancellationToken cancellationToken)
+    private static async Task<(ZipArchive Archive, PackageManifest Manifest)> OpenAndValidateAsync(
+        string packagePath, PackageLimits limits, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packagePath);
         var stream = new FileStream(Path.GetFullPath(packagePath), FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
@@ -246,7 +254,7 @@ public sealed class PersonalConfigTransferService(
                 manifest = await JsonSerializer.DeserializeAsync<PackageManifest>(input, JsonOptions, cancellationToken);
             if (manifest is null || manifest.FormatVersion != FormatVersion)
                 throw new InvalidDataException("不支持的个人配置迁移包版本。");
-            ValidateManifestShape(manifest);
+            ValidateManifestShape(manifest, limits);
             var assetsByName = manifest.Assets.ToDictionary(asset => asset.EntryName, StringComparer.Ordinal);
             if (assetsByName.Count != manifest.Assets.Count) throw new InvalidDataException("迁移包资源名称重复。");
             if (archive.Entries.Count != manifest.Assets.Count + 1 ||
@@ -260,17 +268,29 @@ public sealed class PersonalConfigTransferService(
                 var entry = archive.GetEntry(asset.EntryName) ?? throw new InvalidDataException($"迁移包缺少资源：{asset.OriginalName}");
                 if (entry.Length != asset.ByteSize) throw new InvalidDataException($"资源大小校验失败：{asset.OriginalName}");
                 total = checked(total + entry.Length);
-                if (total > MaxPackageBytes) throw new InvalidDataException("迁移包资源总大小校验失败。");
+                if (entry.Length > limits.MaxFileBytes)
+                    throw new InvalidDataException($"文件超过 {limits.MaxFileBytes / 1024 / 1024} MB 上限：{asset.OriginalName}");
+                if (total > limits.MaxPackageBytes) throw new InvalidDataException("迁移包资源总大小校验失败。");
                 entries.Add(asset.EntryName, entry);
             }
             if (total != manifest.IncludedBytes) throw new InvalidDataException("迁移包资源总大小校验失败。");
+            var imageEntries = limits.Network
+                ? manifest.Items.SelectMany(item => new[] { item.ImageEntry, item.ThumbnailEntry }).OfType<string>().ToHashSet(StringComparer.Ordinal)
+                : [];
             foreach (var asset in manifest.Assets)
             {
                 var entry = entries[asset.EntryName];
-                await using var content = entry.Open();
-                var hash = Convert.ToHexString(await SHA256.HashDataAsync(content, cancellationToken));
+                var hash = await HashEntryAsync(entry, asset.ByteSize, asset.OriginalName, cancellationToken);
                 if (!hash.Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"资源校验失败：{asset.OriginalName}");
+                if (imageEntries.Contains(asset.EntryName))
+                {
+                    await using var header = entry.Open();
+                    var buffer = new byte[8];
+                    var read = await header.ReadAtLeastAsync(buffer, buffer.Length, false, cancellationToken);
+                    if (!ConfigSyncPolicy.IsPngOrJpeg(buffer.AsSpan(0, read)))
+                        throw new InvalidDataException($"图片不是 PNG/JPEG：{asset.OriginalName}");
+                }
             }
             return (archive, manifest);
         }
@@ -298,12 +318,17 @@ public sealed class PersonalConfigTransferService(
         return target;
     }
 
-    private static void ValidateManifestShape(PackageManifest manifest)
+    private static void ValidateManifestShape(PackageManifest manifest, PackageLimits limits)
     {
         if (manifest.PackageId == Guid.Empty || manifest.Folders is null || manifest.Items is null || manifest.Assets is null ||
-            manifest.MissingFileCount < 0 || manifest.IncludedBytes < 0 || manifest.IncludedBytes > MaxPackageBytes ||
+            manifest.MissingFileCount < 0 || manifest.IncludedBytes < 0 || manifest.IncludedBytes > limits.MaxPackageBytes ||
             manifest.Folders.Count > MaxFolderCount || manifest.Items.Count > MaxItemCount || manifest.Assets.Count > MaxAssetCount)
             throw new InvalidDataException("迁移包清单结构或数量无效。");
+        if (limits.Network && (manifest.Folders.Count is < 1 or > ConfigSyncPolicy.MaxFolderCount ||
+                               manifest.Items.Count > ConfigSyncPolicy.MaxItemCount ||
+                               manifest.Folders.Any(folder => folder is null || folder.Name is null ||
+                                                              folder.Name.Length > ConfigSyncPolicy.MaxFolderNameLength)))
+            throw new InvalidDataException($"配置包的文件夹数须在 1 到 {ConfigSyncPolicy.MaxFolderCount} 之间，条目数不超过 10000，文件夹名不超过 80 字。");
 
         var folders = new HashSet<Guid>();
         foreach (var folder in manifest.Folders)
@@ -325,6 +350,9 @@ public sealed class PersonalConfigTransferService(
                 try { CollectionLink.Normalize(item.Url); }
                 catch (ArgumentException exception) { throw new InvalidDataException("迁移包链接无效。", exception); }
             }
+            if (limits.Network && item.TextContent is not null &&
+                Encoding.UTF8.GetByteCount(item.TextContent) > ConfigSyncPolicy.MaxTextBytes)
+                throw new InvalidDataException("配置包中的文本超过 2 MB 上限。");
             if (type is not CollectionItemType.Image && (item.ImageEntry is not null || item.ThumbnailEntry is not null))
                 throw new InvalidDataException("迁移包项目资源类型不匹配。");
             if (type != CollectionItemType.File && item.FileEntries.Count != 0)
@@ -378,18 +406,21 @@ public sealed class PersonalConfigTransferService(
     }
 
     private static bool IsSafeEntryName(string name) => !string.IsNullOrWhiteSpace(name) &&
-        !name.StartsWith('/') && !name.StartsWith('\\') && !name.Contains('\\') &&
+        !name.StartsWith('/') && !name.StartsWith('\\') && !name.Contains('\\') && !name.Contains(':') &&
         name.Split('/').All(part => part is not "" and not "." and not "..");
 
     private static void TryDeleteFile(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
     private static void TryDeleteDirectory(string path) { try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { } }
 
+    private sealed record PackageLimits(long MaxPackageBytes, long MaxFileBytes, bool Network);
+    private sealed record PackageSyncInfo(Guid PublishedId, string Name, int Version);
     private sealed record PackageManifest(int FormatVersion, Guid PackageId, DateTimeOffset CreatedAtUtc,
         IReadOnlyList<PackageFolder> Folders, IReadOnlyList<PackageItem> Items,
-        IReadOnlyList<PackageAsset> Assets, int MissingFileCount, long IncludedBytes);
+        IReadOnlyList<PackageAsset> Assets, int MissingFileCount, long IncludedBytes,
+        PackageSyncInfo? Sync = null);
     private sealed record PackageFolder(Guid Id, string Name, bool IsSystem, int Order);
     private sealed record PackageItem(Guid Id, Guid FolderId, int ItemType, int Order, string? Title,
         string? TextContent, string? Url, string? Description, string? ContentHash, long ContentSize,
-        string? ImageEntry, string? ThumbnailEntry, IReadOnlyList<string> FileEntries);
+        string? ImageEntry, string? ThumbnailEntry, IReadOnlyList<string> FileEntries, string? Digest = null);
     private sealed record PackageAsset(string EntryName, string OriginalName, long ByteSize, string Sha256);
 }

@@ -58,7 +58,7 @@ public sealed class SqliteDatabaseInitializerTests : IDisposable
         }
         var backup = new DatabaseSafetyBackup(paths, factory);
         await new SqliteDatabaseInitializer(factory, NullLogger<SqliteDatabaseInitializer>.Instance, backup).InitializeAsync();
-        var file = Assert.Single(Directory.GetFiles(Path.Combine(_root, "migration-backups"), "clipboard-v1-before-v7-*.db"));
+        var file = Assert.Single(Directory.GetFiles(Path.Combine(_root, "migration-backups"), "clipboard-v1-before-v8-*.db"));
         await using var snapshot = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = file, Mode = SqliteOpenMode.ReadOnly }.ConnectionString);
         await snapshot.OpenAsync();
         await using var check = snapshot.CreateCommand();

@@ -14,7 +14,9 @@
 
 ## 当前范围
 
-> 状态对齐（2026-10-31）：正式发布版为 0.7.9；0.8.0–0.8.7（青序结构、暖纸赤陶、面板宠物与划词排除、收起互动、桌面宠物、夹夹形象重绘与拖拽修复、夹夹主题与布局调整、Kami 主题与选中态统一）均在 CHANGELOG「Unreleased」，尚未整理为带日期的发布条目。版本源为 `Directory.Build.targets`（0.8.7 / `0.8.7-kami-theme`）与 `release/release-contract.json`（appVersion 0.8.7，schema 7）。0.8.7 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-31 构建于 `artifacts/release/0.8.7/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 213 项测试通过，LayoutCheck 三套主题全部通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过，SHA256 复核一致），未签名；三主题在真实桌面上的来回切换与逐页点验未完成。0.8.6 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.6/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 211 项测试通过，LayoutCheck 两套主题全部通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过，SHA256 复核一致），未签名。0.8.5 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.5/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 202 项测试通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过）；0.8.4 产物仍在 `artifacts/release/0.8.4/`。均未签名，真实桌面点验与多显示器/DPI 验收待完成。Phase 2/3 已完成，Phase 4 收尾中；下述阶段条款保留为历史基线。当前在制内容见 `docs/design/2026-10-21-*` 与 CHANGELOG「Unreleased」。
+> 0.9.0 补充（2026-10-31）：新增「配置订阅同步」第一期（见下「扩展能力实现状态」），数据库 schema 8，版本源 `Directory.Build.targets`（0.9.0 / `0.9.0-config-sync`）与 `release/release-contract.json`（appVersion 0.9.0，schema 8）；以下 0.8.x 状态保留为历史基线，其中"schema 7"以此处为准。
+>
+> 状态对齐（2026-10-31）：正式发布版为 0.7.9；0.8.0–0.8.7（青序结构、暖纸赤陶、面板宠物、收起互动、桌面宠物、夹夹形象重绘与拖拽修复、夹夹主题与布局调整、Kami 主题与选中态统一、移除划词功能、计算页与算式识别重做）均在 CHANGELOG「Unreleased」，尚未整理为带日期的发布条目。版本源为 `Directory.Build.targets`（0.8.7 / `0.8.7-kami-theme`）与 `release/release-contract.json`（appVersion 0.8.7，schema 7）。0.8.7 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-31 构建于 `artifacts/release/0.8.7/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 160 项测试通过（移除划词前为 213 项），LayoutCheck 三套主题 × 4 页全部通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过，SHA256 复核一致），该目录已在移除划词后重新打包，未签名；三主题在真实桌面上的来回切换与逐页点验未完成，设置窗口实机界面与 MSI 升级未验证。0.8.6 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.6/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 211 项测试通过，LayoutCheck 两套主题全部通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过，SHA256 复核一致），未签名。0.8.5 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.5/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 202 项测试通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过）；0.8.4 产物仍在 `artifacts/release/0.8.4/`。均未签名，真实桌面点验与多显示器/DPI 验收待完成。Phase 2/3 已完成，Phase 4 收尾中；下述阶段条款保留为历史基线。当前在制内容见 `docs/design/2026-10-21-*` 与 CHANGELOG「Unreleased」。
 
 ### 首期实现
 
@@ -33,7 +35,15 @@
 - 账号与登录：客户端已实现腾讯云账号登录（`src/ClipboardManager.Infrastructure/Cloud/`，ADR-0003）；令牌存 Windows 凭据管理器；`cloud/` 为预览服务端。
 - 跨设备同步：客户端已实现 Tencent Remote Sync Provider、Cloud Outbox 本地队列与本地匿名身份回退。
 - 局域网分享：`Infrastructure/Lan/LocalSendLanShareService` 已实现，入口暂不开放。
-- 划词 AI 与本地 AI 网关：已实现（ADR-0004），OpenAI 兼容接口，密钥走凭据管理器。
+- 划词 AI 与本地 AI 网关：曾在 0.7.9 实现（ADR-0004），已于 0.8.7 整体移除（鼠标选区监听、模拟 Ctrl+C 取词、浮动工具栏、模型调用、提示词模板、「划词」页签）。不得在未经新的架构决策前重新引入全局鼠标钩子、模拟按键取词或自动调用模型接口。旧设置文件里的 `selectionAi` 字段读取时必须被忽略；此前保存的 API Key 留在 Windows 凭据管理器（`ClipboardManager/SelectionAI/…`），不自动清除。主窗口导航在 0.9.0 起为「历史、配置、待办、计算、共享」五页（团队页签保持隐藏）。
+- 配置订阅同步（0.9.0 起，ADR-0006，schema 8）：局域网内一台设备发布个人配置（默认一次发布全部个人收藏文件夹，同一个包、同一个版本，也可只勾选部分；包内 1–200 个文件夹），其他设备配对后只读订阅，订阅方得到同数量的受管文件夹，更新/回退/取消订阅整体进行。「共享」页签分「发布」「订阅」两段；历史页的「发送到局域网」仍是 LocalSend（53317），与本能力（53318）互不影响。约束如下：
+  - **订阅只读**：订阅得到的受管文件夹（`CollectionFolder.ManagedSubscriptionId` 非空）与个人配置物理隔离；任何用户写入路径必须拒绝，个人导出跳过，不可再发布。取消订阅须确认并说明会删除受管文件夹。
+  - **版本单调**：拒收版本号 ≤ 当前版本的包；更新必须先快照（含当前最多 3 个）、再下载校验、最后原子替换，任一步失败保留原版本；回退后自动跳过被回退的版本。
+  - **不同步剪切板历史**：只同步用户显式发布的配置文件夹；本机捕获内容永不因此上传或分发；同步失败不得阻塞或侵入剪切板监听主链路，本地功能在离线时完整可用。
+  - **配对码不明文传输**：6 位码 5 分钟有效、单次使用、错 5 次作废，用 HMAC-SHA256 双向验证；配对后只接受已 pin 的证书指纹（双向 TLS），不信任系统根证书。身份私钥只存 Windows 凭据管理器，不得写入 SQLite、日志或普通配置文件。
+  - **导入限制**：网络接收包 ≤ 200 MB、清单 ≤ 4 MB、单文件 ≤ 50 MB、仅 http/https 链接、图片须为 PNG/JPEG；条目名与路径必须通过 `IsSafeEntryName`；本地导入保持 20 GB。可执行类扩展名标记高风险，导入需单独确认，永不自动打开，自动更新不得应用含高风险文件的版本。
+  - **防火墙**：MSI 仍为 perUser，不写防火墙规则；运行时只提示放行 TCP/UDP 53318 并提供可复制的 `netsh` 命令。"安装程序加规则"是待办，不得标为已完成。
+  - **验收状态**：0.9.0 以真实 TLS 的进程内环回集成测试代替两台机器验证；两台真实设备、防火墙、组播真实网络、真实 UI 点击均待验收。
 - 桌面宠物（0.8.2 起，0.8.4 完成收起形态）：原创像素宠物，设置内可关闭（默认开）。约束如下：
   - 形象为原创"夹夹"（纸页 + 赤陶夹子）。帧图由 `scripts/build-pet-assets.py` 在 28×20 网格内用代码确定性绘制并精确 2 倍导出为 56×40；不得手改帧图，不得非整数缩放或非等比拉伸。
   - 状态只映射真实运行状态：监听中=Idle、暂停=Sleeping、捕获到新内容=一次性 Hop；拖拽就绪=Carry（仅视觉反馈）。不得用宠物伪造同步、云端或团队状态。
@@ -45,6 +55,11 @@
   - 拖拽按窗口 DPI 把设备像素换算为 DIP，并限制在光标所在屏幕的工作区内（0.8.5）。
   - 已知待办：上述 DPI 换算与屏幕限位、Carry 状态、Esc 在未获得焦点的宠物窗口上是否生效，均需在 Windows 实机（100%/125%/150% 缩放、多显示器）验收。
 - 仍未实现：团队创建、成员管理、权限校验与团队内容分发；OCR；移动端与 macOS/Linux 客户端。
+- 计算页与剪切板算式识别（0.7.6 起；0.8.7 重做，设计依据 `docs/design/2026-10-31-calculator/`）：
+  - 引擎 `CalculatorService` 在入口一次规范化后只处理规范串；支持十进制加减乘除、括号、后缀 `%`、紧邻括号的隐式乘法、整数 `^`（|指数|≤64）；限制 512 字符、嵌套 32、128 次运算、28/29 位；不做科学函数、进制、单位换算。错误分不完整（输入中不报错）、非法格式、除零/溢出三类。显示最多 12 位小数并以 `≈` 标注舍入；复制出去的是不带千分位的纯数字。
+  - 设置 `ClipboardCalculatorMode`（`Off` / `Hint` / `Rewrite`）取代旧 `EnableClipboardCalculator`：旧 true → Rewrite、false → Off（`JsonAppSettingsStore` 读取时迁移，不覆盖已有新字段），全新安装默认 `Hint`。`Hint` 不得改写剪切板，历史行的 `= 结果` 标签只在显示时计算、不入库；`Rewrite` 才允许后台改写，且不改写纯"数字-数字"、年-月、ISO 日期。`CalculatorKeypadOpen` 只记住小键盘开关。
+  - 纸带只在内存（最近 30 条），不持久化、不入同步 Outbox、不进入历史；计算页键盘契约：Enter 记录并回填结果（全选，运算符接着算、数字重开）、Ctrl+Enter 复制、Esc 清空、↑ 调出上一条。0.9.0 起另有「大写」按钮（Ctrl+Shift+Enter）复制报销单大写金额（`ChineseAmountFormatter`：精确到分、超出两位小数四舍五入并提示、≥ 10^16 元拒绝）。历史页筛选为「全部、文本、链接、图片、文件」居中显示，"链接"= 单个 http/https 地址（`ClipboardQuery.LinksOnly`，SQL 过滤）。
+  - 状态：282 项自动测试（Domain 26 / Application 186 / Infrastructure 70）与 LayoutCheck 37 项通过；Ctrl+Enter/复制结果写系统剪切板、Hint/Rewrite 的真实剪切板路径、纸带悬停按钮、缩放与多显示器实机验收待完成。
 - 界面主题（0.8.6 起；0.8.7 增加「Kami（纸）」）：标准暖纸（默认）、可选「夹夹」与「Kami」，设置 → 界面主题，保存后即时生效。约束如下：
   - 主题只改视觉（颜色、圆角、描边、装饰显隐、主题文案），不改功能、快捷键、数据、窗口尺寸或导航顺序；布局调整（行高、图标、筛选合并等）两套主题共用。
   - `Themes/Palette.xaml` 是标准主题；`Palette.Jiajia.xaml`、`Palette.Kami.xaml` 是最后合并的覆盖层（`ThemeService.Apply` 按主题 id 加载，先移除旧层再加新层，standard 不加载），覆盖层只写与标准不同的键，其键必须是 `Palette.xaml` 键的子集，LayoutCheck 断言；新增主题须同步更新校验器、设置下拉、测试与 LayoutCheck。
@@ -95,7 +110,7 @@ Phase 3 验收至少覆盖：未分类唯一性、收藏快照独立性、文件
 
 ## 实施阶段（收尾中）：Phase 4 桌面体验、隐私与交付
 
-Phase 2/3 上述条款作为历史基线保留；当前功能范围以 Phase 4 为准，不再隐藏图片和文件入口。0.7.5 起范围扩展：个人待办（0.7.4 规则已交付）、计算器（0.7.6）、划词 AI 与本地网关（0.7.9，ADR-0004）、腾讯云账号与同步（ADR-0003）；0.8.0 青序结构审阅版在制。
+Phase 2/3 上述条款作为历史基线保留；当前功能范围以 Phase 4 为准，不再隐藏图片和文件入口。0.7.5 起范围扩展：个人待办（0.7.4 规则已交付）、计算器（0.7.6）、划词 AI 与本地网关（0.7.9，ADR-0004；0.8.7 已移除）、腾讯云账号与同步（ADR-0003）；0.8.0 青序结构审阅版在制。
 
 ### 0.7.4 个人待办规则
 

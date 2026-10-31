@@ -47,6 +47,12 @@ public sealed class TrayIconService : IDisposable
         UpdatePauseText();
     }
 
+    /// <summary>托盘气泡提示；托盘未初始化时静默忽略。</summary>
+    public void ShowBalloon(string title, string text)
+    {
+        _notifyIcon?.ShowBalloonTip(5000, title, text, ToolTipIcon.Info);
+    }
+
     public void Dispose()
     {
         if (_notifyIcon is null)

@@ -13,7 +13,7 @@ public sealed class ClipboardCalculationServiceTests
     {
         var clipboard = new Rewriter();
         var guard = new SelfWriteGuard();
-        var service = new ClipboardCalculationService(clipboard, new Store(new AppSettings { EnableClipboardCalculator = true }), guard);
+        var service = new ClipboardCalculationService(clipboard, new Store(new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Rewrite }), guard);
         CalculationResult? observed = null;
         service.CalculationCompleted += (_, result) => observed = result;
         Assert.True(await service.TryCalculateAsync(" 0.1+0.2 ", 17, Source));
@@ -26,14 +26,16 @@ public sealed class ClipboardCalculationServiceTests
     }
 
     [Fact]
-    public async Task DisabledPausedTimedPausedAndExcluded_NeverAttemptRewrite()
+    public async Task OffHintPausedTimedPausedAndExcluded_NeverAttemptRewrite()
     {
         var settings = new[]
         {
-            new AppSettings(),
-            new AppSettings { EnableClipboardCalculator = true, IsCapturePaused = true },
-            new AppSettings { EnableClipboardCalculator = true, CapturePausedUntil = DateTimeOffset.UtcNow.AddHours(1) },
-            new AppSettings { EnableClipboardCalculator = true, ExcludedProcesses = ["NOTEPAD"] }
+            new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Off },
+            new AppSettings(),   // the default is Hint: show a result in the history, never rewrite the clipboard
+            new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Hint },
+            new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Rewrite, IsCapturePaused = true },
+            new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Rewrite, CapturePausedUntil = DateTimeOffset.UtcNow.AddHours(1) },
+            new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Rewrite, ExcludedProcesses = ["NOTEPAD"] }
         };
         foreach (var config in settings)
         {
@@ -50,12 +52,30 @@ public sealed class ClipboardCalculationServiceTests
     [InlineData("1/0")]
     [InlineData("12")]
     [InlineData("2026-10-08")]
+    [InlineData("10-12")]          // page range / room number
+    [InlineData("2026-10")]        // year-month
+    [InlineData("10 - 12")]
+    [InlineData("50%")]
     public async Task NonExpressionAndInvalidInput_LeaveClipboardUntouched(string text)
     {
         var clipboard = new Rewriter();
-        var service = new ClipboardCalculationService(clipboard, new Store(new AppSettings { EnableClipboardCalculator = true }), new SelfWriteGuard());
+        var service = new ClipboardCalculationService(clipboard, new Store(new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Rewrite }), new SelfWriteGuard());
         Assert.False(await service.TryCalculateAsync(text, 17, Source));
         Assert.Equal(0, clipboard.Calls);
+    }
+
+    [Theory]
+    [InlineData("200+10%", "200+10%=220")]
+    [InlineData("(1250+380)/3", "(1250+380)/3=543.333333333333")]
+    [InlineData("10-12+1", "10-12+1=-1")]
+    [InlineData("１＋２", "１＋２=3")]
+    [InlineData("1,250×2", "1,250×2=2500")]
+    public async Task Rewrite_StillRewritesRealExpressions_WithTheSameOutputShape(string text, string expected)
+    {
+        var clipboard = new Rewriter();
+        var service = new ClipboardCalculationService(clipboard, new Store(new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Rewrite }), new SelfWriteGuard());
+        Assert.True(await service.TryCalculateAsync(text, 17, Source));
+        Assert.Equal(expected, clipboard.Replacement);
     }
 
     [Theory]
@@ -65,7 +85,7 @@ public sealed class ClipboardCalculationServiceTests
     {
         var clipboard = new Rewriter { Accepted = false, Throws = throws };
         var guard = new SelfWriteGuard();
-        var service = new ClipboardCalculationService(clipboard, new Store(new AppSettings { EnableClipboardCalculator = true }), guard);
+        var service = new ClipboardCalculationService(clipboard, new Store(new AppSettings { ClipboardCalculatorMode = ClipboardCalculatorMode.Rewrite }), guard);
         var events = 0;
         service.CalculationCompleted += (_, _) => events++;
         if (throws) await Assert.ThrowsAsync<InvalidOperationException>(() => service.TryCalculateAsync("1+1", 17, Source));

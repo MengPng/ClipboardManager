@@ -47,6 +47,16 @@ public sealed class SqliteClipboardHistoryRepository(SqliteConnectionFactory con
             }
         }
 
+        if (query.LinksOnly)
+        {
+            // Same rule as the list's link icon: one http(s) URL with no whitespace inside, at most 2048 characters.
+            filters.Add("item_type = $linkTextType");
+            filters.Add("length(trim(COALESCE(text_content, preview_text, ''), char(32, 9, 10, 13))) <= 2048");
+            filters.Add("(trim(COALESCE(text_content, preview_text, ''), char(32, 9, 10, 13)) LIKE 'http://%' OR trim(COALESCE(text_content, preview_text, ''), char(32, 9, 10, 13)) LIKE 'https://%')");
+            filters.Add("trim(COALESCE(text_content, preview_text, ''), char(32, 9, 10, 13)) NOT GLOB '*[ ' || char(9, 10, 13) || ']*'");
+            command.Parameters.AddWithValue("$linkTextType", (int)ClipboardItemType.Text);
+        }
+
         if (query.FavoritesOnly)
         {
             filters.Add("is_favorite = 1");

@@ -17,7 +17,7 @@ public sealed class ClipboardMonitorService(
     ClipboardCalculationService calculationService,
     ForegroundApplicationService foregroundApplicationService,
     IAppSettingsStore settingsStore,
-    SelectionClipboardGate selectionGate,
+    SelfWriteSequenceGate selfWriteGate,
     ILogger<ClipboardMonitorService> logger) : IDisposable
 {
     private readonly Channel<ClipboardCaptureAttribution> _events = Channel.CreateBounded<ClipboardCaptureAttribution>(
@@ -134,7 +134,7 @@ public sealed class ClipboardMonitorService(
         if (message == NativeMethods.WmClipboardUpdate)
         {
             var sequence = NativeMethods.GetClipboardSequenceNumber();
-            if (!IsPaused && !selectionGate.Observe(sequence))
+            if (!IsPaused && !selfWriteGate.Observe(sequence))
             {
                 // The foreground app is diagnostic context only. Attribution and privacy are
                 // based on the clipboard owner, which can differ while another app is active.
@@ -162,13 +162,13 @@ public sealed class ClipboardMonitorService(
                     // Check before touching the clipboard, not only after materializing its payload.
                     var settings = await settingsStore.LoadAsync(cancellationToken);
                     if (!CapturePrivacyPolicy.CanRead(settings, source, DateTimeOffset.UtcNow, clipboardEvent.Owner.IsKnown)) continue;
-                    if (IsPaused || selectionGate.Observe(clipboardEvent.Sequence) ||
+                    if (IsPaused || selfWriteGate.Observe(clipboardEvent.Sequence) ||
                         !clipboardEvent.MatchesCurrent(
                             NativeMethods.GetClipboardSequenceNumber(),
                             foregroundApplicationService.GetClipboardOwner(),
                             foregroundApplicationService.GetCurrentSource())) continue;
                     var payload = await systemClipboard.ReadAsync(cancellationToken);
-                    if (selectionGate.Observe(clipboardEvent.Sequence) ||
+                    if (selfWriteGate.Observe(clipboardEvent.Sequence) ||
                         !clipboardEvent.MatchesCurrent(
                             NativeMethods.GetClipboardSequenceNumber(),
                             foregroundApplicationService.GetClipboardOwner(),

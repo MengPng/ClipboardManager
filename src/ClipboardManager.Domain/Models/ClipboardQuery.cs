@@ -7,4 +7,5 @@ public sealed record ClipboardQuery(
     bool FavoritesOnly = false,
     bool PinnedOnly = false,
     int Offset = 0,
-    int Limit = 100);
+    int Limit = 100,
+    bool LinksOnly = false);

@@ -23,10 +23,10 @@ public sealed class StorageMaintenanceSecurityTests : IDisposable
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version=7;";
+            command.CommandText = "PRAGMA user_version=8;";
             await command.ExecuteNonQueryAsync();
         }
-        await CreateArchiveAsync(archive, fake, 7);
+        await CreateArchiveAsync(archive, fake, 8);
 
         Assert.False((await service.ValidateBackupAsync(archive)).IsValid);
         await Assert.ThrowsAnyAsync<Exception>(() => service.RestoreAsync(archive));
@@ -65,7 +65,7 @@ public sealed class StorageMaintenanceSecurityTests : IDisposable
         await target.RestoreAsync(archive);
 
         Assert.Equal("old", await ScalarAsync(new AppPaths(targetRoot), "SELECT name FROM workspaces WHERE id='old';"));
-        Assert.Equal("7", await ScalarAsync(new AppPaths(targetRoot), "PRAGMA user_version;"));
+        Assert.Equal("8", await ScalarAsync(new AppPaths(targetRoot), "PRAGMA user_version;"));
     }
 
     [Fact]

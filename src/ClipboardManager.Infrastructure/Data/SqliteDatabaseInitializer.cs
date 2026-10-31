@@ -9,7 +9,7 @@ public sealed class SqliteDatabaseInitializer(
     ILogger<SqliteDatabaseInitializer> logger,
     DatabaseSafetyBackup? safetyBackup = null) : IDatabaseInitializer
 {
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -78,9 +78,40 @@ public sealed class SqliteDatabaseInitializer(
         {
             await ApplyVersion7Async(connection, cancellationToken);
             await ExecuteAsync(connection, "PRAGMA user_version=7;", cancellationToken);
+            version = 7;
         }
 
+        if (version < 8)
+        {
+            await ApplyVersion8Async(connection, cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA user_version=8;", cancellationToken);
+        }
+
+        // 0.9.0 多文件夹发布新增的两列。0.9.0 尚未正式发布而 schema 号保持 8，已经跑过第一版 v8 的库不会再进入
+        // ApplyVersion8Async，所以这里每次启动都做一次幂等的列补齐，而不是再提高 schema 号。
+        await EnsureConfigSyncColumnsAsync(connection, cancellationToken);
+
         logger.LogInformation("Local database schema is at version {Version}.", CurrentVersion);
+    }
+
+    private static async Task EnsureConfigSyncColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(connection, "published_config", "folder_scope", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(connection, "collection_folders", "managed_remote_id", "TEXT NULL", cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(SqliteConnection connection, string table, string column, string definition,
+        CancellationToken cancellationToken)
+    {
+        await using var tableExists = connection.CreateCommand();
+        tableExists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table;";
+        tableExists.Parameters.AddWithValue("$table", table);
+        if (Convert.ToInt32(await tableExists.ExecuteScalarAsync(cancellationToken)) == 0) return;
+        await using var columnExists = connection.CreateCommand();
+        columnExists.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=$column;";
+        columnExists.Parameters.AddWithValue("$column", column);
+        if (Convert.ToInt32(await columnExists.ExecuteScalarAsync(cancellationToken)) > 0) return;
+        await ExecuteAsync(connection, $"ALTER TABLE {table} ADD COLUMN {column} {definition};", cancellationToken);
     }
 
     private static async Task<int> GetUserVersionAsync(
@@ -462,6 +493,82 @@ public sealed class SqliteDatabaseInitializer(
             DELETE FROM todo_tags WHERE is_preset=1;
             COMMIT;
             """;
+        await ExecuteAsync(connection, sql, cancellationToken);
+    }
+
+    private static async Task ApplyVersion8Async(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // 配置订阅同步（0.9.0）。旧库可能没有 collection_folders（未完整初始化的残缺库），此时只建新表。
+        await using var exists = connection.CreateCommand();
+        exists.CommandText = "SELECT COUNT(*) FROM pragma_table_info('collection_folders') WHERE name='managed_subscription_id';";
+        var hasColumn = Convert.ToInt32(await exists.ExecuteScalarAsync(cancellationToken)) > 0;
+        await using var folders = connection.CreateCommand();
+        folders.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='collection_folders';";
+        var hasFolders = Convert.ToInt32(await folders.ExecuteScalarAsync(cancellationToken)) > 0;
+
+        var sql = """
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS published_config (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                folder_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                current_version INTEGER NOT NULL,
+                content_hash TEXT NOT NULL,
+                package_path TEXT NOT NULL,
+                package_bytes INTEGER NOT NULL DEFAULT 0,
+                manifest_json TEXT NOT NULL,
+                auto_publish INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(workspace_id) REFERENCES workspaces(id)
+            );
+            CREATE TABLE IF NOT EXISTS paired_peer (
+                id TEXT PRIMARY KEY,
+                role INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                last_address TEXT NULL,
+                paired_at TEXT NOT NULL,
+                status INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_paired_peer_active
+                ON paired_peer(role, fingerprint) WHERE status=0;
+            CREATE TABLE IF NOT EXISTS subscription (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                peer_id TEXT NOT NULL,
+                published_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                local_version INTEGER NOT NULL,
+                managed_folder_id TEXT NOT NULL,
+                auto_update INTEGER NOT NULL DEFAULT 0,
+                stay_on_current INTEGER NOT NULL DEFAULT 0,
+                skipped_version INTEGER NULL,
+                last_checked_at TEXT NULL,
+                latest_known_version INTEGER NULL,
+                last_error TEXT NULL,
+                manifest_json TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+                FOREIGN KEY(peer_id) REFERENCES paired_peer(id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_subscription_source
+                ON subscription(workspace_id, peer_id, published_id);
+            CREATE TABLE IF NOT EXISTS config_snapshot (
+                subscription_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                snapshot_path TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(subscription_id, version),
+                FOREIGN KEY(subscription_id) REFERENCES subscription(id) ON DELETE CASCADE
+            );
+            """;
+        if (hasFolders && !hasColumn)
+            sql += "ALTER TABLE collection_folders ADD COLUMN managed_subscription_id TEXT NULL;\n";
+        sql += "COMMIT;";
         await ExecuteAsync(connection, sql, cancellationToken);
     }
 

@@ -14,7 +14,10 @@ public sealed class ClipboardCalculationService(
         CancellationToken cancellationToken = default)
     {
         var settings = await settingsStore.LoadAsync(cancellationToken);
-        if (!settings.EnableClipboardCalculator || !CapturePrivacyPolicy.CanRead(settings, source, DateTimeOffset.UtcNow) ||
+        // Only Rewrite touches the clipboard; Hint is display-only (the history row shows the result).
+        if (settings.ClipboardCalculatorMode != ClipboardCalculatorMode.Rewrite ||
+            !CapturePrivacyPolicy.CanRead(settings, source, DateTimeOffset.UtcNow) ||
+            CalculatorService.IsDashSeparatedIdentifier(text) ||
             !CalculatorService.TryCalculate(text, out var calculation, out _, requireBinaryOperator: true)) return false;
         var output = calculation!.Output;
         selfWriteGuard.Expect(TextContentService.ComputeHash(output));

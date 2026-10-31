@@ -13,7 +13,7 @@ public sealed class ForegroundApplicationService
 
     public ClipboardOwnerObservation GetClipboardOwner()
     {
-        var window = SelectionNative.GetClipboardOwner();
+        var window = NativeMethods.GetClipboardOwner();
         return new ClipboardOwnerObservation(window, GetSourceForWindow(window));
     }
 

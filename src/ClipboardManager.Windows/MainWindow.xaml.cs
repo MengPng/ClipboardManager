@@ -1,4 +1,5 @@
 using ClipboardManager.Application.Services;
+using ClipboardManager.Application.Services.ConfigSync;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
 using ClipboardManager.Windows.Services;
@@ -31,12 +32,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly ClipboardManager.Domain.Contracts.IStorageMaintenanceService _storageMaintenance;
     private readonly ClipboardManager.Domain.Contracts.IPersonalConfigTransferService _personalConfigTransfer;
     private readonly ILanShareService _lanShareService;
+    private readonly ConfigPublishService _configPublish;
+    private readonly ConfigSubscriptionService _configSubscriptions;
+    private readonly ConfigSyncCoordinator _configSync;
+    private readonly ClipboardManager.Domain.Contracts.IConfigDiscovery _configDiscovery;
+    private readonly ClipboardManager.Domain.Contracts.IConfigSyncIdentity _configIdentity;
     private readonly ICloudModeService _cloudModeService;
     private readonly TodoService _todoService;
-    private readonly ICredentialVault _credentialVault;
-    private readonly SelectionAiController _selectionAiController;
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
-    private bool _allowClose, _favoritesOnly, _pinnedOnly, _refreshingFolders, _isPinnedTopmost;
+    private bool _allowClose, _favoritesOnly, _pinnedOnly, _linksOnly, _refreshingFolders, _isPinnedTopmost;
     private bool _isCollapsed;
     private Services.CollapsedPetWindow? _collapsedPet;
     private double _expandedWidth = 340;
@@ -53,7 +57,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private long _historyVersion, _collectionVersion, _foldersVersion, _tabSelectionVersion;
     private CancellationTokenSource? _historySearch, _collectionSearch;
     private bool _compactList;
-    private bool _lanSettingsLoaded;
     private string _lanSessionPin = string.Empty;
     private Guid _personalWorkspaceId;
     private Guid? _teamWorkspaceId;
@@ -81,8 +84,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ClipboardManager.Domain.Contracts.IStorageMaintenanceService storageMaintenance,
         ClipboardManager.Domain.Contracts.IPersonalConfigTransferService personalConfigTransfer,
         ILanShareService lanShareService, ICloudModeService cloudModeService, TodoService todoService,
-        ICredentialVault credentialVault, SelectionAiController selectionAiController,
-        ClipboardCalculationService calculationService)
+        ClipboardCalculationService calculationService,
+        ConfigPublishService configPublish, ConfigSubscriptionService configSubscriptions,
+        ConfigSyncCoordinator configSync, ClipboardManager.Domain.Contracts.IConfigDiscovery configDiscovery,
+        ClipboardManager.Domain.Contracts.IConfigSyncIdentity configIdentity)
     {
         _historyService = historyService; _restoreService = restoreService; _monitorService = monitorService;
         _captureService = captureService; _payloadCaptureService = payloadCaptureService;
@@ -92,9 +97,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settingsStore = settingsStore; _storageMaintenance = storageMaintenance;
         _personalConfigTransfer = personalConfigTransfer;
         _lanShareService = lanShareService;
+        _configPublish = configPublish; _configSubscriptions = configSubscriptions;
+        _configSync = configSync; _configDiscovery = configDiscovery; _configIdentity = configIdentity;
         _cloudModeService = cloudModeService;
-        _credentialVault = credentialVault;
-        _selectionAiController = selectionAiController;
         DataContext = this;
         InitializeComponent();
         // Created in code rather than XAML: LayoutCheck loads this window's XAML
@@ -115,14 +120,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         EmptyPetHost.Children.Add(_emptyPet);
         EmptyPetHost.SetResourceReference(VisibilityProperty, "EmptyPetVisibility");
         Closed += (_, _) => _collapsedPet?.Close();
-        var selectionSettings = new SelectionAiSettingsPanel(_settingsStore, _credentialVault);
-        selectionSettings.Saved += async (_, _) =>
-        {
-            try { await _selectionAiController.ReloadAsync(); }
-            catch { System.Windows.MessageBox.Show(this, "划词设置已保存，但暂时无法应用；请关闭后重试。", "划词与 AI", MessageBoxButton.OK, MessageBoxImage.Warning); }
-        };
-        selectionSettings.Cancelled += async (_, _) => await selectionSettings.ReloadAsync();
-        SelectionAiSettingsHost.Content = selectionSettings;
+        InitializeShare();
         calculationService.CalculationCompleted += (_, result) => Dispatcher.InvokeAsync(() => AddCalculation(result));
         var pauseMenu = new ContextMenu();
         AddMenu(pauseMenu, "暂停 5 分钟", () => _monitorService.PauseForAsync(TimeSpan.FromMinutes(5)));
@@ -162,10 +160,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // Undocking here is what left the pet frozen while the chat window moved.
             if (!IsVisible && !_isCollapsed && !_windowDockingService.IsTemporarilyHidden)
                 _windowDockingService.Undock();
+            if (!IsVisible && !_isCollapsed) StopShareListening();
         };
         PreviewKeyDown += (_, e) =>
         {
-            if (IsCalculatorTabActive) return;
+            if (IsCalculatorTabActive || IsShareTabActive) return;
             if (Keyboard.FocusedElement is TextBoxBase or PasswordBox ||
                 (e.Key is not (Key.Up or Key.Down)) || Keyboard.Modifiers != ModifierKeys.None) return;
             var list = IsTodoTabActive ? TodoList : IsCollectionTabActive ? CollectionList : HistoryList;
@@ -222,7 +221,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public ObservableCollection<HistoryItemViewModel> Items { get; } = [];
     public ObservableCollection<FolderViewModel> Folders { get; } = [];
     public ObservableCollection<CollectionItemViewModel> CollectionItems { get; } = [];
-    public ObservableCollection<LanDeviceViewModel> LanDevices { get; } = [];
     public HistoryItemViewModel? SelectedItem { get => _selectedItem; set { _selectedItem = value; Changed(nameof(SelectedItem)); } }
     public FolderViewModel? SelectedFolder { get => _selectedFolder; set { _selectedFolder = value; Changed(nameof(SelectedFolder)); } }
     public CollectionItemViewModel? SelectedCollectionItem { get => _selectedCollectionItem; set { _selectedCollectionItem = value; Changed(nameof(SelectedCollectionItem)); } }
@@ -242,9 +240,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// </summary>
     private bool IsTodoTabActive => ReferenceEquals(MainTabs.SelectedItem, TodoTab);
     private bool IsCalculatorTabActive => ReferenceEquals(MainTabs.SelectedItem, CalculatorTab);
-    private bool IsSelectionAiTabActive => ReferenceEquals(MainTabs.SelectedItem, SelectionAiTab);
     private bool IsCollectionTabActive => ReferenceEquals(MainTabs.SelectedItem, PersonalSpaceTab) || ReferenceEquals(MainTabs.SelectedItem, TeamSpaceTab);
-    private bool IsLanTabActive => ReferenceEquals(MainTabs.SelectedItem, LanShareTab);
+    private bool IsShareTabActive => ReferenceEquals(MainTabs.SelectedItem, ShareTab);
     private bool IsHistoryTabActive => MainTabs.SelectedIndex == -1 || ReferenceEquals(MainTabs.SelectedItem, HistoryTab);
 
     /// <summary>
@@ -309,20 +306,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ApplySpaceLayout()
     {
         var config = IsCollectionTabActive;
-        var lan = IsLanTabActive;
+        var share = IsShareTabActive;
         var todo = IsTodoTabActive;
         var calculator = IsCalculatorTabActive;
-        var selectionAi = IsSelectionAiTabActive;
-        HistoryPanel.Visibility = !config && !lan && !todo && !calculator && !selectionAi ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPanel.Visibility = !config && !share && !todo && !calculator ? Visibility.Visible : Visibility.Collapsed;
         CalculatorPanel.Visibility = calculator ? Visibility.Visible : Visibility.Collapsed;
         // 历史页的条数在筛选条右侧（HistoryCountText），页脚只留快捷提示；其它页页脚计数不变。
         CountText.Visibility = HistoryPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
-        ShortcutHintText.Text = calculator ? "Enter 计算" : selectionAi ? "保存后应用" : todo ? "本机待办" : "Enter 使用";
+        ShortcutHintText.Text = calculator ? "Esc 清空" : todo ? "本机待办" : share ? "仅限局域网" : "Enter 使用";
+        if (calculator) UpdateCalculatorStatus();
         ShortcutHintText.ToolTip = "Ctrl+F 搜索 · Delete 删除 · Ctrl+D 存入配置 · Ctrl+P 记录置顶 · Esc 隐藏";
         TodoPanel.Visibility = todo ? Visibility.Visible : Visibility.Collapsed;
         ConfigPanel.Visibility = config ? Visibility.Visible : Visibility.Collapsed;
-        SelectionAiPanel.Visibility = selectionAi ? Visibility.Visible : Visibility.Collapsed;
-        LanSharePanel.Visibility = lan ? Visibility.Visible : Visibility.Collapsed;
+        SharePanel.Visibility = share ? Visibility.Visible : Visibility.Collapsed;
+        if (!share) StopShareListening();
         ConfigSpaceNotice.Visibility = config && ReferenceEquals(MainTabs.SelectedItem, TeamSpaceTab) ? Visibility.Visible : Visibility.Collapsed;
         PersonalTransferPanel.Visibility = config && ReferenceEquals(MainTabs.SelectedItem, PersonalSpaceTab) ? Visibility.Visible : Visibility.Collapsed;
         if (todo) UpdateTodoLayout();
@@ -349,9 +346,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var search = SearchBox.Text;
         try
         {
-            var records = await _historyService.SearchAsync(search, _favoritesOnly, _pinnedOnly, _itemType, cancellationToken: request.Token);
+            if (!_calculatorModeLoaded)
+            {
+                _calculatorMode = (await _settingsStore.LoadAsync(request.Token)).ClipboardCalculatorMode;
+                _calculatorModeLoaded = true;
+            }
+            var records = await _historyService.SearchAsync(search, _favoritesOnly, _pinnedOnly, _itemType, cancellationToken: request.Token, linksOnly: _linksOnly);
             if (request.IsCancellationRequested || version != _historyVersion) return;
-            Items.Clear(); foreach (var item in records) Items.Add(new HistoryItemViewModel(item));
+            Items.Clear(); foreach (var item in records) Items.Add(new HistoryItemViewModel(item, _calculatorMode == ClipboardCalculatorMode.Hint));
             SelectedItem = Items.FirstOrDefault(x => x.Item.Id == selectedId) ?? Items.FirstOrDefault();
             HistoryCountText.Text = $"{Items.Count} 条";
             _emptyPaused = _monitorService.IsPaused;
@@ -402,7 +404,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // the other config space invalidates this result even at the same folder index.
             if (request.IsCancellationRequested || version != _collectionVersion ||
                 SelectedFolder?.Folder.Id != folderId || SelectedFolder?.WorkspaceId != workspaceId) return;
-            CollectionItems.Clear(); foreach (var item in records) CollectionItems.Add(new CollectionItemViewModel(item));
+            CollectionItems.Clear(); foreach (var item in records) CollectionItems.Add(new CollectionItemViewModel(item, SelectedFolder?.IsManaged == true));
             // Without a search this query already is the folder's full order, so it can be
             // cached for the 上移/下移 boundary check. With one, the service resolves the
             // index against the unfiltered folder itself and an edge move is a no-op.
@@ -439,9 +441,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.F)
             { CalculatorExpressionBox.Focus(); e.Handled = true; }
             else if (key == Key.Escape)
-            { if (CalculatorExpressionBox.Text.Length > 0) CalculatorExpressionBox.Clear(); else Hide(); e.Handled = true; }
-            else if (!editing && key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None)
-            { CalculateExpression(); e.Handled = true; }
+            { if (CalculatorExpressionBox.Text.Length > 0) ClearCalculatorInput(); else Hide(); e.Handled = true; }
             base.OnKeyDown(e);
             return;
         }
@@ -477,13 +477,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         else if (!editing)
         {
             Func<Task>? action = null;
-            if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.D && !IsCollectionTabActive) action = () => CollectSelectedAsync();
+            if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.C && !IsCollectionTabActive && SelectedItem?.Calculation is not null)
+                action = CopyCalculationResultAsync;
+            else if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.D && !IsCollectionTabActive) action = () => CollectSelectedAsync();
             else if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.P && !IsCollectionTabActive) action = TogglePinnedAsync;
             else if (Keyboard.Modifiers == ModifierKeys.Alt && key is Key.Up or Key.Down && IsCollectionTabActive)
-            { var offset = key == Key.Up ? -1 : 1; action = () => MoveCollectionSelectedAsync(offset); }
+            { var offset = key == Key.Up ? -1 : 1; action = SelectedCollectionItem?.IsManaged == true ? ManagedReadOnlyNoticeAsync : () => MoveCollectionSelectedAsync(offset); }
             else if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.Enter) action = !IsCollectionTabActive ? () => RestoreSelectedAsync(true) : () => UseCollectionSelectedAsync(true);
             else if (Keyboard.Modifiers == ModifierKeys.None && key == Key.Enter) action = !IsCollectionTabActive ? () => RestoreSelectedAsync(false) : () => UseCollectionSelectedAsync(false);
-            else if (Keyboard.Modifiers == ModifierKeys.None && key == Key.Delete) action = !IsCollectionTabActive ? DeleteSelectedAsync : DeleteCollectionSelectedAsync;
+            else if (Keyboard.Modifiers == ModifierKeys.None && key == Key.Delete) action = !IsCollectionTabActive ? DeleteSelectedAsync : SelectedCollectionItem?.IsManaged == true ? ManagedReadOnlyNoticeAsync : DeleteCollectionSelectedAsync;
             if (action is not null) { e.Handled = true; await RunActionAsync("记录操作", action); }
         }
         base.OnKeyDown(e);
@@ -506,16 +508,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void AllFilterButton_Click(object sender, RoutedEventArgs e) => await FilterAsync(null, false, false);
     private async void TextFilterButton_Click(object sender, RoutedEventArgs e) => await FilterAsync(ClipboardItemType.Text, false, false);
+    private async void LinkFilterButton_Click(object sender, RoutedEventArgs e) => await FilterAsync(ClipboardItemType.Text, false, false, linksOnly: true);
     private async void ImageFilterButton_Click(object sender, RoutedEventArgs e) => await FilterAsync(ClipboardItemType.Image, false, false);
     private async void FileFilterButton_Click(object sender, RoutedEventArgs e) => await FilterAsync(ClipboardItemType.Files, false, false);
     private async void PinnedFilterButton_Click(object sender, RoutedEventArgs e) => await FilterAsync(null, false, true);
     private async void FavoriteFilterButton_Click(object sender, RoutedEventArgs e) => await FilterAsync(null, true, false);
-    private async Task FilterAsync(ClipboardItemType? type, bool favorite, bool pinned)
+    private async Task FilterAsync(ClipboardItemType? type, bool favorite, bool pinned, bool linksOnly = false)
     {
-        _itemType = type; _favoritesOnly = favorite; _pinnedOnly = pinned;
+        _itemType = type; _favoritesOnly = favorite; _pinnedOnly = pinned; _linksOnly = linksOnly;
         // The chips share a group, so checking one clears the rest. Assigning IsChecked
         // does not raise Click, so this cannot re-enter the filter.
-        (pinned ? PinnedFilterButton : favorite ? FavoriteFilterButton : type == ClipboardItemType.Text ? TextFilterButton : type == ClipboardItemType.Image ? ImageFilterButton : type == ClipboardItemType.Files ? FileFilterButton : AllFilterButton).IsChecked = true;
+        (pinned ? PinnedFilterButton : favorite ? FavoriteFilterButton : linksOnly ? LinkFilterButton : type == ClipboardItemType.Text ? TextFilterButton : type == ClipboardItemType.Image ? ImageFilterButton : type == ClipboardItemType.Files ? FileFilterButton : AllFilterButton).IsChecked = true;
         await RunActionAsync("筛选", () => RefreshHistoryAsync());
     }
     private async void PauseButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("切换监听", async () =>
@@ -805,7 +808,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         foreach (var workspaceId in new[] { _personalWorkspaceId })
         {
             var result = await _collectionService.GetFoldersAsync(workspaceId, cancellationToken);
-            foreach (var folder in result.Folders)
+            foreach (var folder in result.Folders.Where(candidate => candidate.ManagedSubscriptionId is null))
                 choices.Add(new FolderViewModel(folder,
                     (await _collectionService.GetItemsAsync(workspaceId, folder.Id, cancellationToken: cancellationToken)).Count,
                     SpaceName(workspaceId)));
@@ -845,13 +848,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     finally { _refreshingFolders = false; }
                 }
 
-                if (IsLanTabActive) await RunActionAsync("发现局域网设备", async () =>
-                {
-                    if (!_lanSettingsLoaded) await LoadLanSettingsAsync();
-                    await RefreshLanDevicesAsync();
-                });
+                if (IsShareTabActive) await RunActionAsync("加载共享页", RefreshShareAsync);
                 else if (IsCalculatorTabActive) await RunActionAsync("加载计算器", LoadCalculatorSettingsAsync);
-                else if (IsSelectionAiTabActive) await RunActionAsync("加载划词设置", () => ((SelectionAiSettingsPanel)SelectionAiSettingsHost.Content).ReloadAsync());
                 else if (IsTodoTabActive) await RunActionAsync("刷新待办", () => RefreshTodosAsync());
                 else await RunActionAsync("切换视图", () => IsCollectionTabActive ? RefreshFoldersAsync() : RefreshHistoryAsync());
             }
@@ -866,39 +864,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         }, DispatcherPriority.ContextIdle);
     }
-    private async void RefreshLanDevicesButton_Click(object sender, RoutedEventArgs e) =>
-        await RunActionAsync("发现局域网设备", RefreshLanDevicesAsync);
-
-    private async Task LoadLanSettingsAsync()
-    {
-        _ = await _settingsStore.LoadAsync();
-        _lanSettingsLoaded = true;
-    }
-
-    private async void OpenLanSettingsButton_Click(object sender, RoutedEventArgs e) =>
-        await RunActionAsync("局域网共享设置", async () =>
-        {
-            var dialog = new LanShareSettingsDialog(this, _settingsStore, _lanSessionPin);
-            if (WithModal(() => dialog.ShowDialog()) == true)
-            {
-                _lanSessionPin = dialog.SessionPin;
-                LanStatusText.Text = "共享设置已保存，正在重新发现设备…";
-                await RefreshLanDevicesAsync();
-            }
-        });
-
-    private async Task RefreshLanDevicesAsync()
-    {
-        LanStatusText.Text = "正在发现附近设备…";
-        var devices = await _lanShareService.DiscoverAsync();
-        LanDevices.Clear();
-        foreach (var device in devices) LanDevices.Add(new(device));
-        LanEmptyText.Visibility = LanDevices.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        LanStatusText.Text = LanDevices.Count == 0
-            ? "未发现设备；请确认双方在同一局域网、LocalSend 已打开且防火墙允许 UDP 53317"
-            : $"发现 {LanDevices.Count} 台设备；在历史记录右键选择“发送到局域网”";
-        CountText.Text = $"{LanDevices.Count} 台附近设备";
-    }
     private async void FolderList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     { if (IsLoaded && !_refreshingFolders) await RunActionAsync("读取文件夹", () => RefreshCollectionItemsAsync()); }
 
@@ -911,9 +876,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         menu.Items.Add(new Separator());
         var rename = AddMenu(menu, "重命名…", () => RenameSelectedFolderAsync());
         var delete = AddMenu(menu, "删除文件夹", () => DeleteSelectedFolderAsync());
-        var editable = SelectedFolder is { Folder.IsSystem: false };
+        var editable = SelectedFolder is { Folder.IsSystem: false, IsManaged: false };
         rename.IsEnabled = editable;
         delete.IsEnabled = editable;
+        if (SelectedFolder is { IsManaged: true } managed)
+        {
+            menu.Items.Add(new Separator());
+            AddMenu(menu, "复制到我的配置", () => CopyManagedFolderToMineAsync(managed));
+        }
         FolderList.ContextMenu = menu;
     }
 
@@ -949,6 +919,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void AddCollectionButton_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedFolder is null) return;
+        if (SelectedFolder.IsManaged) { _ = ManagedReadOnlyNoticeAsync(); return; }
         var workspaceId = SelectedFolder.WorkspaceId;
         var folderId = SelectedFolder.Folder.Id;
         var menu = new ContextMenu { PlacementTarget = sender as UIElement };
@@ -1056,6 +1027,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (item is null) { e.Handled = true; return; }
         var menu = new ContextMenu();
         AddMenu(menu, "复制到剪切板", async () => { await _collectionRestoreService.UseAsync(item); });
+        if (SelectedCollectionItem is { IsManaged: true })
+        {
+            // 订阅内容只读：只提供使用与“复制到我的配置”，不提供编辑、移动、排序、删除。
+            AddMenu(menu, "复制到我的配置", () => CopyManagedItemToMineAsync(item));
+            if (item.ItemType == CollectionItemType.Link)
+                AddMenu(menu, "在浏览器打开", () => { _collectionRestoreService.OpenLink(item); return Task.CompletedTask; });
+            CollectionList.ContextMenu = menu;
+            return;
+        }
         if (item.ItemType is CollectionItemType.Text or CollectionItemType.Link)
             AddMenu(menu, "编辑…", () => EditContentAsync(item.WorkspaceId, item.FolderId, item.ItemType, item));
         else
@@ -1066,7 +1046,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AddMenu(menu, "上移", () => MoveCollectionSelectedAsync(-1), "Alt+↑", _folderItemOrder is null || position > 0);
         AddMenu(menu, "下移", () => MoveCollectionSelectedAsync(1), "Alt+↓", _folderItemOrder is null || (position >= 0 && position < _folderItemOrder.Count - 1));
         var move = new MenuItem { Header = "移动到文件夹" };
-        foreach (var folder in Folders.Where(f => f.Folder.Id != item.FolderId))
+        foreach (var folder in Folders.Where(f => f.Folder.Id != item.FolderId && !f.IsManaged))
             AddMenu(move, folder.Name, () => MoveToFolderAsync(item, folder.Folder.Id));
         move.IsEnabled = move.Items.Count > 0; menu.Items.Add(move);
         if (item.ItemType == CollectionItemType.Image)
@@ -1106,6 +1086,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (item is null) { e.Handled = true; return; }
         var menu = new ContextMenu();
         AddMenu(menu, "复制到剪切板", () => _restoreService.RestoreAsync(item), "Enter");
+        if (SelectedItem?.Calculation is not null) AddMenu(menu, "复制计算结果", CopyCalculationResultAsync, "Ctrl+Shift+C");
         menu.Items.Add(new Separator());
         AddMenu(menu, "存入个人配置", async () =>
         {
@@ -1318,6 +1299,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (e.Handled || !IsCollectionTabActive || SelectedFolder is null || e.Data.GetData(System.Windows.DataFormats.FileDrop) is not string[] paths) return;
         e.Handled = true;
         var target = FindItem<FolderViewModel>(e.OriginalSource as DependencyObject) ?? SelectedFolder;
+        if (target.IsManaged) { await ManagedReadOnlyNoticeAsync(); return; }
         var workspaceId = target.WorkspaceId;
         var folderId = target.Folder.Id;
         foreach (var path in paths)
@@ -1352,13 +1334,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 }
 
-public sealed class HistoryItemViewModel(ClipboardItem item)
+public sealed class HistoryItemViewModel(ClipboardItem item, bool showCalculationHint = false)
 {
     private string[]? _files;
     private string? _metadata;
     private string? _typeText;
     private ImageSource? _preview;
     private bool _previewResolved;
+    private CalculationResult? _calculation;
+    private bool _calculationResolved;
 
     // Display-only classification: it never touches the data model or the filter categories,
     // so a link still belongs to the 文本 filter.
@@ -1450,6 +1434,28 @@ public sealed class HistoryItemViewModel(ClipboardItem item)
     public FontWeight IconFontWeight => UsesLabelIcon ? FontWeights.SemiBold : FontWeights.Normal;
     public Visibility IconVisibility => UsesLabelIcon || IsLink || Preview is null ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>
+    /// The "= result" hint for a short single-line arithmetic text. Computed on first display of the row and cached,
+    /// never stored: only rows the virtualised list actually realises pay for it, and only in Hint mode.
+    /// </summary>
+    public CalculationResult? Calculation
+    {
+        get
+        {
+            if (_calculationResolved) return _calculation;
+            _calculationResolved = true;
+            if (showCalculationHint && Item.ItemType == ClipboardItemType.Text && Item.TextContent is { Length: > 0 and <= MaxHintLength } text
+                && text.Any(char.IsDigit) && CalculatorService.TryCalculate(text, out var result, out _, requireBinaryOperator: true))
+                _calculation = result;
+            return _calculation;
+        }
+    }
+    private const int MaxHintLength = 64;
+    public Visibility CalculationHintVisibility => Calculation is null ? Visibility.Collapsed : Visibility.Visible;
+    public string CalculationHintText => Calculation is { } calculation ? "= " + calculation.CompactText : string.Empty;
+    public string CalculationHintToolTip => Calculation is { } calculation
+        ? $"结果 {calculation.DisplayText}（Ctrl+Shift+C 复制结果；Enter 仍粘贴原文）" : string.Empty;
+
     public Visibility PreviewVisibility => Item.ItemType == ClipboardItemType.Text ? Visibility.Collapsed : Visibility.Visible;
     public Stretch PreviewStretch => Item.ItemType is ClipboardItemType.Image or ClipboardItemType.ImageFile ? Stretch.UniformToFill : Stretch.Uniform;
     public Thickness PreviewPadding => default;
@@ -1526,14 +1532,20 @@ public sealed class FolderViewModel(CollectionFolder folder, int count, string s
     /// <summary>Space-qualified label for pickers that mix folders from both spaces.</summary>
     public string QualifiedName => $"{SpaceName} · {Folder.Name}";
     public string CountText => count.ToString();
+    /// <summary>订阅得到的受管文件夹：只读，由订阅更新替换。</summary>
+    public bool IsManaged => Folder.ManagedSubscriptionId is not null;
+    public Visibility ManagedMarkVisibility => IsManaged ? Visibility.Visible : Visibility.Collapsed;
 }
-public sealed class CollectionItemViewModel(CollectionItem item)
+public sealed class CollectionItemViewModel(CollectionItem item, bool managed = false)
 {
     private ImageSource? _thumbnail;
     private bool _thumbnailResolved;
     private string? _typeText;
 
     public CollectionItem Item { get; }=item;
+    public bool IsManaged { get; } = managed;
+    /// <summary>列表里的类型行；订阅得到的条目标明只读。</summary>
+    public string MetaText => IsManaged ? TypeText + " · 订阅（只读）" : TypeText;
     public string Title => string.IsNullOrWhiteSpace(Item.Title) ? TypeText : Item.Title;
     public string Preview => Item.ItemType switch
     {

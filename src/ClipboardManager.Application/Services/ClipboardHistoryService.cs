@@ -14,7 +14,8 @@ public sealed class ClipboardHistoryService(
         bool pinnedOnly = false,
         ClipboardItemType? itemType = null,
         int limit = 200,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool linksOnly = false)
     {
         var workspace = await workspaceService.GetCurrentAsync(cancellationToken);
         return await repository.SearchAsync(
@@ -25,7 +26,8 @@ public sealed class ClipboardHistoryService(
                 favoritesOnly,
                 pinnedOnly,
                 0,
-                limit),
+                limit,
+                linksOnly),
             cancellationToken);
     }
 

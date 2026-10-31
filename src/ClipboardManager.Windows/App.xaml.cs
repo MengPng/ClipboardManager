@@ -102,7 +102,7 @@ public partial class App : System.Windows.Application
                     services.AddSingleton<TrayIconService>();
                     services.AddSingleton(sp =>
                     {
-                        var gate = sp.GetRequiredService<SelectionClipboardGate>();
+                        var gate = sp.GetRequiredService<SelfWriteSequenceGate>();
                         var guard = sp.GetRequiredService<SelfWriteGuard>();
                         return new WindowsSystemClipboard(sequence => { gate.Remember(sequence); guard.Clear(); });
                     });
@@ -111,10 +111,7 @@ public partial class App : System.Windows.Application
                     services.AddSingleton<ILocalAssetStore, WindowsLocalAssetStore>();
                     services.AddSingleton<ForegroundApplicationService>();
                     services.AddSingleton<ClipboardMonitorService>();
-                    services.AddSingleton<SelectionClipboardGate>();
-                    services.AddSingleton<ISelectionTextCapture, SelectionTextCapture>();
-                    services.AddSingleton<ISelectionGestureMonitor, SelectionGestureMonitor>();
-                    services.AddSingleton<SelectionAiController>();
+                    services.AddSingleton<SelfWriteSequenceGate>();
                     services.AddSingleton<AutomaticPasteService>();
                     services.AddSingleton<WindowDockingService>();
                     services.AddSingleton<AutomaticBackupService>();
@@ -140,7 +137,6 @@ public partial class App : System.Windows.Application
             _host.Services.GetRequiredService<AutomaticBackupService>().Start(context.Device.DeviceName);
             log.LogInformation("Content loaded; registering clipboard listener.");
             await _host.Services.GetRequiredService<ClipboardMonitorService>().StartAsync(mainWindow);
-            await _host.Services.GetRequiredService<SelectionAiController>().StartAsync(mainWindow);
 
             var hotkey = _host.Services.GetRequiredService<GlobalHotkeyService>();
             hotkey.Pressed += (_, _) => ToggleMainWindow();
@@ -174,6 +170,7 @@ public partial class App : System.Windows.Application
                 });
 
             ShowMainWindow();
+            StartConfigSync(tray, log);
             log.LogInformation("Startup complete; main window shown.");
         }
         catch (Exception exception)
@@ -298,39 +295,45 @@ public partial class App : System.Windows.Application
         });
     }
 
+    /// <summary>
+    /// 配置订阅同步的后台协调：自动检查更新、自动发布。放在启动最后，失败只记录，
+    /// 不影响剪切板监听与本地功能；更新提示走托盘气泡，不抢焦点。
+    /// </summary>
+    private void StartConfigSync(TrayIconService tray, ILogger<App> log)
+    {
+        try
+        {
+            var sync = _host!.Services.GetRequiredService<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>();
+            sync.UpdateAvailable += (_, notice) => Dispatcher.InvokeAsync(() => tray.ShowBalloon(
+                "配置有新版本",
+                $"“{notice.Subscription.Name}”有新版本 v{notice.Check.Remote?.Version}，打开“共享 → 订阅”查看变化并更新。"));
+            sync.AutoUpdated += (_, notice) => Dispatcher.InvokeAsync(() => tray.ShowBalloon(
+                "配置已自动更新",
+                $"“{notice.Subscription.Name}”已更新到 v{notice.Check.Remote?.Version}。"));
+            sync.Start();
+        }
+        catch (Exception exception)
+        {
+            log.LogError(exception, "Config sync failed to start; local features are unaffected.");
+        }
+    }
+
     protected override async void OnExit(ExitEventArgs e)
     {
         if (_host is not null)
         {
-            _host.Services.GetService<SelectionAiController>()?.Dispose();
             _host.Services.GetService<ClipboardMonitorService>()?.Dispose();
             _host.Services.GetService<GlobalHotkeyService>()?.Dispose();
             _host.Services.GetService<TrayIconService>()?.Dispose();
             _host.Services.GetService<WindowDockingService>()?.Dispose();
             _host.Services.GetService<AutomaticBackupService>()?.Dispose();
+            _host.Services.GetService<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>()?.Dispose();
             await _host.StopAsync(TimeSpan.FromSeconds(3));
             _host.Dispose();
         }
 
         _singleInstance?.Dispose();
         base.OnExit(e);
-    }
-
-    public async void OpenSelectionAiSettings(Window owner)
-    {
-        if (_host is null) return;
-        try
-        {
-            var window = new SelectionAiSettingsWindow(
-                _host.Services.GetRequiredService<IAppSettingsStore>(),
-                _host.Services.GetRequiredService<ICredentialVault>()) { Owner = owner };
-            if (window.ShowDialog() == true)
-                await _host.Services.GetRequiredService<SelectionAiController>().ReloadAsync();
-        }
-        catch
-        {
-            System.Windows.MessageBox.Show(owner, "划词设置加载失败，请关闭后重试。", "划词与 AI", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
     }
 
     /// <summary>

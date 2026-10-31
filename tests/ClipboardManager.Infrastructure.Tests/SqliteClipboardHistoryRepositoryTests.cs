@@ -71,6 +71,31 @@ public sealed class SqliteClipboardHistoryRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task LinkFilter_MatchesOnlySingleHttpUrlsInTheCurrentWorkspace()
+    {
+        var (repository, workspaceId, deviceId) = await CreateRepositoryAsync();
+        var otherWorkspace = Guid.NewGuid();
+        await RegisterWorkspaceAsync(otherWorkspace);
+        var now = DateTimeOffset.UtcNow;
+        var texts = new[]
+        {
+            "https://example.com/a?b=1", "  HTTP://Example.com/路径  ", "https://example.com two words", "see https://example.com",
+            "ftp://example.com/file", "plain text", "https://example.com/line\nbreak"
+        };
+        for (var i = 0; i < texts.Length; i++)
+            await repository.CaptureTextAsync(Capture(workspaceId, deviceId, texts[i], $"h{i}", now.AddSeconds(i)));
+        await repository.CaptureTextAsync(Capture(otherWorkspace, deviceId, "https://other.example.com", "other", now));
+
+        var links = await repository.SearchAsync(new ClipboardQuery(workspaceId, LinksOnly: true));
+        var searched = await repository.SearchAsync(new ClipboardQuery(workspaceId, SearchText: "路径", LinksOnly: true));
+        var all = await repository.SearchAsync(new ClipboardQuery(workspaceId));
+
+        Assert.Equal(new[] { "  HTTP://Example.com/路径  ", "https://example.com/a?b=1" }, links.Select(item => item.TextContent).ToArray());
+        Assert.Single(searched);
+        Assert.Equal(texts.Length, all.Count);
+    }
+
+    [Fact]
     public async Task Cleanup_PreservesFavoriteAndPinnedItems()
     {
         var (repository, workspaceId, deviceId) = await CreateRepositoryAsync();

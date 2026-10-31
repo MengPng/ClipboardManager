@@ -200,9 +200,6 @@ public sealed class SettingsWindow : Window
         {
             // Re-read now rather than cloning the opening snapshot: pause may have changed while this dialog was open.
             var latest = await _store.LoadAsync();
-            if (latest.SelectionAi.HotkeyEnabled &&
-                HotkeyGesture.Parse(_hotkey.Text.Trim()) == HotkeyGesture.Parse(latest.SelectionAi.Hotkey))
-                throw new ArgumentException("主面板快捷键不能与划词快捷键相同。");
             var candidate = latest with
             {
                 RetentionDays = checked((int)Number(_days, "保留天数")),

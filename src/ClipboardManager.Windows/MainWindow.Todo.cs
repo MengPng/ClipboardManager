@@ -104,9 +104,10 @@ public partial class MainWindow
         TodoPendingSummaryButton.IsChecked = _todoSummaryDrilldown == TodoSummaryDrilldown.Pending;
         TodoCreatedSummaryButton.IsChecked = _todoSummaryDrilldown == TodoSummaryDrilldown.Created;
         TodoRateSummaryButton.IsChecked = _todoSummaryDrilldown == TodoSummaryDrilldown.Rate;
-        TodoCompletedLabel.Text = _todoStatsPeriod switch { TodoStatsPeriod.Week => "本周完成", TodoStatsPeriod.Month => "本月完成", TodoStatsPeriod.Year => "今年完成", _ => "完成" };
+        // 统计范围已由上方“全部/本周/本月/今年”胶囊标明，胶囊内不再重复前缀，保证一排放得下。
+        TodoCompletedLabel.Text = "完成";
         TodoPendingLabel.Text = "待完成";
-        TodoCreatedLabel.Text = _todoStatsPeriod switch { TodoStatsPeriod.Week => "本周新增", TodoStatsPeriod.Month => "本月新增", TodoStatsPeriod.Year => "今年新增", _ => "新增" };
+        TodoCreatedLabel.Text = "新增";
         TodoRateLabel.Text = "完成率";
         TodoTodayCompletedText.Text = completedItems.Count.ToString(CultureInfo.InvariantCulture);
         TodoPendingText.Text = pendingItems.Count.ToString(CultureInfo.InvariantCulture);

@@ -1,11 +1,11 @@
 using System.IO;
-using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml.Linq;
+using ClipboardManager.Application.Services;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
 
@@ -88,19 +88,45 @@ internal static class Program
                 throw new InvalidOperationException("History rows must take their fixed pitch from HistoryRowHeight on the item container.");
             if (historyList.Attribute("ItemContainerStyle")?.Value != "{StaticResource HistoryRowItemStyle}")
                 throw new InvalidOperationException("History rows must use the token-driven HistoryRowItemStyle.");
-            var calculatorPanel = document.Descendants(presentation + "ScrollViewer")
+            // Calculator page: tape (expression left, result right, actions in between), live result, 4x5 keypad.
+            var calculatorPanel = document.Descendants(presentation + "Grid")
                 .Single(element => element.Attribute(x + "Name")?.Value == "CalculatorPanel");
-            var calculatorTemplates = calculatorPanel.Descendants(presentation + "DataTemplate").ToArray();
-            var calculationTemplate = calculatorTemplates.Single(template =>
-                template.Descendants(presentation + "Button").Any(button => button.Attribute("Content")?.Value == "复制原算式"));
-            var resultText = calculationTemplate.Descendants(presentation + "TextBlock")
-                .Single(text => text.Attribute("Text")?.Value == "{Binding ResultText}");
-            var expressionText = calculationTemplate.Descendants(presentation + "TextBlock")
+            var tapeTemplate = calculatorPanel.Descendants(presentation + "ListBox")
+                .Single(element => element.Attribute(x + "Name")?.Value == "CalculatorTapeList")
+                .Descendants(presentation + "DataTemplate").Single();
+            var tapeResult = tapeTemplate.Descendants(presentation + "TextBlock")
+                .Single(text => text.Attribute("Text")?.Value == "{Binding DisplayText}");
+            var tapeExpression = tapeTemplate.Descendants(presentation + "TextBlock")
                 .Single(text => text.Attribute("Text")?.Value == "{Binding Expression}");
-            if (resultText.Attribute("FontSize")?.Value != "18" ||
-                expressionText.Attribute("Grid.Row")?.Value != "1" ||
-                calculationTemplate.Descendants(presentation + "Border").All(border => border.Attribute("Height")?.Value != "1"))
-                throw new InvalidOperationException("Calculator history must show the result first and separate records with a rule.");
+            var tapeActionLabels = tapeTemplate.Descendants(presentation + "Button")
+                .Select(button => button.Attribute("AutomationProperties.Name")?.Value ?? button.Attribute("Content")?.Value).ToArray();
+            if (tapeResult.Attribute("Grid.Column")?.Value != "1" || tapeResult.Attribute("FontSize")?.Value != "{DynamicResource FontSizeTitle}" ||
+                tapeExpression.Attribute("Grid.Column") is not null ||
+                !tapeActionLabels.SequenceEqual(new[] { "复制", "复用", "删除" }))
+                throw new InvalidOperationException("Calculator tape rows must read expression, then copy/reuse/delete, then the result at the right edge.");
+            var keypad = calculatorPanel.Descendants(presentation + "UniformGrid")
+                .Single(element => element.Attribute(x + "Name")?.Value == "CalculatorKeypad");
+            var keypadKeys = keypad.Elements(presentation + "Button").ToArray();
+            if (keypad.Attribute("Columns")?.Value != "4" || keypad.Attribute("Rows")?.Value != "5" || keypadKeys.Length != 20 ||
+                keypadKeys.Any(key => string.IsNullOrEmpty(key.Attribute("AutomationProperties.Name")?.Value ?? key.Attribute("Content")?.Value)))
+                throw new InvalidOperationException("The keypad must be a named 4x5 grid of 20 keys.");
+            if (System.Text.RegularExpressions.Regex.IsMatch(calculatorPanel.ToString(), @"#[0-9A-Fa-f]{3,8}\b|\bColor=|\bCornerRadius=""\d"))
+                throw new InvalidOperationException("The calculator page must take colours and corner radii from theme tokens, not literals.");
+            // Share page: publish / subscribe segments, every colour and radius from tokens, every action named.
+            var sharePanel = document.Descendants(presentation + "Grid")
+                .Single(element => element.Attribute(x + "Name")?.Value == "SharePanel");
+            if (System.Text.RegularExpressions.Regex.IsMatch(sharePanel.ToString(), @"#[0-9A-Fa-f]{3,8}\b|\bColor=|\bCornerRadius=""\d"))
+                throw new InvalidOperationException("The share page must take colours and corner radii from theme tokens, not literals.");
+            foreach (var brush in sharePanel.DescendantsAndSelf().Attributes()
+                         .Where(attribute => attribute.Name.LocalName is "Foreground" or "Background" or "BorderBrush" or "Fill" or "Stroke"))
+                if (!brush.Value.StartsWith("{DynamicResource ", StringComparison.Ordinal))
+                    throw new InvalidOperationException($"Share page brush '{brush.Name.LocalName}' must be a DynamicResource token: {brush.Value}");
+            foreach (var shareButton in sharePanel.Descendants(presentation + "Button"))
+                if (string.IsNullOrEmpty(shareButton.Attribute("AutomationProperties.Name")?.Value ?? shareButton.Attribute("Content")?.Value))
+                    throw new InvalidOperationException("Every share page button needs an accessible name.");
+            if (sharePanel.Descendants(presentation + "ScrollViewer").Count() != 2 ||
+                sharePanel.Descendants(presentation + "RadioButton").Count() != 2)
+                throw new InvalidOperationException("The share page must have exactly the publish and subscribe segments.");
             // Keep the production templates and layout, without starting services or accessing user data.
             foreach (var element in document.Descendants())
                 foreach (var attribute in element.Attributes().ToArray())
@@ -108,13 +134,10 @@ internal static class Program
                         System.Text.RegularExpressions.Regex.IsMatch(attribute.Value, @"^\w+_\w+$"))
                         attribute.Remove();
             var window = (Window)XamlReader.Parse(document.ToString());
-            var selectionSettings = new ClipboardManager.Windows.SelectionAiSettingsPanel(new PreviewSettings(), new PreviewVault());
-            RunSelectionSettingsRegressionChecks();
-            ((ContentControl)window.FindName("SelectionAiSettingsHost")).Content = selectionSettings;
             var navigation = (TabControl)window.FindName("MainTabs");
             var headers = navigation.Items.Cast<TabItem>()
                 .Where(tab => tab.Visibility == Visibility.Visible).Select(tab => tab.Header?.ToString()).ToArray();
-            if (!headers.SequenceEqual(new[] { "历史", "配置", "待办", "计算", "划词" }))
+            if (!headers.SequenceEqual(new[] { "历史", "配置", "待办", "计算", "共享" }))
                 throw new InvalidOperationException("Five visible two-character navigation labels must preserve their approved order.");
             var pin = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("PinButton");
             if (pin.Visibility != Visibility.Visible || !pin.Focusable)
@@ -130,8 +153,8 @@ internal static class Program
             petHost.UpdateLayout();
             var petCheck = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             petCheck.Render(petHost);
-            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.7", "layout"));
-            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.7", "layout", "PanelPet-probe.png"));
+            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.9.0", "layout"));
+            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.9.0", "layout", "PanelPet-probe.png"));
             var petBytes = new byte[56 * 40 * 4];
             petCheck.CopyPixels(petBytes, 56 * 4, 0);
             if (ClipboardManager.Windows.Services.PetCompanion.LoadError is not null)
@@ -148,14 +171,14 @@ internal static class Program
             System.Threading.Thread.Sleep(350);
             var probeBitmap = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             probeBitmap.Render(collapsedProbe);
-            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.7", "layout", "CollapsedPetWindow-probe.png"));
+            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.9.0", "layout", "CollapsedPetWindow-probe.png"));
             var probeBytes = new byte[56 * 40 * 4];
             probeBitmap.CopyPixels(probeBytes, 56 * 4, 0);
             collapsedProbe.Close();
             if (probeBytes.All(b => b == 0))
                 throw new InvalidOperationException("CollapsedPetWindow renders an empty visual tree; the pet never draws inside the collapsed host.");
             Console.WriteLine("PASS CollapsedPetWindow visual probe");
-            var output = Path.Combine(root, "artifacts", "review", "0.8.7", "layout");
+            var output = Path.Combine(root, "artifacts", "review", "0.9.0", "layout");
             Directory.CreateDirectory(output);
             // Rows are the production view-models, so the icon, link, badge and time rules under
             // test are the shipped ones. The xlsx exists on disk so the row is not marked as stale.
@@ -175,7 +198,7 @@ internal static class Program
                 new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "https://clipboard.netkaize.com/design/v2", "Edge", DateTime.Today.AddHours(14).AddMinutes(29))),
                 new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Files, "发布检查记录.xlsx", "资源管理器", DateTime.Today.AddHours(14).AddMinutes(4),
                     System.Text.Json.JsonSerializer.Serialize(new[] { sampleFile }))),
-                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "长文本示例：核对搜索、配置、待办、计算与划词的完整操作路径，并确认单行省略号不会撑开行高。", "记事本", DateTime.Today.AddHours(13).AddMinutes(10))),
+                new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "长文本示例：核对搜索、配置、待办、计算与设置的完整操作路径，并确认单行省略号不会撑开行高。", "记事本", DateTime.Today.AddHours(13).AddMinutes(10))),
                 new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "本地优先，让每一次复制都安心。", "微信", DateTime.Today.AddDays(-1).AddHours(9).AddMinutes(41))),
                 new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "季度复盘会议纪要", "记事本", DateTime.Today.AddDays(-1).AddHours(9).AddMinutes(12)))
             };
@@ -212,7 +235,20 @@ internal static class Program
             var previewContext = new PreviewContext
             {
                 Items = sampleRows, Folders = sampleFolders, CollectionItems = sampleCollection,
-                SelectedFolder = sampleFolders[1], SelectedCollectionItem = sampleCollection[0]
+                SelectedFolder = sampleFolders[1], SelectedCollectionItem = sampleCollection[0],
+                // Oldest first; the worst case is an expression that cannot fit beside its actions and result.
+                PublishedRows = new(SamplePublishedRows()),
+                SubscriberRows = new(SampleSubscriberRows()),
+                PublisherRows = new(SamplePublisherRows()),
+                PairedPublisherRows = new(SamplePairedPublisherRows()),
+                SubscriptionRows = new(SampleSubscriptionRows()),
+                Calculations = new System.Collections.ObjectModel.ObservableCollection<CalculationResult>
+                {
+                    new("200+10%", 220m, "200 + 20"),
+                    new("1,250×2", 2500m),
+                    new("123456789×987654321+(1250+380)/3", 123456789m * 987654321m + 1630m / 3m),
+                    new("(1250+380)/3", 1630m / 3m)
+                }
             };
             window.DataContext = previewContext;
             var surface = (FrameworkElement)window.Content;
@@ -221,7 +257,7 @@ internal static class Program
             var listening = (FrameworkElement)window.FindName("ListeningStatusText");
             var settings = (FrameworkElement)window.FindName("SettingsButton");
             var count = (FrameworkElement)window.FindName("CountText");
-            var panels = new[] { "HistoryPanel", "TodoPanel", "ConfigPanel", "CalculatorPanel", "SelectionAiPanel" }
+            var panels = new[] { "HistoryPanel", "TodoPanel", "ConfigPanel", "CalculatorPanel", "SharePanel" }
                 .Select(name => (FrameworkElement)window.FindName(name)).ToArray();
             window.Show();
             // Same wiring MainWindow's constructor does in code (loose XAML has no code-behind).
@@ -355,15 +391,14 @@ internal static class Program
                             throw new InvalidOperationException($"Todo summary pills and export must read as one row: {string.Join(" ", rects)}");
                     }
                     AssertPills("default", oneRow: true);
-                    // Worst case: period-prefixed labels and a full one-decimal rate may wrap a pill, but never clip or overlap.
-                    var labelTexts = new[] { "TodoCompletedLabel", "TodoCreatedLabel" }.Select(name => (TextBlock)window.FindName(name)).ToArray();
+                    // The shipped screenshot case (5 / 1 / 6 / 83.3%) must stay on one row with the export button.
                     var valueTexts = new[] { "TodoTodayCompletedText", "TodoPendingText", "TodoTodayCreatedText", "TodoCompletionRateText" }.Select(name => (TextBlock)window.FindName(name)).ToArray();
-                    var oldLabels = labelTexts.Select(text => text.Text).ToArray();
                     var oldValues = valueTexts.Select(text => text.Text).ToArray();
-                    labelTexts[0].Text = "本月完成"; labelTexts[1].Text = "本月新增";
+                    valueTexts[0].Text = "5"; valueTexts[1].Text = "1"; valueTexts[2].Text = "6"; valueTexts[3].Text = "83.3%";
+                    AssertPills("typical", oneRow: true);
+                    // Worst case: large counts may wrap the row, but never clip or overlap.
                     valueTexts[0].Text = "128"; valueTexts[1].Text = "128"; valueTexts[2].Text = "256"; valueTexts[3].Text = "83.3%";
                     AssertPills("worst-case", oneRow: false);
-                    for (var i = 0; i < labelTexts.Length; i++) labelTexts[i].Text = oldLabels[i];
                     for (var i = 0; i < valueTexts.Length; i++) valueTexts[i].Text = oldValues[i];
                     surface.UpdateLayout();
                 }
@@ -382,8 +417,14 @@ internal static class Program
                     var historyBounds = Bounds(historyBox, surface);
                     var countRect = Bounds((FrameworkElement)window.FindName("HistoryCountText"), surface);
                     var searchRect = Bounds((FrameworkElement)window.FindName("SearchBox"), surface);
-                    var chipRects = new[] { "AllFilterButton", "TextFilterButton", "ImageFilterButton", "FileFilterButton" }
+                    var chipRects = new[] { "AllFilterButton", "TextFilterButton", "LinkFilterButton", "ImageFilterButton", "FileFilterButton" }
                         .Select(name => Bounds((FrameworkElement)window.FindName(name), surface)).ToArray();
+                    // The chip group is centred in the row (equal gutters left and right, within a pixel or two).
+                    var chipLeft = chipRects.Min(r => r.Left);
+                    var chipRight = chipRects.Max(r => r.Right);
+                    var rowCentre = (searchRect.Left + searchRect.Right) / 2;
+                    if (Math.Abs((chipLeft + chipRight) / 2 - rowCentre) > 2)
+                        throw new InvalidOperationException($"History filter chips must be centred at {size}: chips {chipLeft}..{chipRight}, row centre {rowCentre}");
                     if (countRect.Right > size.Width - 12 + 1 || countRect.Left < chipRects.Max(r => r.Right) ||
                         chipRects.Max(r => r.Top) - chipRects.Min(r => r.Top) > 1 || searchRect.Right > size.Width - 12 + 1 ||
                         historyBounds.Bottom > contentBounds.Bottom + 1)
@@ -467,15 +508,308 @@ internal static class Program
                     if (folderRowBounds.Left < 0 || folderRowBounds.Right > size.Width || itemRowBounds.Right > size.Width + 0.5 || itemRowBounds.Width < 40)
                         throw new InvalidOperationException($"Config rows are clipped at {size} ({theme}): folder={folderRowBounds} item={itemRowBounds}");
                 }
-                if (active.Name == "SelectionAiPanel" && tabBounds.Right > size.Width)
-                    throw new InvalidOperationException($"Selection tab overflows at {size}: {tabBounds}");
-                if (active.Name == "SelectionAiPanel")
+                if (active.Name == "CalculatorPanel")
                 {
-                    var save = Descendants(selectionSettings).OfType<Button>()
-                        .Single(button => Equals(button.Content, "保存划词设置"));
-                    var saveBounds = Bounds(save, surface);
-                    if (!save.IsEnabled || saveBounds.Width < 50 || saveBounds.Bottom > contentBounds.Bottom + 1)
-                        throw new InvalidOperationException("Selection settings must load and keep its save action inside the content area.");
+                    // Same text the page shows (MainWindow.UpdateCalculatorStatus); the footer must hold it untrimmed.
+                    var footerCount = (TextBlock)count;
+                    var footerHint = (TextBlock)window.FindName("ShortcutHintText");
+                    footerCount.Text = "Enter 记录并继续 · Ctrl+Enter 复制结果";
+                    footerHint.Text = "Esc 清空";
+                    var tapeList = (ListBox)window.FindName("CalculatorTapeList");
+                    var keypadGrid = (FrameworkElement)window.FindName("CalculatorKeypad");
+                    var calcInput = (TextBox)window.FindName("CalculatorExpressionBox");
+                    var calcResult = (TextBlock)window.FindName("CalculatorResultText");
+                    var resultRun = (System.Windows.Documents.Run)window.FindName("CalculatorResultRun");
+                    var copyResult = (Button)window.FindName("CopyCalculatorValueButton");
+                    var copyUppercase = (Button)window.FindName("CopyCalculatorUppercaseButton");
+                    var modeBox = (ComboBox)window.FindName("ClipboardCalculatorModeBox");
+                    calcInput.Text = "(1250+380)/3";
+                    resultRun.Text = "= 543.333333333333≈";
+                    resultRun.FontWeight = FontWeights.SemiBold;
+                    resultRun.SetResourceReference(System.Windows.Documents.TextElement.FontSizeProperty, "FontSizeTitle");
+                    copyResult.IsEnabled = true; copyUppercase.IsEnabled = true;
+                    modeBox.SelectedIndex = 1;
+                    ((TextBlock)window.FindName("CalculatorTapeCountText")).Text = "最近 4 条";
+                    ((FrameworkElement)window.FindName("CalculationEmptyText")).Visibility = Visibility.Collapsed;
+                    var allKeys = ((System.Windows.Controls.Primitives.UniformGrid)keypadGrid).Children.OfType<Button>().ToArray();
+                    foreach (var keypadOpen in new[] { false, true })
+                    {
+                        keypadGrid.Visibility = keypadOpen ? Visibility.Visible : Visibility.Collapsed;
+                        tapeList.SelectedIndex = tapeList.Items.Count - 1;
+                        surface.UpdateLayout();
+                        var state = $"{theme} {size} keypad {(keypadOpen ? "open" : "closed")}";
+                        if (keypadOpen != keypadGrid.IsVisible)
+                            throw new InvalidOperationException($"Keypad visibility did not follow the toggle ({state}).");
+                        var checkedElements = new List<(string Name, FrameworkElement Element)>
+                        {
+                            ("mode", modeBox), ("tape", tapeList), ("input", calcInput), ("result", calcResult), ("uppercase", copyUppercase), ("copy", copyResult)
+                        };
+                        if (keypadOpen) checkedElements.AddRange(allKeys.Select((key, i) => ($"key{i}", (FrameworkElement)key)));
+                        foreach (var (name, element) in checkedElements)
+                        {
+                            var rect = Bounds(element, surface);
+                            if (rect.Left < -0.5 || rect.Right > size.Width + 0.5 || rect.Top < contentBounds.Top - 1 || rect.Bottom > contentBounds.Bottom + 1)
+                                throw new InvalidOperationException($"Calculator {name} is clipped ({state}): {rect} in content {contentBounds}");
+                        }
+                        var inputRect = Bounds(calcInput, surface);
+                        var resultRect = Bounds(calcResult, surface);
+                        var copyRect = Bounds(copyResult, surface);
+                        var uppercaseRect = Bounds(copyUppercase, surface);
+                        if (inputRect.Bottom > resultRect.Top + 1 || copyRect.Left < resultRect.Right - 0.5 || uppercaseRect.Left < resultRect.Right - 0.5 || uppercaseRect.Right > copyRect.Left || uppercaseRect.Width < 36 || resultRect.Width < 150 || calcInput.ActualWidth < 150)
+                            throw new InvalidOperationException($"Calculator input/result row overlaps or is too narrow ({state}): input={inputRect} result={resultRect} copy={copyRect}");
+                        if (Bounds(tapeList, surface).Bottom > inputRect.Top + 8)
+                            throw new InvalidOperationException($"Calculator tape runs into the input ({state}).");
+                        if (tapeList.ActualHeight < 34)
+                            throw new InvalidOperationException($"Calculator tape must keep at least one full row ({state}): {tapeList.ActualHeight} DIP");
+                        var tapeRows = Enumerable.Range(0, tapeList.Items.Count)
+                            .Select(index => tapeList.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem)
+                            .Where(row => row is not null).Cast<ListBoxItem>().ToArray();
+                        if (tapeRows.Length == 0)
+                            throw new InvalidOperationException($"Calculator tape realized no rows ({state}).");
+                        foreach (var row in tapeRows)
+                        {
+                            var data = (CalculationResult)row.DataContext;
+                            var rowRect = Bounds(row, surface);
+                            var rowTexts = Descendants(row).OfType<TextBlock>().ToArray();
+                            var expressionBlock = rowTexts.First(text => text.Text == data.Expression);
+                            var valueBlock = rowTexts.First(text => text.Text == data.DisplayText);
+                            var expressionRect = Bounds(expressionBlock, surface);
+                            var valueRect = Bounds(valueBlock, surface);
+                            if (valueRect.Right > rowRect.Right + 0.5 || expressionRect.Right > valueRect.Left + 0.5 || valueBlock.ActualHeight > 30 ||
+                                expressionBlock.ActualHeight > 22 || valueRect.Right > size.Width + 0.5)
+                                throw new InvalidOperationException($"Calculator tape row overlaps ({state}) '{data.Expression}': expression={expressionRect} result={valueRect}");
+                            // Actions appear on hover only (never kept invisible-but-focusable). Force the hover state to
+                            // measure the worst case: the buttons overlay the expression and must not touch the result.
+                            var presenter = Descendants(row).OfType<ContentPresenter>().First();
+                            var actions = (FrameworkElement)presenter.ContentTemplate.FindName("Actions", presenter);
+                            var rowButtons = Descendants(row).OfType<Button>().ToArray();
+                            if (actions.IsVisible || rowButtons.Any(button => button.IsVisible))
+                                throw new InvalidOperationException($"Tape actions must stay hidden until the row is hovered ({state}).");
+                            actions.Visibility = Visibility.Visible;
+                            surface.UpdateLayout();
+                            var actionsRect = Bounds(actions, surface);
+                            valueRect = Bounds(valueBlock, surface);
+                            if (rowButtons.Length != 3 || rowButtons.Any(button => !button.IsVisible) ||
+                                actionsRect.Right > valueRect.Left + 0.5 || actionsRect.Left < rowRect.Left || actionsRect.Height > 30 ||
+                                valueRect.Left - rowRect.Left < 100)
+                                throw new InvalidOperationException($"Hovered tape row must show copy/reuse/delete beside an unclipped result ({state}): actions={actionsRect} result={valueRect}");
+                            actions.Visibility = Visibility.Collapsed;
+                            surface.UpdateLayout();
+                        }
+                        if (keypadOpen)
+                        {
+                            foreach (var key in allKeys)
+                            {
+                                if (key.ActualHeight < 28 || key.ActualWidth < 48)
+                                    throw new InvalidOperationException($"Keypad key too small to hit ({state}): {key.Content} {key.ActualWidth}x{key.ActualHeight}");
+                            }
+                        }
+                        SaveRender(surface, size, Path.Combine(renderDir, $"CalculatorPanel-keypad-{(keypadOpen ? "open" : "closed")}-{size.Width}x{size.Height}.png"));
+                    }
+                    keypadGrid.Visibility = Visibility.Collapsed;
+                    tapeList.SelectedIndex = -1;
+                    surface.UpdateLayout();
+                    var footerCountRect = Bounds(footerCount, surface);
+                    var footerHintRect = Bounds(footerHint, surface);
+                    if (footerCount.ActualWidth + 0.5 < NaturalWidth(footerCount) || footerCountRect.Right > footerHintRect.Left)
+                        throw new InvalidOperationException($"Calculator footer text is trimmed or overlaps at {size} ({theme}): count={footerCountRect} natural={NaturalWidth(footerCount):F0} hint={footerHintRect}");
+                    // Empty tape: the placeholder is centred and the page keeps its layout.
+                    var populatedTape = previewContext.Calculations.ToArray();
+                    previewContext.Calculations.Clear();
+                    ((FrameworkElement)window.FindName("CalculationEmptyText")).Visibility = Visibility.Visible;
+                    calcInput.Text = string.Empty;
+                    resultRun.Text = "输入算式，例如 (1250+380)/3";
+                    resultRun.FontWeight = FontWeights.Normal;
+                    resultRun.SetResourceReference(System.Windows.Documents.TextElement.FontSizeProperty, "FontSizeCaption");
+                    copyResult.IsEnabled = false; copyUppercase.IsEnabled = false;
+                    surface.UpdateLayout();
+                    var emptyTapeRect = Bounds((FrameworkElement)window.FindName("CalculationEmptyText"), surface);
+                    if (emptyTapeRect.Width < 1 || emptyTapeRect.Bottom > Bounds(calcInput, surface).Top + 1 || emptyTapeRect.Top < contentBounds.Top - 1)
+                        throw new InvalidOperationException($"Empty tape placeholder is clipped at {size} ({theme}): {emptyTapeRect}");
+                    SaveRender(surface, size, Path.Combine(renderDir, $"CalculatorPanel-empty-{size.Width}x{size.Height}.png"));
+                    foreach (var entry in populatedTape) previewContext.Calculations.Add(entry);
+                    ((FrameworkElement)window.FindName("CalculationEmptyText")).Visibility = Visibility.Collapsed;
+                    calcInput.Text = "(1250+380)/3";
+                    resultRun.Text = "= 543.333333333333≈";
+                    resultRun.FontWeight = FontWeights.SemiBold;
+                    resultRun.SetResourceReference(System.Windows.Documents.TextElement.FontSizeProperty, "FontSizeTitle");
+                    copyResult.IsEnabled = true; copyUppercase.IsEnabled = true;
+                    surface.UpdateLayout();
+                }
+                if (active.Name == "SharePanel")
+                {
+                    var footerCount = (TextBlock)count;
+                    var footerHint = (TextBlock)window.FindName("ShortcutHintText");
+                    var shareStatus = (TextBlock)window.FindName("ShareStatusText");
+                    var publishChip = (RadioButton)window.FindName("SharePublishChip");
+                    var subscribeChip = (RadioButton)window.FindName("ShareSubscribeChip");
+                    var publishScroll = (ScrollViewer)window.FindName("SharePublishScroll");
+                    var subscribeScroll = (ScrollViewer)window.FindName("ShareSubscribeScroll");
+                    var emptyTexts = new[]
+                    {
+                        "SharePublishEmptyText", "ShareSubscriberEmptyText", "ShareSubscriptionEmptyText",
+                        "SharePublisherEmptyText", "SharePairedEmptyText"
+                    }.Select(name => (FrameworkElement)window.FindName(name)).ToArray();
+                    shareStatus.Text = "监听中 · 端口 53318";
+                    ((TextBlock)window.FindName("SharePairingCodeText")).Text = "482916";
+                    ((TextBlock)window.FindName("ShareLocalAddressText")).Text = "本机地址：192.168.100.123:53318、10.0.0.5:53318";
+                    footerHint.Text = "仅限局域网";
+                    foreach (var segment in new[] { "publish", "subscribe" })
+                    foreach (var populated in new[] { true, false })
+                    {
+                        var publish = segment == "publish";
+                        publishChip.IsChecked = publish;
+                        subscribeChip.IsChecked = !publish;
+                        publishScroll.Visibility = publish ? Visibility.Visible : Visibility.Collapsed;
+                        subscribeScroll.Visibility = publish ? Visibility.Collapsed : Visibility.Visible;
+                        foreach (var rows in new System.Collections.IList[]
+                                 { previewContext.PublishedRows, previewContext.SubscriberRows, previewContext.PublisherRows,
+                                   previewContext.PairedPublisherRows, previewContext.SubscriptionRows })
+                            rows.Clear();
+                        if (populated)
+                        {
+                            foreach (var row in SamplePublishedRows()) previewContext.PublishedRows.Add(row);
+                            foreach (var row in SampleSubscriberRows()) previewContext.SubscriberRows.Add(row);
+                            foreach (var row in SamplePublisherRows()) previewContext.PublisherRows.Add(row);
+                            foreach (var row in SamplePairedPublisherRows()) previewContext.PairedPublisherRows.Add(row);
+                            foreach (var row in SampleSubscriptionRows()) previewContext.SubscriptionRows.Add(row);
+                        }
+                        foreach (var empty in emptyTexts) empty.Visibility = populated ? Visibility.Collapsed : Visibility.Visible;
+                        footerCount.Text = publish ? $"{previewContext.PublishedRows.Count} 项发布" : $"{previewContext.SubscriptionRows.Count} 个订阅";
+                        surface.UpdateLayout();
+                        var state = $"{theme} {size} {segment} {(populated ? "populated" : "empty")}";
+                        var scroll = publish ? publishScroll : subscribeScroll;
+                        var viewport = Bounds(scroll, surface);
+                        if (!scroll.IsVisible || viewport.Left < -0.5 || viewport.Right > size.Width + 0.5 ||
+                            viewport.Top < contentBounds.Top - 1 || viewport.Bottom > contentBounds.Bottom + 1 || viewport.Height < 80)
+                            throw new InvalidOperationException($"Share {segment} scroll area is clipped ({state}): {viewport} in content {contentBounds}");
+                        // Segment switch row: chips and the status line must not collide.
+                        var chipRight = Math.Max(Bounds(publishChip, surface).Right, Bounds(subscribeChip, surface).Right);
+                        var statusRect = Bounds(shareStatus, surface);
+                        if (statusRect.Left < chipRight - 0.5 || statusRect.Right > size.Width + 0.5 ||
+                            shareStatus.ActualWidth + 0.5 < DisplayWidth(shareStatus))
+                            throw new InvalidOperationException($"Share status text is trimmed or overlaps the segment chips ({state}): chips<={chipRight:F0} status={statusRect} natural={DisplayWidth(shareStatus):F1} actual={shareStatus.ActualWidth:F1}");
+                        var shown = Descendants(scroll).OfType<FrameworkElement>().Where(element => element.IsVisible).ToArray();
+                        var buttonsInScroll = shown.OfType<Button>().ToArray();
+                        var textsOutsideButtons = shown.OfType<TextBlock>()
+                            .Where(block => !buttonsInScroll.Any(button => IsInside(block, button)) && !shown.OfType<TextBox>().Any(box => IsInside(block, box)) && block.ActualWidth > 0).ToArray();
+                        foreach (var element in shown.Where(element => element is TextBlock or Button or CheckBox or TextBox))
+                        {
+                            var rect = Bounds(element, surface);
+                            if (rect.Width < 1) continue;
+                            if (rect.Left < viewport.Left - 0.5 || rect.Right > viewport.Right + 0.5)
+                                throw new InvalidOperationException($"Share element {element.GetType().Name} overflows horizontally ({state}): {rect} in {viewport}");
+                        }
+                        foreach (var block in textsOutsideButtons.Where(block => block.TextWrapping == TextWrapping.NoWrap && block.TextTrimming == TextTrimming.None))
+                            if (block.ActualWidth + 0.5 < DisplayWidth(block))
+                                throw new InvalidOperationException($"Share text '{block.Text}' is trimmed without an ellipsis ({state}): {block.ActualWidth:F0} < {DisplayWidth(block):F0}");
+                        foreach (var button in buttonsInScroll)
+                        {
+                            if (button.ActualHeight < 22 || button.ActualWidth < 36)
+                                throw new InvalidOperationException($"Share button '{button.Content}' is too small to hit ({state}): {button.ActualWidth:F0}x{button.ActualHeight:F0}");
+                            var label = Descendants(button).OfType<TextBlock>().FirstOrDefault();
+                            if (label is not null && label.ActualWidth + 0.5 < DisplayWidth(label))
+                                throw new InvalidOperationException($"Share button '{button.Content}' label is trimmed ({state}).");
+                        }
+                        for (var i = 0; i < buttonsInScroll.Length; i++)
+                        {
+                            var first = Bounds(buttonsInScroll[i], surface);
+                            for (var j = i + 1; j < buttonsInScroll.Length; j++)
+                            {
+                                var overlap = Rect.Intersect(first, Bounds(buttonsInScroll[j], surface));
+                                if (!overlap.IsEmpty && overlap.Width > 0.5 && overlap.Height > 0.5)
+                                    throw new InvalidOperationException($"Share buttons overlap ({state}): '{buttonsInScroll[i].Content}' / '{buttonsInScroll[j].Content}'");
+                            }
+                            foreach (var block in textsOutsideButtons)
+                            {
+                                var overlap = Rect.Intersect(first, Bounds(block, surface));
+                                if (!overlap.IsEmpty && overlap.Width > 0.5 && overlap.Height > 0.5)
+                                    throw new InvalidOperationException($"Share button '{buttonsInScroll[i].Content}' covers text '{block.Text}' ({state}).");
+                            }
+                        }
+                        if (populated)
+                        {
+                            // Cards stay inside the viewport; a long name is ellipsised, never allowed to widen the card.
+                            var cards = shown.OfType<Border>().Where(border => ReferenceEquals(border.Style, app.FindResource("ShareCardStyle"))).ToArray();
+                            if (cards.Length < (publish ? 3 : 4))
+                                throw new InvalidOperationException($"Share page realized too few cards ({state}): {cards.Length}");
+                            foreach (var card in cards)
+                            {
+                                var cardRect = Bounds(card, surface);
+                                if (cardRect.Left < viewport.Left - 0.5 || cardRect.Right > viewport.Right + 0.5)
+                                    throw new InvalidOperationException($"Share card is wider than its viewport ({state}): {cardRect} in {viewport}");
+                            }
+                            if (!publish)
+                            {
+                                // Status line colour comes from tokens: warning for a problem or pending update, secondary otherwise.
+                                var warning = ((SolidColorBrush)app.FindResource("WarningBrush")).Color;
+                                var secondary = ((SolidColorBrush)app.FindResource("LabelSecondaryBrush")).Color;
+                                var surfaceColor = ((SolidColorBrush)app.FindResource("SurfaceBrush")).Color;
+                                foreach (var row in previewContext.SubscriptionRows)
+                                {
+                                    var statusBlock = textsOutsideButtons.Single(block => block.Text == row.StatusText);
+                                    var expected = row.IsProblem ? warning : secondary;
+                                    if (((SolidColorBrush)statusBlock.Foreground).Color != expected)
+                                        throw new InvalidOperationException($"Subscription status '{row.StatusText}' must use the {(row.IsProblem ? "warning" : "secondary")} token ({state}).");
+                                    if (Contrast(expected, surfaceColor) < 3.0)
+                                        throw new InvalidOperationException($"Subscription status colour is hard to read on the card ({state}): contrast {Contrast(expected, surfaceColor):F2}");
+                                }
+                                var updateButtons = buttonsInScroll.Where(button => Equals(button.Content, "更新")).ToArray();
+                                if (updateButtons.Length != previewContext.SubscriptionRows.Count(row => row.HasNewer))
+                                    throw new InvalidOperationException($"The update button must show only on subscriptions with a newer version ({state}): {updateButtons.Length}");
+                                var rollbackButtons = buttonsInScroll.Where(button => Equals(button.Content, "回退")).ToArray();
+                                if (rollbackButtons.Count(button => button.IsEnabled) != previewContext.SubscriptionRows.Count(row => row.CanRollback))
+                                    throw new InvalidOperationException($"Rollback must be enabled only where a snapshot exists ({state}).");
+                            }
+                        }
+                        else
+                        {
+                            var visibleEmpty = emptyTexts.Where(empty => scroll.IsAncestorOf(empty)).ToArray();
+                            if (visibleEmpty.Length == 0 || visibleEmpty.Any(empty => !empty.IsVisible || Bounds(empty, surface).Right > viewport.Right + 0.5))
+                                throw new InvalidOperationException($"Share empty-state hints must be visible and unclipped ({state}).");
+                        }
+                        if (segment == "publish")
+                        {
+                            var code = (TextBlock)window.FindName("SharePairingCodeText");
+                            var issue = (Button)window.FindName("ShareIssueCodeButton");
+                            var firewall = (Button)window.FindName("ShareCopyFirewallButton");
+                            if (Bounds(code, surface).Right > Bounds(issue, surface).Left + 0.5 || code.ActualWidth + 0.5 < DisplayWidth(code))
+                                throw new InvalidOperationException($"Pairing code collides with its button ({state}).");
+                            if (!firewall.IsVisible || Bounds(firewall, surface).Right > viewport.Right + 0.5)
+                                throw new InvalidOperationException($"The firewall hint button must stay reachable ({state}).");
+                        }
+                        else
+                        {
+                            var address = (TextBox)window.FindName("ShareManualAddressBox");
+                            var connect = (Button)window.FindName("ShareManualConnectButton");
+                            if (address.ActualWidth < 120 || Bounds(address, surface).Right > Bounds(connect, surface).Left + 0.5)
+                                throw new InvalidOperationException($"Manual address box is too narrow or overlaps its button ({state}): {address.ActualWidth:F0}");
+                            // The placeholder (the box's Tag) is drawn by the template and must fit inside the box.
+                            var hint = Descendants(address).OfType<TextBlock>().FirstOrDefault(block => block.Text == (string)address.Tag);
+                            if (hint is null || Bounds(hint, surface).Right > Bounds(address, surface).Right - 4 || hint.ActualWidth + 0.5 < DisplayWidth(hint))
+                                throw new InvalidOperationException($"Manual address placeholder does not fit its box ({state}): {(hint is null ? "missing" : $"{hint.ActualWidth:F0} of {address.ActualWidth:F0}")}");
+                        }
+                        surface.UpdateLayout();
+                        var footerCountRect = Bounds(footerCount, surface);
+                        var footerHintRect = Bounds(footerHint, surface);
+                        if (footerCount.ActualWidth + 0.5 < DisplayWidth(footerCount) || footerCountRect.Right > footerHintRect.Left ||
+                            footerHint.ActualWidth + 0.5 < DisplayWidth(footerHint))
+                            throw new InvalidOperationException($"Share footer text is trimmed or overlaps ({state}): count={footerCountRect} hint={footerHintRect}");
+                        SaveRender(surface, size, Path.Combine(renderDir, $"SharePanel-{segment}-{(populated ? "populated" : "empty")}-{size.Width}x{size.Height}.png"));
+                    }
+                    // Leave the default state (publish segment, populated) for the shared render below.
+                    publishChip.IsChecked = true;
+                    subscribeChip.IsChecked = false;
+                    publishScroll.Visibility = Visibility.Visible;
+                    subscribeScroll.Visibility = Visibility.Collapsed;
+                    foreach (var row in SamplePublishedRows()) previewContext.PublishedRows.Add(row);
+                    foreach (var row in SampleSubscriberRows()) previewContext.SubscriberRows.Add(row);
+                    foreach (var row in SamplePublisherRows()) previewContext.PublisherRows.Add(row);
+                    foreach (var row in SamplePairedPublisherRows()) previewContext.PairedPublisherRows.Add(row);
+                    foreach (var row in SampleSubscriptionRows()) previewContext.SubscriptionRows.Add(row);
+                    foreach (var empty in emptyTexts) empty.Visibility = Visibility.Collapsed;
+                    footerCount.Text = $"{previewContext.PublishedRows.Count} 项发布";
+                    surface.UpdateLayout();
                 }
                 Console.WriteLine($"PASS {theme} {active.Name} {size}: content={contentBounds}, footerY={footerBounds.Top:F0}");
                 navigation.SelectedItem = active.Name switch
@@ -483,22 +817,22 @@ internal static class Program
                     "TodoPanel" => window.FindName("TodoTab"),
                     "ConfigPanel" => window.FindName("PersonalSpaceTab"),
                     "CalculatorPanel" => window.FindName("CalculatorTab"),
-                    "SelectionAiPanel" => window.FindName("SelectionAiTab"),
+                    "SharePanel" => window.FindName("ShareTab"),
                     _ => window.FindName("HistoryTab")
                 };
                 count.SetCurrentValue(TextBlock.TextProperty, active.Name switch
                 {
                     "TodoPanel" => "0 项待办",
                     "ConfigPanel" => "0 项配置",
-                    "CalculatorPanel" => "本次计算",
-                    "SelectionAiPanel" => "本机设置",
+                    "CalculatorPanel" => "Enter 记录并继续 · Ctrl+Enter 复制结果",
+                    "SharePanel" => $"{previewContext.PublishedRows.Count} 项发布",
                     _ => "5 条历史"
                 });
                 ((TextBlock)window.FindName("ShortcutHintText")).Text = active.Name switch
                 {
                     "TodoPanel" => "本机待办",
-                    "CalculatorPanel" => "Enter 计算",
-                    "SelectionAiPanel" => "保存后应用",
+                    "CalculatorPanel" => "Esc 清空",
+                    "SharePanel" => "仅限局域网",
                     _ => "Enter 使用"
                 };
                 var list = (ListBox)window.FindName("HistoryList");
@@ -544,6 +878,56 @@ internal static class Program
                     }
                     emptyPanel.Visibility = Visibility.Collapsed;
                     emptyPet.SetListening(true);
+                    // Hint mode: a short single-line expression carries an "= result" pill at the row end.
+                    // Worst cases: a very long result and a long expression must not push the row past 56 DIP,
+                    // wrap, or clip; plain text rows must not show a pill.
+                    var hintAt = DateTime.Today.AddHours(15);
+                    var hintRows = new[]
+                    {
+                        new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "(1250+380)/3", "记事本", hintAt), true),
+                        new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "本周产品检查清单", "记事本", hintAt.AddMinutes(-1)), true),
+                        new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "123456789×987654321+(1250+380)/3-1000000×3", "Excel", hintAt.AddMinutes(-2)), true),
+                        new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "200+10%", "微信", hintAt.AddMinutes(-3)), true),
+                        new ClipboardManager.Windows.HistoryItemViewModel(SampleItem(ClipboardItemType.Text, "1,250×2", "微信", hintAt.AddMinutes(-4)), true)
+                    };
+                    if (hintRows.Select(row => row.Calculation is not null).ToArray() is not [true, false, true, true, true])
+                        throw new InvalidOperationException("Hint rows must carry a calculation only for calculable single-line expressions.");
+                    if (hintRows[0].CalculationHintText != "= 543.33")
+                        throw new InvalidOperationException($"History hint must read '= 543.33' for (1250+380)/3, got '{hintRows[0].CalculationHintText}'.");
+                    window.DataContext = new PreviewContext { Items = hintRows };
+                    var hintList = (ListBox)window.FindName("HistoryList");
+                    hintList.SelectedIndex = 0;
+                    ((TextBlock)window.FindName("HistoryCountText")).Text = $"{hintRows.Length} 条";
+                    surface.UpdateLayout();
+                    var hintRealized = Enumerable.Range(0, hintList.Items.Count)
+                        .Select(index => hintList.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem)
+                        .Where(container => container is not null).Cast<ListBoxItem>().ToArray();
+                    if (hintRealized.Length < 2)
+                        throw new InvalidOperationException($"Hint rows must be realized at {size}: {hintRealized.Length}");
+                    foreach (var container in hintRealized)
+                    {
+                        var data = (ClipboardManager.Windows.HistoryItemViewModel)container.DataContext;
+                        var rowRect = Bounds(container, surface);
+                        var texts = Descendants(container).OfType<TextBlock>().ToArray();
+                        var preview = texts.First(text => text.Text == data.PreviewText);
+                        var pill = texts.FirstOrDefault(text => text.Text == data.CalculationHintText && text.Text.StartsWith("= "));
+                        if (Math.Abs(container.ActualHeight - 56) > 0.5 || preview.ActualHeight > 22)
+                            throw new InvalidOperationException($"Hint row must keep a 56 DIP pitch and a one-line preview at {size} ({theme}): {container.ActualHeight}/{preview.ActualHeight}");
+                        if (data.Calculation is null)
+                        {
+                            if (pill is not null && pill.IsVisible)
+                                throw new InvalidOperationException($"Plain text row must not show a result pill ({theme}, {size}).");
+                            continue;
+                        }
+                        if (pill is null || !pill.IsVisible)
+                            throw new InvalidOperationException($"Calculable row '{data.PreviewText}' must show its result pill ({theme}, {size}).");
+                        var pillRect = Bounds(pill, surface);
+                        var previewRect = Bounds(preview, surface);
+                        if (pill.ActualHeight > 20 || pillRect.Right > rowRect.Right - 4 || pillRect.Left < previewRect.Left ||
+                            previewRect.Right > pillRect.Left + 0.5 || previewRect.Width < 48)
+                            throw new InvalidOperationException($"Result pill is clipped or collides with the preview at {size} ({theme}): row={rowRect} preview={previewRect} pill={pillRect}");
+                    }
+                    SaveRender(surface, size, Path.Combine(renderDir, $"HistoryPanel-hint-{size.Width}x{size.Height}.png"));
                     window.DataContext = populated;
                     ((TextBlock)window.FindName("HistoryCountText")).Text = $"{sampleRows.Length} 条";
                     surface.UpdateLayout();
@@ -565,119 +949,6 @@ internal static class Program
 
     private static Rect Bounds(FrameworkElement element, FrameworkElement surface) =>
         element.TransformToAncestor(surface).TransformBounds(new Rect(element.RenderSize));
-
-    private static void RunSelectionSettingsRegressionChecks()
-    {
-        var promptOne = new PromptTemplate(Guid.NewGuid(), "提示词一", "正文一 {text}");
-        var site = new PromptTemplate(Guid.NewGuid(), "官网", "{text}", PromptActions.OpenUrl, "https://example.com");
-        var promptTwo = new PromptTemplate(Guid.NewGuid(), "提示词二", "正文二 {text}");
-        var promptThree = new PromptTemplate(Guid.NewGuid(), "提示词三", "正文三 {text}");
-
-        AssertDeleteKeepsNeighbor(promptOne, site, promptTwo, promptThree, 0);
-        AssertDeleteKeepsNeighbor(promptOne, site, promptTwo, promptThree, 1);
-        AssertDeleteKeepsNeighbor(promptOne, site, promptTwo, promptThree, 3);
-        AssertMoveKeepsIdentity(promptOne, site, promptTwo, promptThree, 1, -1);
-        AssertMoveKeepsIdentity(promptOne, site, promptTwo, promptThree, 1, 1);
-        Console.WriteLine("PASS SelectionAiSettingsPanel editor regression checks");
-    }
-
-    private static void AssertDeleteKeepsNeighbor(
-        PromptTemplate promptOne,
-        PromptTemplate site,
-        PromptTemplate promptTwo,
-        PromptTemplate promptThree,
-        int deleteIndex)
-    {
-        var store = CreateSettingsStore(promptOne, site, promptTwo, promptThree);
-        var panel = LoadPanel(store);
-        SelectTemplate(panel, deleteIndex);
-        Invoke(panel, "DeleteSelected");
-        Save(panel);
-
-        var saved = store.Saved.SelectionAi.Templates;
-        var expected = new[] { promptOne, site, promptTwo, promptThree }.Where((_, index) => index != deleteIndex).ToArray();
-        AssertTemplatesEqual(expected, saved, $"delete index {deleteIndex}");
-        AssertReloadSaveKeepsTemplates(store, expected, $"delete index {deleteIndex}");
-    }
-
-    private static void AssertMoveKeepsIdentity(
-        PromptTemplate promptOne,
-        PromptTemplate site,
-        PromptTemplate promptTwo,
-        PromptTemplate promptThree,
-        int selectedIndex,
-        int delta)
-    {
-        var store = CreateSettingsStore(promptOne, site, promptTwo, promptThree);
-        var panel = LoadPanel(store);
-        SelectTemplate(panel, selectedIndex);
-        Invoke(panel, "Move", delta);
-        Save(panel);
-
-        var expected = new List<PromptTemplate> { promptOne, site, promptTwo, promptThree };
-        (expected[selectedIndex], expected[selectedIndex + delta]) =
-            (expected[selectedIndex + delta], expected[selectedIndex]);
-        AssertTemplatesEqual(expected, store.Saved.SelectionAi.Templates, $"move {delta}");
-        AssertReloadSaveKeepsTemplates(store, expected, $"move {delta}");
-    }
-
-    private static PreviewSettings CreateSettingsStore(params PromptTemplate[] templates) =>
-        new(new AppSettings
-        {
-            SelectionAi = new SelectionAiSettings
-            {
-                Provider = "LocalGateway",
-                BaseUrl = "http://127.0.0.1:3425/v1",
-                Model = "qoder/dfmodel",
-                Templates = templates
-            }
-        });
-
-    private static ClipboardManager.Windows.SelectionAiSettingsPanel LoadPanel(PreviewSettings store)
-    {
-        var panel = new ClipboardManager.Windows.SelectionAiSettingsPanel(store, new PreviewVault());
-        panel.ReloadAsync().GetAwaiter().GetResult();
-        return panel;
-    }
-
-    private static void SelectTemplate(ClipboardManager.Windows.SelectionAiSettingsPanel panel, int index) =>
-        Invoke(panel, "Select", index);
-
-    private static void Save(ClipboardManager.Windows.SelectionAiSettingsPanel panel) =>
-        ((Task)(Invoke(panel, "SaveAsync") ?? throw new InvalidOperationException("SaveAsync did not return a task.")))
-            .GetAwaiter().GetResult();
-
-    private static object? Invoke(object instance, string name, params object[] arguments) =>
-        (instance.GetType().GetMethod(
-            name,
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            types: arguments.Select(argument => argument.GetType()).ToArray(),
-            modifiers: null)
-            ?? throw new InvalidOperationException($"Missing {name} method."))
-        .Invoke(instance, arguments);
-
-    private static T GetField<T>(object instance, string name) where T : class =>
-        (T)(instance.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(instance)
-            ?? throw new InvalidOperationException($"Missing {name} field."));
-
-    private static void AssertTemplatesEqual(
-        IReadOnlyList<PromptTemplate> expected,
-        IReadOnlyList<PromptTemplate> actual,
-        string operation)
-    {
-        if (!expected.SequenceEqual(actual))
-            throw new InvalidOperationException($"Selection settings {operation} corrupted a template identity, order, or fields.");
-    }
-
-    private static void AssertReloadSaveKeepsTemplates(
-        PreviewSettings store,
-        IReadOnlyList<PromptTemplate> expected,
-        string operation)
-    {
-        Save(LoadPanel(store));
-        AssertTemplatesEqual(expected, store.Saved.SelectionAi.Templates, $"{operation} reload/save");
-    }
 
     private static void SaveRender(FrameworkElement surface, Size size, string path)
     {
@@ -706,30 +977,91 @@ internal static class Program
         public IReadOnlyList<ClipboardManager.Windows.CollectionItemViewModel> CollectionItems { get; set; } = [];
         public ClipboardManager.Windows.FolderViewModel? SelectedFolder { get; set; }
         public ClipboardManager.Windows.CollectionItemViewModel? SelectedCollectionItem { get; set; }
+        public System.Collections.ObjectModel.ObservableCollection<CalculationResult> Calculations { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.PublishedRowViewModel> PublishedRows { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.SubscriberRowViewModel> SubscriberRows { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.PublisherRowViewModel> PublisherRows { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.PairedPublisherRowViewModel> PairedPublisherRows { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.SubscriptionRowViewModel> SubscriptionRows { get; set; } = [];
     }
 
-    private sealed class PreviewSettings(AppSettings? initial = null) : IAppSettingsStore
+    private const string SampleFingerprint = "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90";
+
+    private static PairedPeer SamplePeer(PeerRole role, string name, string? address) =>
+        new(Guid.NewGuid(), role, name, SampleFingerprint, address, DateTimeOffset.Now.AddDays(-2), PeerStatus.Active);
+
+    private static ClipboardManager.Windows.PublishedRowViewModel[] SamplePublishedRows() =>
+    [
+        new(SamplePublished("日常工作配置", 3, false, allFolders: false), "常用话术", 12),
+        new(SamplePublished("一个名字特别特别长的发布配置名称用来验证省略号不会撑开行宽", 128, true, allFolders: true), "全部配置 · 同样很长很长的文件夹名称示例等 128 个文件夹", 1200)
+    ];
+
+    private static PublishedConfig SamplePublished(string name, int version, bool auto, bool allFolders) =>
+        new(Guid.NewGuid(), Guid.NewGuid(), allFolders ? [] : [Guid.NewGuid()], allFolders, name, version, "hash", "pkg", 1024, "{}", auto,
+            DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddHours(-3));
+
+    private static ClipboardManager.Windows.SubscriberRowViewModel[] SampleSubscriberRows() =>
+    [
+        new(SamplePeer(PeerRole.Subscriber, "同事的笔记本电脑", null)),
+        new(SamplePeer(PeerRole.Subscriber, "一台设备名称非常非常长的办公室台式机用来验证省略号", null))
+    ];
+
+    private static ClipboardManager.Windows.PublisherRowViewModel[] SamplePublisherRows() =>
+    [
+        new(new DiscoveredPublisher("办公室电脑", "192.168.100.123:53318", "A1B2C3D4E5F6", 1,
+            [new PublicationAnnouncement("日常工作配置", 3), new PublicationAnnouncement("客服话术", 12)], DateTimeOffset.Now),
+            SamplePeer(PeerRole.Publisher, "办公室电脑", "192.168.100.123:53318")),
+        new(new DiscoveredPublisher("一台设备名称非常非常长的家用台式机用来验证省略号", "192.168.100.231:53318", "0F9E8D7C6B5A", 1,
+            [new PublicationAnnouncement("一个名字特别特别长的发布配置名称用来验证省略号不会撑开行宽", 128)], DateTimeOffset.Now), null)
+    ];
+
+    private static ClipboardManager.Windows.PairedPublisherRowViewModel[] SamplePairedPublisherRows() =>
+    [
+        new(SamplePeer(PeerRole.Publisher, "办公室电脑", "192.168.100.123:53318")),
+        new(SamplePeer(PeerRole.Publisher, "一台设备名称非常非常长的家用台式机用来验证省略号", null))
+    ];
+
+    private static ClipboardManager.Windows.SubscriptionRowViewModel[] SampleSubscriptionRows() =>
+    [
+        new(SampleSubscription("日常工作配置", 3, 3, null, false, false), "办公室电脑", true),
+        new(SampleSubscription("一个名字特别特别长的发布配置名称用来验证省略号不会撑开行宽", 2, 4, null, true, false), "一台设备名称非常非常长的家用台式机", true),
+        new(SampleSubscription("客服话术", 1, 1, "无法连接发布者：连接超时。请确认对方在线，并在对方电脑的 Windows 防火墙中放行 TCP/UDP 53318。", false, false), "办公室电脑", false),
+        new(SampleSubscription("会议模板", 5, 6, null, false, true), "办公室电脑", true)
+    ];
+
+    private static ConfigSubscription SampleSubscription(string name, int local, int latest, string? error, bool auto, bool stay) =>
+        new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), name, local, Guid.NewGuid(), auto, stay, null,
+            DateTimeOffset.Now.AddMinutes(-12), latest, error, "{}", "hash", DateTimeOffset.Now.AddDays(-3), DateTimeOffset.Now.AddMinutes(-12));
+
+    private static bool IsInside(DependencyObject child, DependencyObject ancestor)
     {
-        private AppSettings _current = initial ?? new AppSettings();
+        for (var current = child; current is not null; current = System.Windows.Media.VisualTreeHelper.GetParent(current))
+            if (ReferenceEquals(current, ancestor)) return true;
+        return false;
+    }
 
-        public AppSettings Saved { get; private set; } = initial ?? new AppSettings();
-
-        public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(_current);
-
-        public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    /// <summary>WCAG contrast ratio between two opaque colours.</summary>
+    private static double Contrast(Color a, Color b)
+    {
+        static double Channel(byte value)
         {
-            _current = settings;
-            Saved = settings;
-            return Task.CompletedTask;
+            var v = value / 255.0;
+            return v <= 0.03928 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
         }
+        static double Luminance(Color c) => 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+        var (hi, lo) = (Math.Max(Luminance(a), Luminance(b)), Math.Min(Luminance(a), Luminance(b)));
+        return (hi + 0.05) / (lo + 0.05);
     }
 
-    private sealed class PreviewVault : ICredentialVault
-    {
-        public Task<string?> ReadAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
-        public Task WriteAsync(string key, string secret, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task DeleteAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    }
+    /// <summary>Unwrapped width in WPF's Display text mode (what the page renders with), to detect trimming.</summary>
+    private static double DisplayWidth(TextBlock block) => new FormattedText(block.Text, System.Globalization.CultureInfo.CurrentUICulture,
+        FlowDirection.LeftToRight, new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch), block.FontSize,
+        Brushes.Black, null, TextFormattingMode.Display, 1.0).WidthIncludingTrailingWhitespace;
+
+    /// <summary>Unwrapped width of the text on one line, to detect trimming.</summary>
+    private static double NaturalWidth(TextBlock block) => new FormattedText(block.Text, System.Globalization.CultureInfo.CurrentUICulture,
+        FlowDirection.LeftToRight, new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch), block.FontSize,
+        Brushes.Black, 1.0).WidthIncludingTrailingWhitespace;
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
     {

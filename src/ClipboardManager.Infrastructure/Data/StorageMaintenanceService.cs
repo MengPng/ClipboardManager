@@ -366,6 +366,7 @@ public sealed class StorageMaintenanceService(
         "sync_conflicts" or "cloud_workspaces_cache" or "cloud_members_cache" or "cloud_groups_cache" or "blob_transfers" => 4,
         "cloud_workspace_mappings" => 5,
         "todo_tags" or "todo_items" or "todo_item_tags" => 6,
+        "published_config" or "paired_peer" or "subscription" or "config_snapshot" => 8,
         _ => 1
     };
 
@@ -397,6 +398,7 @@ public sealed class StorageMaintenanceService(
             {
                 if (table == "sync_operations" && version < 4 &&
                     name is "next_attempt_at" or "error_code" or "lease_owner" or "lease_expires_at") continue;
+                if (table == "collection_folders" && version < 8 && name == "managed_subscription_id") continue;
                 if (!actualColumns.TryGetValue(name, out var found) || found != signature)
                     throw new InvalidDataException($"Backup schema is missing or incompatible: {table}.{name}.");
             }

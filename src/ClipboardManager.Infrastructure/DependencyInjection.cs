@@ -1,4 +1,5 @@
 using ClipboardManager.Domain.Contracts;
+using ClipboardManager.Infrastructure.ConfigSync;
 using ClipboardManager.Infrastructure.Data;
 using ClipboardManager.Infrastructure.Identity;
 using ClipboardManager.Infrastructure.Lan;
@@ -22,11 +23,17 @@ public static class DependencyInjection
         services.AddSingleton<DatabaseSafetyBackup>();
         services.AddSingleton<IDatabaseInitializer, SqliteDatabaseInitializer>();
         services.AddSingleton<IStorageMaintenanceService, StorageMaintenanceService>();
-        services.AddSingleton<IPersonalConfigTransferService, PersonalConfigTransferService>();
+        services.AddSingleton<PersonalConfigTransferService>();
+        services.AddSingleton<IPersonalConfigTransferService>(provider => provider.GetRequiredService<PersonalConfigTransferService>());
+        services.AddSingleton<IConfigPackageService>(provider => provider.GetRequiredService<PersonalConfigTransferService>());
+        services.AddSingleton<IConfigSyncRepository, SqliteConfigSyncRepository>();
+        services.AddSingleton<ConfigSyncIdentity>();
+        services.AddSingleton<IConfigSyncIdentity>(provider => provider.GetRequiredService<ConfigSyncIdentity>());
+        services.AddSingleton<IConfigSyncServer, ConfigSyncServer>();
+        services.AddSingleton<IConfigSyncClient, ConfigSyncClient>();
+        services.AddSingleton<IConfigDiscovery, ConfigDiscoveryService>();
         services.AddSingleton<ILanShareService, LocalSendLanShareService>();
         services.AddSingleton<ICredentialVault, WindowsCredentialVault>();
-        services.AddHttpClient<ITextAiProvider, Ai.OpenAiCompatibleTextProvider>()
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddHttpClient<TencentCloudAccountService>(client => client.Timeout = TimeSpan.FromSeconds(20));
         services.AddHttpClient<TencentCloudWorkspaceService>(client => client.Timeout = TimeSpan.FromSeconds(20));
         services.AddHttpClient<TencentRemoteSyncProvider>(client => client.Timeout = TimeSpan.FromSeconds(30));

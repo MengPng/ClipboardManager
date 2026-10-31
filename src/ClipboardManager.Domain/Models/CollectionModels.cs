@@ -16,6 +16,8 @@ public sealed record CollectionFolder
     public required string Name { get; init; }
     public required decimal SortKey { get; init; }
     public bool IsSystem { get; init; }
+    /// <summary>非空表示这是订阅产生的受管文件夹：内容只读，仅能通过订阅更新/回退/取消订阅改变。</summary>
+    public Guid? ManagedSubscriptionId { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
     public required DateTimeOffset UpdatedAt { get; init; }
     public DateTimeOffset? DeletedAt { get; init; }

@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$OutputPath = "artifacts/ClipboardManager.exe",
-    [string]$Version = "0.8.7"
+    [string]$Version = "0.9.0"
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -67,7 +67,6 @@ if (-not (Test-Path $destDir)) {
 }
 
 Copy-Item $sourceExe $destFile -Force
-Copy-Item -LiteralPath (Join-Path $root "THIRD-PARTY-NOTICES.txt") -Destination $destDir -Force
 $maintenanceDest = Join-Path $destDir "ClipboardManager.Maintenance.exe"
 Copy-Item $maintenanceExe $maintenanceDest -Force
 $hash = (Get-FileHash $destFile -Algorithm SHA256).Hash

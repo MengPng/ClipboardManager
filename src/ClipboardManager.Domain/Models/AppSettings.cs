@@ -2,7 +2,6 @@ namespace ClipboardManager.Domain.Models;
 
 public sealed record AppSettings
 {
-    public SelectionAiSettings SelectionAi { get; init; } = new();
     public int MaxHistoryItems { get; init; } = 1000;
     public int RetentionDays { get; init; } = 30;
     public long MaxTextBytes { get; init; } = 2 * 1024 * 1024;
@@ -14,7 +13,8 @@ public sealed record AppSettings
     public bool EnableAutomaticPaste { get; init; }
     public bool SingleClickToPaste { get; init; }
     public bool CompactList { get; init; }
-    public bool EnableClipboardCalculator { get; init; }
+    public ClipboardCalculatorMode ClipboardCalculatorMode { get; init; } = ClipboardCalculatorMode.Hint;
+    public bool CalculatorKeypadOpen { get; init; }
     public bool ShowPanelPet { get; init; } = true;
     public string Theme { get; init; } = "standard";
     public bool IsCapturePaused { get; init; }

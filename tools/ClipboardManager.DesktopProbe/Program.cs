@@ -15,7 +15,6 @@ internal static class Program
     {
         if (args.Contains("--clipboard-safety", StringComparer.OrdinalIgnoreCase)) return ClipboardSafetyProbe.Run();
         if (args.Contains("--files-only", StringComparer.OrdinalIgnoreCase)) return ClipboardFileProbe.Run();
-        if (args.Any(arg => arg is "--selection" or "--selection-target" or "--selection-ui" or "--selection-gateway")) return SelectionProbe.Run(args);
         var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {

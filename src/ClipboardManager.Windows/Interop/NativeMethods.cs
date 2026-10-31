@@ -79,6 +79,9 @@ internal static partial class NativeMethods
     public static partial uint GetWindowThreadProcessId(IntPtr windowHandle, out uint processId);
 
     [LibraryImport("user32.dll")]
+    public static partial IntPtr GetClipboardOwner();
+
+    [LibraryImport("user32.dll")]
     public static partial IntPtr GetOpenClipboardWindow();
 
     [LibraryImport("user32.dll", SetLastError = true)]

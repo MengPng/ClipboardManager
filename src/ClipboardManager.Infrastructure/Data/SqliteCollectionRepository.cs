@@ -70,6 +70,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         name = ValidateName(name);
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+        await EnsureWritableFolderAsync(connection, transaction, workspaceId, folderId, cancellationToken);
         await EnsureUniqueNameAsync(connection, workspaceId, name, folderId, cancellationToken, transaction);
         await using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "UPDATE collection_folders SET name=$name,updated_at=$now,local_version=local_version+1 WHERE workspace_id=$workspace AND id=$id AND is_system=0 AND deleted_at IS NULL;";
@@ -85,8 +86,10 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
     {
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+        await EnsureWritableFolderAsync(connection, transaction, workspaceId, folderId, cancellationToken);
         if (await RequireFolderAsync(connection, transaction, workspaceId, folderId, cancellationToken))
             throw new InvalidOperationException("系统文件夹不能删除。");
+        await EnsureWritableFolderAsync(connection, transaction, workspaceId, fallbackFolderId, cancellationToken);
         if (!await RequireFolderAsync(connection, transaction, workspaceId, fallbackFolderId, cancellationToken))
             throw new InvalidOperationException("回退目标必须是同一空间的系统文件夹。");
         var source = await ReadOrderAsync(connection, transaction, workspaceId, folderId, cancellationToken);
@@ -141,6 +144,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
         await RequireFolderAsync(connection, transaction, workspaceId, input.FolderId, cancellationToken);
+        await EnsureWritableFolderAsync(connection, transaction, workspaceId, input.FolderId, cancellationToken);
         await RequireSourceAsync(connection, transaction, input.SourceWorkspaceId ?? workspaceId, input.SourceClipboardItemId, cancellationToken);
         var ordered = await ReadOrderAsync(connection, transaction, workspaceId, input.FolderId, cancellationToken);
         var key = await GetInsertionKeyAsync(connection, transaction, workspaceId, input.FolderId, ordered, ordered.Count, cancellationToken);
@@ -165,6 +169,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
         await RequireFolderAsync(connection, transaction, item.WorkspaceId, item.FolderId, cancellationToken);
+        await EnsureWritableFolderAsync(connection, transaction, item.WorkspaceId, item.FolderId, cancellationToken);
         await WriteItemAsync(connection, transaction, item with { UpdatedAt = DateTimeOffset.UtcNow }, true, cancellationToken);
         await QueueItemAsync(connection, transaction, item.WorkspaceId, item.Id, SyncOperationType.Update, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -175,6 +180,8 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
         await RequireFolderAsync(connection, transaction, workspaceId, targetFolderId, cancellationToken);
+        await EnsureWritableFolderAsync(connection, transaction, workspaceId, targetFolderId, cancellationToken);
+        await EnsureWritableItemAsync(connection, transaction, workspaceId, itemId, cancellationToken);
         await using var find = connection.CreateCommand();
         find.Transaction = transaction;
         find.CommandText = "SELECT folder_id FROM collection_items WHERE workspace_id=$workspace AND id=$id AND deleted_at IS NULL;";
@@ -195,6 +202,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
     {
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+        await EnsureWritableItemAsync(connection, transaction, workspaceId, itemId, cancellationToken);
         await using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "UPDATE collection_items SET deleted_at=$now,updated_at=$now,local_version=local_version+1 WHERE workspace_id=$workspace AND id=$id AND deleted_at IS NULL;";
         command.Parameters.AddWithValue("$now", Format(DateTimeOffset.UtcNow));
@@ -221,6 +229,31 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
         var result = await command.ExecuteScalarAsync(cancellationToken);
         if (result is null) throw new InvalidOperationException("文件夹不存在或不属于当前空间。");
         return Convert.ToInt32(result) != 0;
+    }
+
+    private const string ManagedReadOnlyMessage = "受管文件夹来自订阅，内容只读。可以“复制到我的配置”后再修改。";
+
+    /// <summary>订阅产生的受管文件夹只允许订阅服务改写，用户路径一律拒绝。</summary>
+    private static async Task EnsureWritableFolderAsync(SqliteConnection connection, SqliteTransaction transaction,
+        Guid workspaceId, Guid folderId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT managed_subscription_id FROM collection_folders WHERE workspace_id=$workspace AND id=$id AND deleted_at IS NULL;";
+        AddIdentity(command, workspaceId, folderId);
+        var managed = await command.ExecuteScalarAsync(cancellationToken);
+        if (managed is string { Length: > 0 }) throw new InvalidOperationException(ManagedReadOnlyMessage);
+    }
+
+    private static async Task EnsureWritableItemAsync(SqliteConnection connection, SqliteTransaction transaction,
+        Guid workspaceId, Guid itemId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT f.managed_subscription_id FROM collection_items i JOIN collection_folders f ON f.id=i.folder_id WHERE i.workspace_id=$workspace AND i.id=$id AND i.deleted_at IS NULL;";
+        AddIdentity(command, workspaceId, itemId);
+        var managed = await command.ExecuteScalarAsync(cancellationToken);
+        if (managed is string { Length: > 0 }) throw new InvalidOperationException(ManagedReadOnlyMessage);
     }
 
     /// <summary>
@@ -382,7 +415,7 @@ public sealed class SqliteCollectionRepository(SqliteConnectionFactory connectio
 
     private static CollectionFolder ReadFolder(SqliteDataReader r) => new()
     {
-        Id=Guid.Parse(r.GetString(r.GetOrdinal("id"))), WorkspaceId=Guid.Parse(r.GetString(r.GetOrdinal("workspace_id"))), ParentFolderId=GuidOrNull(r,"parent_folder_id"), Name=r.GetString(r.GetOrdinal("name")), SortKey=Convert.ToDecimal(r.GetDouble(r.GetOrdinal("sort_key"))), IsSystem=r.GetInt32(r.GetOrdinal("is_system"))!=0, CreatedAt=Date(r,"created_at")!.Value, UpdatedAt=Date(r,"updated_at")!.Value, DeletedAt=Date(r,"deleted_at"), LocalVersion=r.GetInt64(r.GetOrdinal("local_version")), ServerVersion=LongOrNull(r,"server_version"), SyncStatus=(SyncState)r.GetInt32(r.GetOrdinal("sync_status"))
+        Id=Guid.Parse(r.GetString(r.GetOrdinal("id"))), WorkspaceId=Guid.Parse(r.GetString(r.GetOrdinal("workspace_id"))), ParentFolderId=GuidOrNull(r,"parent_folder_id"), Name=r.GetString(r.GetOrdinal("name")), SortKey=Convert.ToDecimal(r.GetDouble(r.GetOrdinal("sort_key"))), IsSystem=r.GetInt32(r.GetOrdinal("is_system"))!=0, ManagedSubscriptionId=GuidOrNull(r,"managed_subscription_id"), CreatedAt=Date(r,"created_at")!.Value, UpdatedAt=Date(r,"updated_at")!.Value, DeletedAt=Date(r,"deleted_at"), LocalVersion=r.GetInt64(r.GetOrdinal("local_version")), ServerVersion=LongOrNull(r,"server_version"), SyncStatus=(SyncState)r.GetInt32(r.GetOrdinal("sync_status"))
     };
 
     private static CollectionItem ReadItem(SqliteDataReader r) => new()
