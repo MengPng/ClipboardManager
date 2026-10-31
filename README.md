@@ -47,7 +47,7 @@
 
 ## 下载与安装
 
-正式版本通过 GitHub Releases 分发：
+正式版本同时发布到下载页 <https://clipboard.netkaize.com/download/> 与 GitHub Releases（同一批文件，SHA-256 一致）；发布流程见 `AGENTS.md`「发布与同步」：
 
 - `ClipboardManager-<version>-win-x64.exe`：推荐下载。单个文件即可运行，已内置备份恢复组件，无需安装 .NET 或下载其他文件。
 - `ClipboardManager-<version>-win-x64-portable.zip`：免安装便携包，解压后运行 `ClipboardManager.exe`。

@@ -434,6 +434,41 @@ content_size
 
 新增较大功能时，应同步更新 `README.md` 的路线图或功能状态。任何实质性架构变化都应写入 ADR 或等价决策记录；不要只留在聊天或代码注释中。
 
+## 发布与同步（Codex 执行）
+
+适用于 Codex 等代理。需要的网络操作（`git push`、`gh`、`ssh`/`scp`）须在允许联网的会话中执行。
+
+### 日常改动同步 GitHub
+
+- 改动完成并通过相称的构建和测试后，提交到 `main` 并 `git push origin main`。推送前先 `git pull --rebase`。
+- 禁止 `git push --force`、改写已推送历史、删除或移动已推送的标签和 Release。
+- 只改了下载页（`site/download/`）时，推送后运行 `pwsh ./scripts/publish-download.ps1 -PageOnly` 同步到服务器。
+
+### 发布新版本（用户说"发布 x.y.z"时）
+
+1. 版本号：`Directory.Build.targets` 的 `VersionPrefix` / `InformationalVersion`，`release/release-contract.json` 的 `appVersion`（schema 变化时同步 `databaseSchemaVersion`），三处一致。
+2. CHANGELOG：把「Unreleased」中属于本版本的条目整理为 `## [x.y.z] - YYYY-MM-DD`。
+3. 写 `release/notes/x.y.z.md`：第一行 `# 标题`，下面 3–6 条 `- ` 开头、面向普通用户的说明（不写类名、测试数等实现细节）。下载页、`latest.json` 和 GitHub Release 正文都用它。
+4. 更新 README / 本文件的版本状态行，提交：`release: vx.y.z`。
+5. 先 `pwsh ./scripts/release-all.ps1 -Version x.y.z -DryRun`，检查 `artifacts/release/x.y.z/` 与 `artifacts/download-site/latest.json`。
+6. 再 `pwsh ./scripts/release-all.ps1 -Version x.y.z`。脚本依次：检查版本/工作区/分支 → 构建测试打包 → 推送 `main` 与标签 `vx.y.z` → 创建 GitHub Release（上传 EXE、便携 ZIP、`SHA256SUMS.txt`）→ 上传下载服务器，最后切换 `latest.json`。
+7. 向用户报告：GitHub Release 链接、`https://clipboard.netkaize.com/download/latest.json` 中的版本号、SHA-256，以及未验证事项。
+
+规则：
+
+- 任一步失败立即停止并报告原因，不要绕过检查；修复后可直接重跑（重跑时可加 `-SkipBuild` 复用已打包产物）。
+- 已推送的标签不指向当前提交时，脚本会拒绝；应升版本号，而不是覆盖。
+- MSI 默认不发布；用户明确要求时加 `-IncludeMsi`。
+- `.github/workflows/release.yml` 已改为仅手动触发，不要恢复为推送标签自动发布（会与本地发布重复创建 Release，且 CI 重新构建的二进制哈希与下载页不一致）。
+
+### 一次性前提（缺少时提示用户配置，不要自行猜测或写入仓库）
+
+- PowerShell 7、.NET 8 SDK、WiX（打包 MSI 时）、`gh auth login` 已登录且对 `MengPng/ClipboardManager` 有写权限。
+- 环境变量 `CM_DEPLOY_SSH`（如 `ubuntu@<服务器IP>`），可选 `CM_DEPLOY_KEY`（私钥路径）；服务器地址和密钥不得提交到仓库。
+- 服务器已按 `cloud/deploy/nginx.clipboard.netkaize.com.conf` 配置 `/download/`，并存在可写目录 `/var/www/download`。
+
+客户端检查更新的契约见 `docs/adr/0005-download-page-and-update-check.md`。
+
 ## 测试要求
 
 优先覆盖高风险规则：
