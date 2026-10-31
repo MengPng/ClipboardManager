@@ -57,6 +57,8 @@
     <SolidColorBrush x:Key="RowHoverBrush" Color="#FFFFF1E6" />
     <SolidColorBrush x:Key="RowSelectedMetaBrush" Color="#FF6F6258" />
     <Visibility x:Key="RowSeparatorVisibility">Collapsed</Visibility>
+    <Thickness x:Key="SelectionEdgeThickness">0</Thickness>
+    <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#FF2B2622" />
     <Visibility x:Key="SelectionDecorVisibility">Visible</Visibility>
     <SolidColorBrush x:Key="SelectionDecorBrush" Color="#FF2B2622" />
     <Visibility x:Key="EmptyPetVisibility">Visible</Visibility>

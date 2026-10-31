@@ -26,16 +26,21 @@ internal static class Program
             // and must parse; a typo here would silently fall back to the standard value.
             var themeDir = Path.Combine(root, "src/ClipboardManager.Windows/Themes");
             var jiajia = (ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(themeDir, "Palette.Jiajia.xaml")));
+            var kami = (ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(themeDir, "Palette.Kami.xaml")));
             var standardKeys = ((ResourceDictionary)app.Resources.MergedDictionaries[0]).Keys.Cast<object>().ToHashSet();
-            var unknown = jiajia.Keys.Cast<object>().Where(key => !standardKeys.Contains(key)).ToArray();
-            if (unknown.Length > 0)
-                throw new InvalidOperationException("Palette.Jiajia.xaml defines keys absent from Palette.xaml: " + string.Join(", ", unknown));
+            foreach (var (layerName, layer) in new[] { ("Palette.Jiajia.xaml", jiajia), ("Palette.Kami.xaml", kami) })
+            {
+                var unknown = layer.Keys.Cast<object>().Where(key => !standardKeys.Contains(key)).ToArray();
+                if (unknown.Length > 0)
+                    throw new InvalidOperationException($"{layerName} defines keys absent from Palette.xaml: " + string.Join(", ", unknown));
+            }
             // Shape and copy tokens: the standard palette owns every one (with 0.8.5 values) and
             // the jiajia layer overrides all of them, so a template never resolves a missing key.
             var shapeTokens = new[]
             {
                 "RowCornerRadius", "RowBorderThickness", "RowCardInset", "RowCardBrush", "RowBorderBrush", "RowSelectedBorderBrush",
-                "RowHoverBrush", "RowSelectedMetaBrush", "RowSeparatorVisibility", "SelectionDecorVisibility", "SelectionDecorBrush",
+                "RowHoverBrush", "RowSelectedMetaBrush", "RowSeparatorVisibility", "SelectionEdgeThickness", "SelectionEdgeBrush",
+                "SelectionDecorVisibility", "SelectionDecorBrush",
                 "EmptyPetVisibility", "NavPillRadius", "NavPillBorderThickness", "NavPillBorderBrush", "NavBottomBorderThickness",
                 "NavMarkBrush", "NavSelectedBackgroundBrush", "NavSelectedForegroundBrush", "ChipCornerRadius",
                 "ChipCheckedBackgroundBrush", "ChipMarkBrush", "SearchCornerRadius", "SearchFillBrush", "RadiusPill",
@@ -49,6 +54,15 @@ internal static class Program
             if (!Equals(standardRow["SelectionDecorVisibility"], Visibility.Collapsed) || !Equals(jiajia["SelectionDecorVisibility"], Visibility.Visible) ||
                 !Equals(standardRow["RowBorderThickness"], new Thickness(2, 0, 0, 0)))
                 throw new InvalidOperationException("Standard theme must keep the 0.8.5 row shape (left bar, no decor); jiajia must show the selection decor.");
+            // One selection rule for every list: the left edge bar comes from SelectionEdgeThickness
+            // (standard and kami 2, jiajia 0) and decor only from SelectionDecorVisibility (jiajia only).
+            if (!Equals(standardRow["SelectionEdgeThickness"], new Thickness(2, 0, 0, 0)) ||
+                !Equals(jiajia["SelectionEdgeThickness"], new Thickness(0)) || !Equals(kami["SelectionEdgeThickness"], new Thickness(2, 0, 0, 0)) ||
+                kami.Contains("SelectionDecorVisibility") || kami.Contains("EmptyPetVisibility") || kami.Contains("RowSeparatorVisibility"))
+                throw new InvalidOperationException("Selection edge tokens must be standard 2 / jiajia 0 / kami 2, and kami must inherit decor, hairline and empty-pet tokens from standard.");
+            var kamiDisplayFont = ((FontFamily)kami["AppDisplayFontFamily"]).Source;
+            if (!kamiDisplayFont.StartsWith("Georgia") || kami.Contains("AppFontFamily"))
+                throw new InvalidOperationException("Kami overrides only AppDisplayFontFamily; the body font stays Microsoft YaHei.");
 
             var document = XDocument.Load(Path.Combine(root, "src/ClipboardManager.Windows/MainWindow.xaml"));
             XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
@@ -116,8 +130,8 @@ internal static class Program
             petHost.UpdateLayout();
             var petCheck = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             petCheck.Render(petHost);
-            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.6", "layout"));
-            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.6", "layout", "PanelPet-probe.png"));
+            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.8.7", "layout"));
+            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.8.7", "layout", "PanelPet-probe.png"));
             var petBytes = new byte[56 * 40 * 4];
             petCheck.CopyPixels(petBytes, 56 * 4, 0);
             if (ClipboardManager.Windows.Services.PetCompanion.LoadError is not null)
@@ -134,14 +148,14 @@ internal static class Program
             System.Threading.Thread.Sleep(350);
             var probeBitmap = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             probeBitmap.Render(collapsedProbe);
-            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.6", "layout", "CollapsedPetWindow-probe.png"));
+            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.8.7", "layout", "CollapsedPetWindow-probe.png"));
             var probeBytes = new byte[56 * 40 * 4];
             probeBitmap.CopyPixels(probeBytes, 56 * 4, 0);
             collapsedProbe.Close();
             if (probeBytes.All(b => b == 0))
                 throw new InvalidOperationException("CollapsedPetWindow renders an empty visual tree; the pet never draws inside the collapsed host.");
             Console.WriteLine("PASS CollapsedPetWindow visual probe");
-            var output = Path.Combine(root, "artifacts", "review", "0.8.6", "layout");
+            var output = Path.Combine(root, "artifacts", "review", "0.8.7", "layout");
             Directory.CreateDirectory(output);
             // Rows are the production view-models, so the icon, link, badge and time rules under
             // test are the shipped ones. The xlsx exists on disk so the row is not marked as stale.
@@ -171,15 +185,36 @@ internal static class Program
             if (!sampleRows[0].Metadata.EndsWith(" · 14:32") || sampleRows[0].Metadata.Contains("今天") ||
                 !System.Text.RegularExpressions.Regex.IsMatch(sampleRows[4].Metadata, @" · \d\d-\d\d \d\d:\d\d$"))
                 throw new InvalidOperationException($"History time format: {sampleRows[0].Metadata} | {sampleRows[4].Metadata}");
-            window.DataContext = new
+            // Config page samples use the production view-models; SelectedFolder/SelectedCollectionItem
+            // are TwoWay in XAML, so the context needs settable properties (not an anonymous type).
+            static CollectionFolder SampleFolder(string name, bool system = false) => new()
             {
-                RowMargin = new Thickness(10, 9, 10, 9),
-                ThumbnailSize = 34d,
-                HistoryRowHeight = 56d,
-                HistoryIconSize = 30d,
-                HistoryRowPadding = new Thickness(10, 0, 10, 0),
-                Items = sampleRows
+                Id = Guid.NewGuid(), WorkspaceId = Guid.Empty, Name = name, SortKey = 1m, IsSystem = system,
+                CreatedAt = DateTimeOffset.Now, UpdatedAt = DateTimeOffset.Now
             };
+            static CollectionItem SampleCollection(CollectionItemType type, string title, string? text = null, string? url = null) => new()
+            {
+                Id = Guid.NewGuid(), WorkspaceId = Guid.Empty, FolderId = Guid.Empty, ItemType = type, Title = title, TextContent = text, Url = url,
+                SortKey = 1m, CreatedAt = DateTimeOffset.Now, UpdatedAt = DateTimeOffset.Now
+            };
+            var sampleFolders = new[]
+            {
+                new ClipboardManager.Windows.FolderViewModel(SampleFolder("未分类", true), 3, "个人"),
+                new ClipboardManager.Windows.FolderViewModel(SampleFolder("常用回复"), 5, "个人"),
+                new ClipboardManager.Windows.FolderViewModel(SampleFolder("地址与账号备忘"), 2, "个人")
+            };
+            var sampleCollection = new[]
+            {
+                new ClipboardManager.Windows.CollectionItemViewModel(SampleCollection(CollectionItemType.Text, "周报开头", "本周完成了剪切板主题与布局的统一检查。")),
+                new ClipboardManager.Windows.CollectionItemViewModel(SampleCollection(CollectionItemType.Link, "设计规范", url: "https://clipboard.netkaize.com/design/v2")),
+                new ClipboardManager.Windows.CollectionItemViewModel(SampleCollection(CollectionItemType.Text, "会议链接", "https://meeting.example.com/room/42"))
+            };
+            var previewContext = new PreviewContext
+            {
+                Items = sampleRows, Folders = sampleFolders, CollectionItems = sampleCollection,
+                SelectedFolder = sampleFolders[1], SelectedCollectionItem = sampleCollection[0]
+            };
+            window.DataContext = previewContext;
             var surface = (FrameworkElement)window.Content;
             var tabs = (FrameworkElement)window.FindName("MainTabs");
             var title = (FrameworkElement)window.FindName("TitleBar");
@@ -222,15 +257,24 @@ internal static class Program
                 if (bounds.Right > surface.ActualWidth || bounds.Width < 1)
                     throw new InvalidOperationException("Title controls overflow after collapse/expand.");
             }
-            // Pass 1 renders the standard palette; pass 2 merges the jiajia override layer last
-            // (same as ThemeService.Apply) and runs every layout assertion again.
-            foreach (var themed in new[] { false, true })
+            // One pass per theme: standard renders the bare palette; jiajia and kami merge their override
+            // layer last (same as ThemeService.Apply, old layer removed first) and run every layout assertion again.
+            var themeLayers = new (string Name, ResourceDictionary? Layer)[] { ("standard", null), ("jiajia", jiajia), ("kami", kami) };
+            ResourceDictionary? activeLayer = null;
+            Color? historySelectedColor = null;
+            foreach (var (theme, layer) in themeLayers)
             foreach (var size in new[] { new Size(340, 540), new Size(340, 450), new Size(520, 700) })
             foreach (var active in panels)
             {
-                if (themed && !app.Resources.MergedDictionaries.Contains(jiajia))
-                    app.Resources.MergedDictionaries.Add(jiajia);
-                var renderDir = Path.Combine(output, themed ? "jiajia" : "standard");
+                if (!ReferenceEquals(activeLayer, layer))
+                {
+                    if (activeLayer is not null) app.Resources.MergedDictionaries.Remove(activeLayer);
+                    if (layer is not null) app.Resources.MergedDictionaries.Add(layer);
+                    activeLayer = layer;
+                }
+                // Decor, hairline and empty-state pet differ only for jiajia; kami is flat like standard.
+                var themed = theme == "jiajia";
+                var renderDir = Path.Combine(output, theme);
                 Directory.CreateDirectory(renderDir);
                 foreach (var panel in panels)
                     panel.Visibility = panel == active ? Visibility.Visible : Visibility.Collapsed;
@@ -361,16 +405,17 @@ internal static class Program
                             throw new InvalidOperationException($"History type icon must be 30x30: {rowIcon.ActualWidth}x{rowIcon.ActualHeight}");
                         var hairline = Descendants(container).OfType<Border>().Single(border => border.Height == 1);
                         if (hairline.IsVisible == themed)
-                            throw new InvalidOperationException($"Row separator must be a hairline in standard only (themed={themed}, visible={hairline.IsVisible}).");
+                            throw new InvalidOperationException($"Row separator must be a hairline in standard and kami, hidden in jiajia ({theme}, visible={hairline.IsVisible}).");
                     }
 
                     // Selection decor (shadow, clip, fold) belongs to the jiajia theme only.
                     var selectedRow = realized[0];
+                    historySelectedColor = SelectedBackground(selectedRow);
                     foreach (var part in new[] { "Shadow", "Clip", "Fold" })
                     {
                         var element = (FrameworkElement)selectedRow.Template.FindName(part, selectedRow);
                         if (element.IsVisible != themed)
-                            throw new InvalidOperationException($"Selection decor '{part}' visibility must follow the theme (themed={themed}, visible={element.IsVisible}).");
+                            throw new InvalidOperationException($"Selection decor '{part}' must show in jiajia only ({theme}, visible={element.IsVisible}).");
                         if (realized.Length > 1 && ((FrameworkElement)realized[1].Template.FindName(part, realized[1])).IsVisible)
                             throw new InvalidOperationException($"Unselected rows must not show selection decor '{part}'.");
                     }
@@ -386,6 +431,41 @@ internal static class Program
                     var search = (FrameworkElement)window.FindName("CollectionSearchBox");
                     if (search.ActualWidth < 120)
                         throw new InvalidOperationException($"Configuration search clipped: {search.ActualWidth}");
+                    // Selected folder + selected item share one selection rule with the history list:
+                    // same fill, the left edge bar only where the theme asks for it, decor on card rows only.
+                    var folderBox = (ListBox)window.FindName("FolderList");
+                    var collectionBox = (ListBox)window.FindName("CollectionList");
+                    var folderRow = folderBox.ItemContainerGenerator.ContainerFromItem(previewContext.SelectedFolder) as ListBoxItem;
+                    var itemRow = collectionBox.ItemContainerGenerator.ContainerFromItem(previewContext.SelectedCollectionItem) as ListBoxItem;
+                    var otherFolderRow = folderBox.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
+                    var otherItemRow = collectionBox.ItemContainerGenerator.ContainerFromIndex(1) as ListBoxItem;
+                    if (folderRow is not { IsSelected: true } || itemRow is not { IsSelected: true } || otherFolderRow is null || otherItemRow is null ||
+                        otherFolderRow.IsSelected || otherItemRow.IsSelected)
+                        throw new InvalidOperationException($"Config page must show one selected folder and one selected item at {size} ({theme}).");
+                    var folderColor = SelectedBackground(folderRow);
+                    var itemColor = SelectedBackground(itemRow);
+                    var themeSelection = (SolidColorBrush)app.FindResource("SelectionBrush");
+                    if (folderColor != itemColor || folderColor != historySelectedColor || folderColor != themeSelection.Color)
+                        throw new InvalidOperationException($"Selected fill must match across folders, config items and history ({theme}, {size}): folder={folderColor} item={itemColor} history={historySelectedColor} token={themeSelection.Color}");
+                    if (SelectedBackground(otherFolderRow) == folderColor || SelectedBackground(otherItemRow) == itemColor)
+                        throw new InvalidOperationException($"Unselected config rows must not use the selected fill ({theme}).");
+                    var edge = (Thickness)app.FindResource("SelectionEdgeThickness");
+                    if (((Border)folderRow.Template.FindName("Root", folderRow)).BorderThickness != edge ||
+                        ((Border)otherFolderRow.Template.FindName("Root", otherFolderRow)).BorderThickness != edge)
+                        throw new InvalidOperationException($"Folder rows must take their left bar from SelectionEdgeThickness ({theme}).");
+                    // Folder rows are plain list items: no decor parts at all. Card rows (config items) show decor in jiajia only.
+                    foreach (var part in new[] { "Shadow", "Clip", "Fold" })
+                    {
+                        if (folderRow.Template.FindName(part, folderRow) is not null)
+                            throw new InvalidOperationException($"Folder rows must not carry selection decor '{part}'.");
+                        var decor = (FrameworkElement)itemRow.Template.FindName(part, itemRow);
+                        if (decor.IsVisible != themed || ((FrameworkElement)otherItemRow.Template.FindName(part, otherItemRow)).IsVisible)
+                            throw new InvalidOperationException($"Config item decor '{part}' must show on the selected card in jiajia only ({theme}, visible={decor.IsVisible}).");
+                    }
+                    var folderRowBounds = Bounds(folderRow, surface);
+                    var itemRowBounds = Bounds(itemRow, surface);
+                    if (folderRowBounds.Left < 0 || folderRowBounds.Right > size.Width || itemRowBounds.Right > size.Width + 0.5 || itemRowBounds.Width < 40)
+                        throw new InvalidOperationException($"Config rows are clipped at {size} ({theme}): folder={folderRowBounds} item={itemRowBounds}");
                 }
                 if (active.Name == "SelectionAiPanel" && tabBounds.Right > size.Width)
                     throw new InvalidOperationException($"Selection tab overflows at {size}: {tabBounds}");
@@ -397,7 +477,7 @@ internal static class Program
                     if (!save.IsEnabled || saveBounds.Width < 50 || saveBounds.Bottom > contentBounds.Bottom + 1)
                         throw new InvalidOperationException("Selection settings must load and keep its save action inside the content area.");
                 }
-                Console.WriteLine($"PASS {(themed ? "jiajia" : "standard")} {active.Name} {size}: content={contentBounds}, footerY={footerBounds.Top:F0}");
+                Console.WriteLine($"PASS {theme} {active.Name} {size}: content={contentBounds}, footerY={footerBounds.Top:F0}");
                 navigation.SelectedItem = active.Name switch
                 {
                     "TodoPanel" => window.FindName("TodoTab"),
@@ -430,12 +510,7 @@ internal static class Program
                 {
                     // Empty history: the jiajia theme shows the 112x80 pet and its own copy; standard shows text only.
                     var populated = window.DataContext;
-                    window.DataContext = new
-                    {
-                        RowMargin = new Thickness(10, 9, 10, 9), ThumbnailSize = 34d, HistoryRowHeight = 56d,
-                        HistoryIconSize = 30d, HistoryRowPadding = new Thickness(10, 0, 10, 0),
-                        Items = Array.Empty<ClipboardManager.Windows.HistoryItemViewModel>()
-                    };
+                    window.DataContext = new PreviewContext { Items = Array.Empty<ClipboardManager.Windows.HistoryItemViewModel>() };
                     var emptyText = (TextBlock)window.FindName("EmptyStateText");
                     foreach (var (variant, copyKey, paused) in new[]
                     {
@@ -483,6 +558,10 @@ internal static class Program
             return 1;
         }
     }
+
+    /// <summary>Fill of the container's template root once selected (the colour a row paints, not the token).</summary>
+    private static Color SelectedBackground(ListBoxItem row) =>
+        ((SolidColorBrush)((Border)row.Template.FindName("Root", row)).Background).Color;
 
     private static Rect Bounds(FrameworkElement element, FrameworkElement surface) =>
         element.TransformToAncestor(surface).TransformBounds(new Rect(element.RenderSize));
@@ -613,6 +692,20 @@ internal static class Program
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    private sealed class PreviewContext
+    {
+        public Thickness RowMargin { get; set; } = new(10, 9, 10, 9);
+        public double ThumbnailSize { get; set; } = 34d;
+        public double HistoryRowHeight { get; set; } = 56d;
+        public double HistoryIconSize { get; set; } = 30d;
+        public Thickness HistoryRowPadding { get; set; } = new(10, 0, 10, 0);
+        public IReadOnlyList<ClipboardManager.Windows.HistoryItemViewModel> Items { get; set; } = [];
+        public IReadOnlyList<ClipboardManager.Windows.FolderViewModel> Folders { get; set; } = [];
+        public IReadOnlyList<ClipboardManager.Windows.CollectionItemViewModel> CollectionItems { get; set; } = [];
+        public ClipboardManager.Windows.FolderViewModel? SelectedFolder { get; set; }
+        public ClipboardManager.Windows.CollectionItemViewModel? SelectedCollectionItem { get; set; }
     }
 
     private sealed class PreviewSettings(AppSettings? initial = null) : IAppSettingsStore

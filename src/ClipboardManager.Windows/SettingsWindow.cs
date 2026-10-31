@@ -28,7 +28,7 @@ public sealed class SettingsWindow : Window
     private readonly CheckBox _compact = new() { Content = "紧凑列表（降低行高与缩略图尺寸，一屏显示更多记录）" };
     private readonly CheckBox _pet = new() { Content = "在标题栏显示小宠物（监听时眨眼、暂停时睡觉、捕获时跳一下）" };
     private readonly ComboBox _backupInterval = new() { MinWidth = 180 };
-    private readonly ComboBox _theme = new() { MinWidth = 180, ItemsSource = new[] { "标准（暖纸）", "夹夹（二次元）" } };
+    private readonly ComboBox _theme = new() { MinWidth = 180, ItemsSource = new[] { "标准（暖纸）", "夹夹（二次元）", "Kami（纸）" } };
     private readonly Button _save = new() { Content = "保存", IsEnabled = false, Padding = new Thickness(20, 7, 20, 7) };
     private readonly Button _cancel = new() { Content = "取消", IsCancel = true, Padding = new Thickness(20, 7, 20, 7), Margin = new Thickness(0, 0, 8, 0) };
     private bool _saving;
@@ -124,7 +124,7 @@ public sealed class SettingsWindow : Window
             _singleClick.IsChecked = settings.SingleClickToPaste;
             _compact.IsChecked = settings.CompactList;
             _pet.IsChecked = settings.ShowPanelPet;
-            _theme.SelectedIndex = settings.Theme == "jiajia" ? 1 : 0;
+            _theme.SelectedIndex = settings.Theme switch { "jiajia" => 1, "kami" => 2, _ => 0 };
             _backupInterval.SelectedIndex = settings.AutoBackupIntervalHours switch { 24 => 1, 48 => 2, 72 => 3, _ => 0 };
             _save.IsEnabled = true;
         }
@@ -219,7 +219,7 @@ public sealed class SettingsWindow : Window
                 SingleClickToPaste = _singleClick.IsChecked == true,
                 CompactList = _compact.IsChecked == true,
                 ShowPanelPet = _pet.IsChecked == true,
-                Theme = _theme.SelectedIndex == 1 ? "jiajia" : "standard",
+                Theme = _theme.SelectedIndex switch { 1 => "jiajia", 2 => "kami", _ => "standard" },
                 AutoBackupChoiceCompleted = true,
                 AutoBackupIntervalHours = _backupInterval.SelectedIndex switch { 1 => 24, 2 => 48, 3 => 72, _ => 0 }
             };

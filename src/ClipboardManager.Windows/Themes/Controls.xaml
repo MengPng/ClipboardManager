@@ -485,7 +485,8 @@
                             Background="Transparent"
                             Padding="{TemplateBinding Padding}"
                             CornerRadius="{DynamicResource RadiusMedium}"
-                            SnapsToDevicePixels="True" BorderBrush="Transparent" BorderThickness="2,0,0,0">
+                            SnapsToDevicePixels="True" BorderBrush="Transparent"
+                            BorderThickness="{DynamicResource SelectionEdgeThickness}">
                         <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                           VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                     </Border>
@@ -510,7 +511,7 @@
                             <Setter TargetName="Root" Property="Background" Value="{DynamicResource SelectionBrush}" />
                         </MultiTrigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource AccentBrandBrush}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource SelectionEdgeBrush}" />
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
@@ -528,9 +529,7 @@
          标准主题的 token 值复现 0.8.5 的"透明底 + 左缘选中条"；夹夹主题为白卡片描边，选中时
          显示偏移阴影、赤陶夹子与折角（由 SelectionDecorVisibility 控制，标准为 Collapsed）。
          行高由 DataTemplate 决定，卡片内缩（RowCardInset）在行高之内，所以两套主题行距一致。 -->
-    <Style x:Key="HistoryRowItemStyle" TargetType="ListBoxItem">
-        <!-- 行距固定为 HistoryRowHeight（含卡片内缩），两套主题的列表节奏一致。 -->
-        <Setter Property="Height" Value="{Binding DataContext.HistoryRowHeight, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
+    <Style x:Key="CardRowItemStyle" TargetType="ListBoxItem">
         <Setter Property="Margin" Value="2,0" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -595,6 +594,12 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- 历史行：卡片行 + 固定行距 HistoryRowHeight（含卡片内缩），各主题的列表节奏一致。
+         配置条目直接用 CardRowItemStyle（高度随内容），选中底色与装饰和历史行同一套 token。 -->
+    <Style x:Key="HistoryRowItemStyle" TargetType="ListBoxItem" BasedOn="{StaticResource CardRowItemStyle}">
+        <Setter Property="Height" Value="{Binding DataContext.HistoryRowHeight, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" />
     </Style>
 
     <!--  Segmented navigation  -->

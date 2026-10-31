@@ -1,0 +1,89 @@
+<!-- Kami（纸）主题：暖米纸底、油墨蓝唯一点缀、扁平无阴影。只覆盖与标准主题不同的键，
+     须作为最后一个合并字典加载（见 ThemeService）；键必须是 Palette.xaml 键的子集（LayoutCheck 断言）。
+     设计依据：docs/design/2026-10-31-kami-theme/kami-theme-spec.md。
+     可访问性：次要文字 #504E49、三级文字 #6B6A64 在 canvas #F5F4ED 上分别约 7.6:1 与 4.9:1。 -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!-- 衬线只用于标题栏、页签与空状态标题；正文保持微软雅黑，保证 13px 可读。不随包分发字体：
+         装有思源宋体时自动生效，否则回退到 Georgia / 宋体。 -->
+    <FontFamily x:Key="AppDisplayFontFamily">Georgia, Source Han Serif SC, Noto Serif SC, SimSun</FontFamily>
+
+    <SolidColorBrush x:Key="LabelPrimaryBrush" Color="#FF141413" />
+    <SolidColorBrush x:Key="LabelSecondaryBrush" Color="#FF504E49" />
+    <SolidColorBrush x:Key="LabelTertiaryBrush" Color="#FF6B6A64" />
+
+    <!-- 唯一强调色：油墨蓝，面积 ≤5%。 -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF1B365D" />
+    <SolidColorBrush x:Key="AccentBrandBrush" Color="#FF1B365D" />
+    <SolidColorBrush x:Key="AccentBrandStrongBrush" Color="#FF12294A" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#FFB53333" />
+
+    <!-- canvas：窗面、标题栏、页脚同色，靠 1px 暖沙细线分隔。 -->
+    <SolidColorBrush x:Key="WindowVibrancyBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="WindowFallbackBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="WindowSurfaceBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="WindowChromeBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="SurfaceOpaqueBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="ChromeBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="PopoverBrush" Color="#FFF5F4ED" />
+
+    <SolidColorBrush x:Key="SegmentedTrackBrush" Color="#FFE8E6DC" />
+    <SolidColorBrush x:Key="SeparatorBrush" Color="#FFE8E6DC" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#FFE8E6DC" />
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#FFE8E6DC" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#FFC9C6B8" />
+
+    <!-- ivory：搜索框、卡片。 -->
+    <SolidColorBrush x:Key="ControlFillBrush" Color="#FFFAF9F5" />
+    <SolidColorBrush x:Key="ControlFillHoverBrush" Color="#FFE8E6DC" />
+    <SolidColorBrush x:Key="ControlFillPressedBrush" Color="#FFDEDBCF" />
+    <SolidColorBrush x:Key="ControlFillDisabledBrush" Color="#FFF5F4ED" />
+    <SolidColorBrush x:Key="HoverOverlayBrush" Color="#101B365D" />
+    <SolidColorBrush x:Key="PressedOverlayBrush" Color="#201B365D" />
+
+    <!-- 选中：较深的浅蓝实色底 + 2px 油墨蓝左缘条（与标准主题同一几何），不加装饰。浅蓝过淡时在米色底上不易辨认，故加深并保留左缘条。 -->
+    <SolidColorBrush x:Key="SelectionBrush" Color="#FFD3E1F2" />
+    <SolidColorBrush x:Key="SelectionInactiveBrush" Color="#FFDDE7F3" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#FFD3E1F2" />
+    <SolidColorBrush x:Key="ThumbnailBackdropBrush" Color="#FFEFEDE4" />
+
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#FFC9C6B8" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#FF9A978B" />
+    <SolidColorBrush x:Key="TooltipBrush" Color="#FF141413" />
+
+    <CornerRadius x:Key="RadiusSmall">3</CornerRadius>
+    <CornerRadius x:Key="RadiusMedium">5</CornerRadius>
+    <CornerRadius x:Key="RadiusLarge">8</CornerRadius>
+
+    <!-- 形状 token：平面。历史、配置条目、文件夹栏三处选中规则一致：同色底 + 2px 油墨蓝左缘条。 -->
+    <CornerRadius x:Key="RowCornerRadius">3</CornerRadius>
+    <Thickness x:Key="RowBorderThickness">2,0,0,0</Thickness>
+    <SolidColorBrush x:Key="RowSelectedBorderBrush" Color="#FF1B365D" />
+    <SolidColorBrush x:Key="RowHoverBrush" Color="#101B365D" />
+    <SolidColorBrush x:Key="RowSelectedMetaBrush" Color="#FF504E49" />
+    <Thickness x:Key="SelectionEdgeThickness">2,0,0,0</Thickness>
+    <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#FF1B365D" />
+    <SolidColorBrush x:Key="SelectionDecorBrush" Color="#FF141413" />
+
+    <!-- 页签：油墨蓝文字 + 蓝色下划线，无底色块。 -->
+    <CornerRadius x:Key="NavPillRadius">3</CornerRadius>
+    <SolidColorBrush x:Key="NavMarkBrush" Color="#FF1B365D" />
+    <SolidColorBrush x:Key="NavSelectedBackgroundBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="NavSelectedForegroundBrush" Color="#FF1B365D" />
+
+    <!-- 筛选条：选中为浅蓝底小圆角，无下划线（键盘焦点仍用下划线显示）。 -->
+    <CornerRadius x:Key="ChipCornerRadius">3</CornerRadius>
+    <SolidColorBrush x:Key="ChipCheckedBackgroundBrush" Color="#FFD3E1F2" />
+    <SolidColorBrush x:Key="ChipMarkBrush" Color="#00FFFFFF" />
+
+    <CornerRadius x:Key="SearchCornerRadius">5</CornerRadius>
+    <SolidColorBrush x:Key="SearchFillBrush" Color="#FFFAF9F5" />
+
+    <!-- 扁平：仅弹层保留极轻阴影。 -->
+    <DropShadowEffect x:Key="PopoverShadow" BlurRadius="18" ShadowDepth="3" Direction="270" Opacity="0.08" Color="#FF000000" />
+
+</ResourceDictionary>

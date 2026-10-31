@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$OutputPath = "artifacts/ClipboardManager.exe",
-    [string]$Version = "0.8.6"
+    [string]$Version = "0.8.7"
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot

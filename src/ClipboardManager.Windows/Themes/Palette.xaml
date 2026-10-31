@@ -97,7 +97,10 @@
     <SolidColorBrush x:Key="RowHoverBrush" Color="#101F1E1C" />
     <SolidColorBrush x:Key="RowSelectedMetaBrush" Color="#FFA39F94" />
     <Visibility x:Key="RowSeparatorVisibility">Visible</Visibility>
-    <!-- 选中行的偏移阴影、夹子与折角；只在夹夹主题显示。 -->
+    <!-- 全局列表项（文件夹栏等）的选中左缘条：标准 2px 赤陶；夹夹、Kami 为 0，只用同色底。 -->
+    <Thickness x:Key="SelectionEdgeThickness">2,0,0,0</Thickness>
+    <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#FFD97757" />
+    <!-- 选中行的偏移阴影、夹子与折角；只在夹夹主题显示，只加在历史、配置条目这类卡片行上。 -->
     <Visibility x:Key="SelectionDecorVisibility">Collapsed</Visibility>
     <SolidColorBrush x:Key="SelectionDecorBrush" Color="#FF1F1E1C" />
     <!-- 历史页空状态里的夹夹（还需"显示小宠物"开启）。 -->

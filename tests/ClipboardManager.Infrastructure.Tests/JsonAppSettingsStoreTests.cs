@@ -57,6 +57,8 @@ public sealed class JsonAppSettingsStoreTests : IDisposable
         Assert.Equal("standard", original.Theme);
         await store.SaveAsync(original with { Theme = "jiajia" });
         Assert.Equal("jiajia", (await new JsonAppSettingsStore(new AppPaths(_root)).LoadAsync()).Theme);
+        await store.SaveAsync(original with { Theme = "kami" });
+        Assert.Equal("kami", (await new JsonAppSettingsStore(new AppPaths(_root)).LoadAsync()).Theme);
     }
 
     [Fact]

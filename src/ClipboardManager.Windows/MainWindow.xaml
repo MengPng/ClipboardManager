@@ -468,6 +468,7 @@
                                 <ListBox x:Name="CollectionList"
                                          ItemsSource="{Binding CollectionItems}"
                                          SelectedItem="{Binding SelectedCollectionItem, Mode=TwoWay}"
+                                         ItemContainerStyle="{StaticResource CardRowItemStyle}"
                                          AllowDrop="True"
                                          PreviewMouseMove="CollectionList_PreviewMouseMove"
                                          Drop="CollectionList_Drop"
