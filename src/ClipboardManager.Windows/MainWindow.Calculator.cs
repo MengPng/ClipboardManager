@@ -394,8 +394,9 @@ public partial class MainWindow
     {
         if (SelectedItem?.Calculation is not { } calculation) return;
         await _restoreService.CopyTextAsync(calculation.ResultText);
-        HistoryCountText.Text = "已复制计算结果";
+        const string copied = "已复制计算结果";
+        ShortcutHintText.Text = copied;
         await Task.Delay(1500);
-        HistoryCountText.Text = $"{Items.Count} 条";
+        if (ShortcutHintText.Text == copied) ShortcutHintText.Text = "Enter 使用";
     }
 }

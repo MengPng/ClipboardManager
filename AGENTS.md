@@ -56,7 +56,7 @@
   - 资源缺失时宠物静默隐藏但必须写日志；不得影响剪切板监听主链路。
   - 拖拽按窗口 DPI 把设备像素换算为 DIP，并限制在光标所在屏幕的工作区内（0.8.5）。
   - 已知待办：上述 DPI 换算与屏幕限位、Carry 状态、Esc 在未获得焦点的宠物窗口上是否生效，均需在 Windows 实机（100%/125%/150% 缩放、多显示器）验收。
-- 划词查找本地文件（0.9.1 起，ADR-0007）：选中文件名/路径/关键词后按 Ctrl+Alt+F（默认开，可改可关）或点可选浮动按钮，经 Everything IPC 在本机查找，结果可复制文件（CF_HDROP）、复制路径或在资源管理器定位。约束如下：
+- 划词查找本地文件（0.9.1 起，ADR-0007）：选中文件名/路径/关键词后按 Ctrl+Alt+F（默认开，可改可关）或点可选浮动按钮，经 Everything IPC 在本机查找，结果可复制文件（CF_HDROP）、复制路径、在资源管理器定位，或双击 / Ctrl+Enter 用默认应用打开（可执行类文件先确认，0.9.2）。约束如下：
   - 只在用户显式触发时读取选区；UIA `TextPattern` 优先（700 ms），失败才模拟 Ctrl+C，并先完整快照剪切板、读后恢复，过渡序号经 `SelectionClipboardGate` 交给 `SelfWriteSequenceGate`，不得进入历史；`SendInput` 返回值必须等于事件数。
   - 暂停、应用排除在读取载荷前生效；终端/控制台拒绝模拟 Ctrl+C；本程序在前台时不取词；选区 ≤ 4000 字符。
   - 浮动按钮默认关闭，仅在白名单进程（`SelectionToolbarApps`）显示，窗口 `WS_EX_NOACTIVATE`；关闭开关或白名单为空时必须卸载 `WH_MOUSE_LL` 钩子；钩子只判定手势，不读内容。
@@ -70,13 +70,15 @@
   - 设置 `ClipboardCalculatorMode`（`Off` / `Hint` / `Rewrite`）取代旧 `EnableClipboardCalculator`：旧 true → Rewrite、false → Off（`JsonAppSettingsStore` 读取时迁移，不覆盖已有新字段），全新安装默认 `Hint`。`Hint` 不得改写剪切板，历史行的 `= 结果` 标签只在显示时计算、不入库；`Rewrite` 才允许后台改写，且不改写纯"数字-数字"、年-月、ISO 日期。`CalculatorKeypadOpen` 只记住小键盘开关。
   - 纸带只在内存（最近 30 条），不持久化、不入同步 Outbox、不进入历史；计算页键盘契约：Enter 记录并回填结果（全选，运算符接着算、数字重开）、Ctrl+Enter 复制、Esc 清空、↑ 调出上一条。0.9.0 起另有「大写」按钮（Ctrl+Shift+Enter）复制报销单大写金额（`ChineseAmountFormatter`：精确到分、超出两位小数四舍五入并提示、≥ 10^16 元拒绝）。历史页筛选为「全部、文本、链接、图片、文件」居中显示，"链接"= 单个 http/https 地址（`ClipboardQuery.LinksOnly`，SQL 过滤）。
   - 状态：282 项自动测试（Domain 26 / Application 186 / Infrastructure 70）与 LayoutCheck 37 项通过；Ctrl+Enter/复制结果写系统剪切板、Hint/Rewrite 的真实剪切板路径、纸带悬停按钮、缩放与多显示器实机验收待完成。
-- 界面主题（0.8.6 起；0.8.7 增加「Kami（纸）」）：标准暖纸（默认）、可选「夹夹」与「Kami」，设置 → 界面主题，保存后即时生效。约束如下：
+- 界面主题（0.8.6 起；0.8.7 增加「Kami（纸）」；0.9.2 增加「Kubai（清透）」）：标准暖纸（默认）、可选「夹夹」「Kami」与「Kubai」，共四套，设置 → 界面主题，保存后即时生效。约束如下：
   - 主题只改视觉（颜色、圆角、描边、装饰显隐、主题文案），不改功能、快捷键、数据、窗口尺寸或导航顺序；布局调整（行高、图标、筛选合并等）两套主题共用。
-  - `Themes/Palette.xaml` 是标准主题；`Palette.Jiajia.xaml`、`Palette.Kami.xaml` 是最后合并的覆盖层（`ThemeService.Apply` 按主题 id 加载，先移除旧层再加新层，standard 不加载），覆盖层只写与标准不同的键，其键必须是 `Palette.xaml` 键的子集，LayoutCheck 断言；新增主题须同步更新校验器、设置下拉、测试与 LayoutCheck。
+  - `Themes/Palette.xaml` 是标准主题；`Palette.Jiajia.xaml`、`Palette.Kami.xaml`、`Palette.Kubai.xaml` 是最后合并的覆盖层（`ThemeService.Apply` 按主题 id 加载，先移除旧层再加新层，standard 不加载），覆盖层只写与标准不同的键，其键必须是 `Palette.xaml` 键的子集，LayoutCheck 断言；新增主题须同步更新校验器、设置下拉、测试与 LayoutCheck。
   - 形状差异使用 token（`RowCornerRadius`、`RowBorderThickness`、`RowCardBrush`、`NavPillRadius`、`ChipCornerRadius`、`SelectionDecorVisibility`、`EmptyPetVisibility` 等），标准取值保持既有外观。
   - 控件模板与窗口一律以 `DynamicResource` 引用主题键（Style/BasedOn 除外）；新增控件不得硬编码颜色、圆角或文案；空状态等主题文案放在 `Copy*` 字符串资源中，由代码按键读取。
-  - 列表选中规则统一：历史、配置条目、文件夹栏在同一主题下选中底色相同（`SelectionBrush`）；左缘条由 `SelectionEdgeThickness` / `SelectionEdgeBrush` 控制（标准 2、夹夹 0、Kami 2），不得写死；夹子、折角等装饰只加在卡片行（历史、配置条目，`SelectionDecorVisibility`），文件夹栏只用同色底。选中态必须在该主题底色上清晰可辨。
+  - 列表选中规则统一：历史、配置条目、文件夹栏在同一主题下选中底色相同（`SelectionBrush`）；左缘条由 `SelectionEdgeThickness` / `SelectionEdgeBrush` 控制（标准 2、夹夹 0、Kami 2、Kubai 0），不得写死；夹子、折角等装饰只加在卡片行（历史、配置条目，`SelectionDecorVisibility`），文件夹栏只用同色底。选中态必须在该主题底色上清晰可辨。
   - 空状态宠物沿用宠物约束：112×80 为 56×40 的精确 2 倍，不可聚焦、不可命中，不得伪造状态。
+  - 主题图标（0.9.2 起，仅 Kubai）：`ThemeIconVisibility` 与 `IconNavHistory/Config/Todo/Calc/Share`、`IconRowText/Link/File`、`IconFolder` 及各自的 `…Hover` 键；`Palette.xaml` 中为 `Collapsed` / `x:Null`，夹夹与 Kami 不写这些键，因此其他主题外观不变。Kubai 用 96×96 PNG（`Assets/Icons/Kubai/`，`scripts/build-kubai-icons.ps1` 生成，来源与许可见同目录 `NOTICE.txt`，只在产品内使用，不得单独作为图标包分发）；图片历史行保留缩略图；页签悬停/选中 160 ms 淡入悬停图，选中行与选中文件夹换悬停图。LayoutCheck 断言 Kubai 每个图标键为 96×96 位图、其他主题图标不可见且无图源。
+  - 共享页（0.9.2 起）与设置窗口同一风格：组标题 + `SettingsGroupStyle` 卡片，卡内行左侧标题与说明、右侧控件，行间 `SettingsDividerStyle` 细线；行样式在 `Controls.xaml` 的 `Settings*` 系列中，新增共享页内容须沿用，不得再引入独立卡片样式。
 
 不得为了展示进度而提供不可用的假入口。未实现的团队界面默认隐藏。
 

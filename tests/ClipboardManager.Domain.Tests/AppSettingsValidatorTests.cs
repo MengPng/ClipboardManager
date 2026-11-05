@@ -30,12 +30,14 @@ public sealed class AppSettingsValidatorTests
     [InlineData("standard")]
     [InlineData("jiajia")]
     [InlineData("kami")]
+    [InlineData("kubai")]
     public void KnownThemes_AreAccepted(string theme) => AppSettingsValidator.Validate(new AppSettings { Theme = theme });
 
     [Theory]
     [InlineData("")]
     [InlineData("Jiajia")]
     [InlineData("Kami")]
+    [InlineData("Kubai")]
     [InlineData("neon")]
     [InlineData(null)]
     public void UnknownTheme_IsRejected(string? theme) =>

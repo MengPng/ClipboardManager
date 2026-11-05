@@ -1,6 +1,8 @@
 using ClipboardManager.Application.Services.FileSearch;
+using ClipboardManager.Domain.Models;
 using ClipboardManager.Windows.Interop;
 using ClipboardManager.Windows.Services;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -18,9 +20,10 @@ using TextBox = System.Windows.Controls.TextBox;
 namespace ClipboardManager.Windows;
 
 /// <summary>
-/// 划词查找 results: an editable query, up to 20 ranked local files and three actions.
+/// 划词查找 results: an editable query, up to 20 ranked local files and four actions.
 /// Enter copies the file itself (paste into a chat to send it), Ctrl+C copies the path,
-/// Shift+Enter shows it in Explorer. Closing returns focus to the window the text came from.
+/// Shift+Enter shows it in Explorer, double-click or Ctrl+Enter opens it with its default app
+/// (executable types ask first). Closing returns focus to the window the text came from.
 /// </summary>
 public sealed class FileSearchPopup : Window
 {
@@ -35,6 +38,7 @@ public sealed class FileSearchPopup : Window
     private readonly Button _copyFile = ActionButton("复制文件  Enter");
     private readonly Button _copyPath = ActionButton("复制路径  Ctrl+C");
     private readonly Button _reveal = ActionButton("打开位置  Shift+Enter");
+    private readonly Button _open = ActionButton("打开  Ctrl+Enter");
     private CancellationTokenSource? _running;
     private bool _closing;
     private bool _busyAction;
@@ -81,7 +85,14 @@ public sealed class FileSearchPopup : Window
 
         ScrollViewer.SetHorizontalScrollBarVisibility(_results, ScrollBarVisibility.Disabled);
         _results.SelectionChanged += (_, _) => UpdateActions();
-        _results.MouseDoubleClick += async (_, e) => { if (_results.SelectedItem is not null) await CopyFileAsync(); };
+        // Double-click a result opens it like Explorer does; clicks on the scrollbar or padding are ignored.
+        _results.MouseDoubleClick += (_, e) =>
+        {
+            if (e.ChangedButton != MouseButton.Left || e.OriginalSource is not DependencyObject source ||
+                ItemsControl.ContainerFromElement(_results, source) is not ListBoxItem) return;
+            e.Handled = true;
+            Open();
+        };
         root.Children.Add(_results);
 
         var actions = new WrapPanel { Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
@@ -89,12 +100,14 @@ public sealed class FileSearchPopup : Window
         _copyFile.Click += async (_, _) => await CopyFileAsync();
         _copyPath.Click += async (_, _) => await CopyPathAsync();
         _reveal.Click += (_, _) => Reveal();
+        _open.Click += (_, _) => Open();
+        actions.Children.Add(_open);
         actions.Children.Add(_reveal);
         actions.Children.Add(_copyPath);
         actions.Children.Add(_copyFile);
         root.Children.Add(actions);
 
-        var hint = new TextBlock { Text = "复制文件后，在聊天窗口按 Ctrl+V 即可发送文件。", Margin = new Thickness(2, 8, 0, 0) };
+        var hint = new TextBlock { Text = "双击或 Ctrl+Enter 用默认应用打开；复制文件后，在聊天窗口按 Ctrl+V 即可发送文件。", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 0, 0) };
         hint.SetResourceReference(StyleProperty, "MetaTextStyle");
         root.Children.Add(hint);
 
@@ -225,7 +238,7 @@ public sealed class FileSearchPopup : Window
     private void UpdateActions()
     {
         var any = Selected is not null;
-        _copyFile.IsEnabled = _copyPath.IsEnabled = _reveal.IsEnabled = any;
+        _copyFile.IsEnabled = _copyPath.IsEnabled = _reveal.IsEnabled = _open.IsEnabled = any;
     }
 
     private async void OnKey(object sender, System.Windows.Input.KeyEventArgs e)
@@ -242,6 +255,10 @@ public sealed class FileSearchPopup : Window
                 var index = Math.Clamp(_results.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, _results.Items.Count - 1);
                 _results.SelectedIndex = index;
                 _results.ScrollIntoView(_results.SelectedItem);
+                break;
+            case Key.Enter when modifiers == ModifierKeys.Control:
+                e.Handled = true;
+                Open();
                 break;
             case Key.Enter when modifiers == ModifierKeys.Shift:
                 e.Handled = true;
@@ -286,6 +303,41 @@ public sealed class FileSearchPopup : Window
             SafeClose();
         }
         catch (Exception exception) { SetStatus("无法打开位置：" + exception.Message, "DangerBrush"); }
+    }
+
+    /// <summary>
+    /// Opens the selected result with its default app (a folder opens in Explorer). Only on an explicit
+    /// double-click, button or Ctrl+Enter; executable or auto-run types ask first. The opened app takes
+    /// the foreground, so focus is not handed back to the source window.
+    /// </summary>
+    private void Open()
+    {
+        if (Selected is not { } hit) return;
+        if (!File.Exists(hit.FullPath) && !Directory.Exists(hit.FullPath)) { SetStatus("文件已不存在（可能刚被移动或删除）。", "DangerBrush"); return; }
+        if (!hit.IsFolder && ConfigSyncPolicy.IsHighRiskFile(hit.Name))
+        {
+            _busyAction = true;
+            try
+            {
+                var answer = System.Windows.MessageBox.Show(this,
+                    $"「{hit.Name}」是可执行或会被系统自动运行的文件类型。确定要打开它吗？",
+                    "划词查找", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                if (answer != MessageBoxResult.Yes) return;
+            }
+            finally { _busyAction = false; }
+        }
+        try
+        {
+            try { Process.Start(new ProcessStartInfo(hit.FullPath) { UseShellExecute = true }); }
+            // ERROR_NO_ASSOCIATION: no default app yet, let Windows ask which one to use.
+            catch (Win32Exception exception) when (exception.NativeErrorCode == 1155)
+            {
+                Process.Start(new ProcessStartInfo(hit.FullPath) { UseShellExecute = true, Verb = "openas" });
+            }
+            SafeClose();
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 1223) { } // user cancelled the system prompt
+        catch (Exception exception) { SetStatus("无法打开：" + exception.Message, "DangerBrush"); }
     }
 
     private async Task RunActionAsync(Func<Task> action)

@@ -20,15 +20,16 @@ internal static class Program
             var app = new System.Windows.Application();
             foreach (var file in new[] { "Palette.xaml", "Controls.xaml" })
                 app.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(
-                    File.ReadAllText(Path.Combine(root, "src/ClipboardManager.Windows/Themes", file))));
+                    QualifyLocalNamespaces(File.ReadAllText(Path.Combine(root, "src/ClipboardManager.Windows/Themes", file)))));
 
             // Theme override layers may only redefine keys the standard palette already owns,
             // and must parse; a typo here would silently fall back to the standard value.
             var themeDir = Path.Combine(root, "src/ClipboardManager.Windows/Themes");
             var jiajia = (ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(themeDir, "Palette.Jiajia.xaml")));
             var kami = (ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(themeDir, "Palette.Kami.xaml")));
+            var kubai = (ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(themeDir, "Palette.Kubai.xaml")));
             var standardKeys = ((ResourceDictionary)app.Resources.MergedDictionaries[0]).Keys.Cast<object>().ToHashSet();
-            foreach (var (layerName, layer) in new[] { ("Palette.Jiajia.xaml", jiajia), ("Palette.Kami.xaml", kami) })
+            foreach (var (layerName, layer) in new[] { ("Palette.Jiajia.xaml", jiajia), ("Palette.Kami.xaml", kami), ("Palette.Kubai.xaml", kubai) })
             {
                 var unknown = layer.Keys.Cast<object>().Where(key => !standardKeys.Contains(key)).ToArray();
                 if (unknown.Length > 0)
@@ -60,6 +61,24 @@ internal static class Program
                 !Equals(jiajia["SelectionEdgeThickness"], new Thickness(0)) || !Equals(kami["SelectionEdgeThickness"], new Thickness(2, 0, 0, 0)) ||
                 kami.Contains("SelectionDecorVisibility") || kami.Contains("EmptyPetVisibility") || kami.Contains("RowSeparatorVisibility"))
                 throw new InvalidOperationException("Selection edge tokens must be standard 2 / jiajia 0 / kami 2, and kami must inherit decor, hairline and empty-pet tokens from standard.");
+            // Kubai: flat rows without edge bar, hairline or decor; the body and display fonts stay standard.
+            if (!Equals(kubai["SelectionEdgeThickness"], new Thickness(0)) || !Equals(kubai["RowSeparatorVisibility"], Visibility.Collapsed) ||
+                !Equals(kubai["SelectionDecorVisibility"], Visibility.Collapsed) || kubai.Contains("EmptyPetVisibility") ||
+                kubai.Contains("AppFontFamily") || kubai.Contains("AppDisplayFontFamily"))
+                throw new InvalidOperationException("Kubai must hide edge bar, hairline and decor, inherit the empty-state pet token and keep the standard fonts.");
+            // Theme icons: the standard palette owns every key as Collapsed / x:Null, so the three older
+            // themes render as before; only kubai turns them on, and every icon must resolve to a bitmap.
+            var themeIconKeys = new[] { "IconNavHistory", "IconNavConfig", "IconNavTodo", "IconNavCalc", "IconNavShare", "IconRowText", "IconRowLink", "IconRowFile", "IconFolder" }
+                .SelectMany(key => new[] { key, key + "Hover" }).ToArray();
+            if (!Equals(standardRow["ThemeIconVisibility"], Visibility.Collapsed) || themeIconKeys.Any(key => !standardRow.Contains(key) || standardRow[key] is not null) ||
+                jiajia.Contains("ThemeIconVisibility") || kami.Contains("ThemeIconVisibility") ||
+                themeIconKeys.Any(key => jiajia.Contains(key) || kami.Contains(key)))
+                throw new InvalidOperationException("Theme icons must be Collapsed / x:Null in the standard palette and untouched by jiajia and kami.");
+            if (!Equals(kubai["ThemeIconVisibility"], Visibility.Visible))
+                throw new InvalidOperationException("Kubai must show its theme icons.");
+            foreach (var key in themeIconKeys)
+                if (kubai[key] is not System.Windows.Media.Imaging.BitmapSource { PixelWidth: 96, PixelHeight: 96 })
+                    throw new InvalidOperationException($"Kubai icon {key} must be a 96x96 bitmap (run scripts/build-kubai-icons.ps1).");
             var kamiDisplayFont = ((FontFamily)kami["AppDisplayFontFamily"]).Source;
             if (!kamiDisplayFont.StartsWith("Georgia") || kami.Contains("AppFontFamily"))
                 throw new InvalidOperationException("Kami overrides only AppDisplayFontFamily; the body font stays Microsoft YaHei.");
@@ -133,7 +152,7 @@ internal static class Program
                     if (attribute.Name == x + "Class" || attribute.Name.LocalName == "Icon" ||
                         System.Text.RegularExpressions.Regex.IsMatch(attribute.Value, @"^\w+_\w+$"))
                         attribute.Remove();
-            var window = (Window)XamlReader.Parse(document.ToString());
+            var window = (Window)XamlReader.Parse(QualifyLocalNamespaces(document.ToString()));
             var navigation = (TabControl)window.FindName("MainTabs");
             var headers = navigation.Items.Cast<TabItem>()
                 .Where(tab => tab.Visibility == Visibility.Visible).Select(tab => tab.Header?.ToString()).ToArray();
@@ -267,7 +286,6 @@ internal static class Program
             emptyHost.SetResourceReference(UIElement.VisibilityProperty, "EmptyPetVisibility");
             var emptyPanel = (FrameworkElement)window.FindName("EmptyStatePanel");
             emptyPanel.Visibility = Visibility.Collapsed;
-            ((TextBlock)window.FindName("HistoryCountText")).Text = $"{sampleRows.Length} 条";
             ((TextBlock)window.FindName("CountText")).Text = "5 条历史";
             for (var cycle = 0; cycle < 3; cycle++)
             {
@@ -295,7 +313,7 @@ internal static class Program
             }
             // One pass per theme: standard renders the bare palette; jiajia and kami merge their override
             // layer last (same as ThemeService.Apply, old layer removed first) and run every layout assertion again.
-            var themeLayers = new (string Name, ResourceDictionary? Layer)[] { ("standard", null), ("jiajia", jiajia), ("kami", kami) };
+            var themeLayers = new (string Name, ResourceDictionary? Layer)[] { ("standard", null), ("jiajia", jiajia), ("kami", kami), ("kubai", kubai) };
             ResourceDictionary? activeLayer = null;
             Color? historySelectedColor = null;
             foreach (var (theme, layer) in themeLayers)
@@ -310,6 +328,8 @@ internal static class Program
                 }
                 // Decor, hairline and empty-state pet differ only for jiajia; kami is flat like standard.
                 var themed = theme == "jiajia";
+                var hairlineTheme = theme is "standard" or "kami";
+                var iconTheme = theme == "kubai";
                 var renderDir = Path.Combine(output, theme);
                 Directory.CreateDirectory(renderDir);
                 foreach (var panel in panels)
@@ -415,7 +435,8 @@ internal static class Program
                     historyBox.SelectedIndex = 0;
                     surface.UpdateLayout();
                     var historyBounds = Bounds(historyBox, surface);
-                    var countRect = Bounds((FrameworkElement)window.FindName("HistoryCountText"), surface);
+                    if (window.FindName("HistoryCountText") is not null)
+                        throw new InvalidOperationException("History page must not show a record count");
                     var searchRect = Bounds((FrameworkElement)window.FindName("SearchBox"), surface);
                     var chipRects = new[] { "AllFilterButton", "TextFilterButton", "LinkFilterButton", "ImageFilterButton", "FileFilterButton" }
                         .Select(name => Bounds((FrameworkElement)window.FindName(name), surface)).ToArray();
@@ -425,10 +446,9 @@ internal static class Program
                     var rowCentre = (searchRect.Left + searchRect.Right) / 2;
                     if (Math.Abs((chipLeft + chipRight) / 2 - rowCentre) > 2)
                         throw new InvalidOperationException($"History filter chips must be centred at {size}: chips {chipLeft}..{chipRight}, row centre {rowCentre}");
-                    if (countRect.Right > size.Width - 12 + 1 || countRect.Left < chipRects.Max(r => r.Right) ||
-                        chipRects.Max(r => r.Top) - chipRects.Min(r => r.Top) > 1 || searchRect.Right > size.Width - 12 + 1 ||
+                    if (chipRects.Max(r => r.Top) - chipRects.Min(r => r.Top) > 1 || searchRect.Right > size.Width - 12 + 1 ||
                         historyBounds.Bottom > contentBounds.Bottom + 1)
-                        throw new InvalidOperationException($"History filter row clipped at {size}: count={countRect}, chips={string.Join(" ", chipRects)}, search={searchRect}, list={historyBounds}");
+                        throw new InvalidOperationException($"History filter row clipped at {size}: chips={string.Join(" ", chipRects)}, search={searchRect}, list={historyBounds}");
                     var realized = Enumerable.Range(0, historyBox.Items.Count)
                         .Select(index => historyBox.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem)
                         .Where(container => container is not null).Cast<ListBoxItem>().ToArray();
@@ -445,8 +465,8 @@ internal static class Program
                         if (rowIcon.ActualWidth != 30 || rowIcon.ActualHeight != 30)
                             throw new InvalidOperationException($"History type icon must be 30x30: {rowIcon.ActualWidth}x{rowIcon.ActualHeight}");
                         var hairline = Descendants(container).OfType<Border>().Single(border => border.Height == 1);
-                        if (hairline.IsVisible == themed)
-                            throw new InvalidOperationException($"Row separator must be a hairline in standard and kami, hidden in jiajia ({theme}, visible={hairline.IsVisible}).");
+                        if (hairline.IsVisible != hairlineTheme)
+                            throw new InvalidOperationException($"Row separator must be a hairline in standard and kami, hidden in jiajia and kubai ({theme}, visible={hairline.IsVisible}).");
                     }
 
                     // Selection decor (shadow, clip, fold) belongs to the jiajia theme only.
@@ -730,7 +750,7 @@ internal static class Program
                         if (populated)
                         {
                             // Cards stay inside the viewport; a long name is ellipsised, never allowed to widen the card.
-                            var cards = shown.OfType<Border>().Where(border => ReferenceEquals(border.Style, app.FindResource("ShareCardStyle"))).ToArray();
+                            var cards = shown.OfType<Border>().Where(border => ReferenceEquals(border.Style, app.FindResource("SettingsGroupStyle"))).ToArray();
                             if (cards.Length < (publish ? 3 : 4))
                                 throw new InvalidOperationException($"Share page realized too few cards ({state}): {cards.Length}");
                             foreach (var card in cards)
@@ -782,7 +802,8 @@ internal static class Program
                         {
                             var address = (TextBox)window.FindName("ShareManualAddressBox");
                             var connect = (Button)window.FindName("ShareManualConnectButton");
-                            if (address.ActualWidth < 120 || Bounds(address, surface).Right > Bounds(connect, surface).Left + 0.5)
+                            var addressOverlap = Rect.Intersect(Bounds(address, surface), Bounds(connect, surface));
+                            if (address.ActualWidth < 120 || !addressOverlap.IsEmpty && addressOverlap.Width > 0.5 && addressOverlap.Height > 0.5 || !connect.IsVisible)
                                 throw new InvalidOperationException($"Manual address box is too narrow or overlaps its button ({state}): {address.ActualWidth:F0}");
                             // The placeholder (the box's Tag) is drawn by the template and must fit inside the box.
                             var hint = Descendants(address).OfType<TextBlock>().FirstOrDefault(block => block.Text == (string)address.Tag);
@@ -838,6 +859,25 @@ internal static class Program
                 var list = (ListBox)window.FindName("HistoryList");
                 if (active.Name == "HistoryPanel") list.SelectedIndex = 0;
                 surface.UpdateLayout();
+                // Theme icons: invisible without a source outside kubai; in kubai every tab, text/link/file
+                // history row and folder row shows a bitmap, while image rows keep their thumbnail.
+                foreach (var tab in navigation.Items.Cast<TabItem>().Where(tab => tab.Visibility == Visibility.Visible))
+                    foreach (var part in new[] { "IconRest", "IconHover" })
+                    {
+                        var image = (Image)tab.Template.FindName(part, tab);
+                        if (iconTheme ? !image.IsVisible || image.Source is null : image.IsVisible || image.Source is not null)
+                            throw new InvalidOperationException($"Tab icon {part} on '{tab.Header}' must show only in kubai ({theme}, visible={image.IsVisible}, source={image.Source is not null}).");
+                    }
+                var listIcons = Descendants(active).OfType<Image>().Where(image => image.Name is "ThemeRowIcon" or "ThemeFolderIcon").ToArray();
+                foreach (var image in listIcons)
+                {
+                    var keepsThumbnail = image.DataContext is ClipboardManager.Windows.HistoryItemViewModel { IconKind: ClipboardManager.Windows.HistoryIconKind.Image };
+                    var shouldShow = iconTheme && !keepsThumbnail;
+                    if (image.IsVisible != shouldShow || shouldShow && image.Source is null || !iconTheme && image.Source is not null)
+                        throw new InvalidOperationException($"List icon {image.Name} must show only in kubai, never on image rows ({theme}, visible={image.IsVisible}, source={image.Source is not null}).");
+                }
+                if (active.Name is "HistoryPanel" or "ConfigPanel" && listIcons.Length == 0)
+                    throw new InvalidOperationException($"{active.Name} must realise theme icon slots ({theme}).");
                 SaveRender(surface, size, Path.Combine(renderDir, $"{active.Name}-{size.Width}x{size.Height}.png"));
 
                 if (active.Name == "HistoryPanel")
@@ -854,11 +894,12 @@ internal static class Program
                         emptyText.Text = (string)app.FindResource(copyKey);
                         emptyPanel.Visibility = Visibility.Visible;
                         emptyPet.SetListening(!paused);
-                        ((TextBlock)window.FindName("HistoryCountText")).Text = "0 条";
                         surface.UpdateLayout();
                         var expectedCopy = themed
                             ? copyKey switch { "CopyEmptyHistory" => "夹夹在等你复制点什么", "CopyPausedHistory" => "已暂停监听，夹夹在打盹", _ => "夹夹没找到，换个关键词试试？" }
-                            : copyKey switch { "CopyEmptyHistory" => "还没有历史，复制内容试试", "CopyPausedHistory" => "监听已暂停", _ => "没有匹配的记录" };
+                            : iconTheme
+                                ? copyKey switch { "CopyEmptyHistory" => "复制点什么，它会出现在这里", "CopyPausedHistory" => "监听已暂停", _ => "没有匹配的记录" }
+                                : copyKey switch { "CopyEmptyHistory" => "还没有历史，复制内容试试", "CopyPausedHistory" => "监听已暂停", _ => "没有匹配的记录" };
                         if (emptyText.Text != expectedCopy)
                             throw new InvalidOperationException($"Empty copy for {variant} must come from the theme: '{emptyText.Text}' != '{expectedCopy}'");
                         if (emptyHost.IsVisible != themed)
@@ -897,7 +938,6 @@ internal static class Program
                     window.DataContext = new PreviewContext { Items = hintRows };
                     var hintList = (ListBox)window.FindName("HistoryList");
                     hintList.SelectedIndex = 0;
-                    ((TextBlock)window.FindName("HistoryCountText")).Text = $"{hintRows.Length} 条";
                     surface.UpdateLayout();
                     var hintRealized = Enumerable.Range(0, hintList.Items.Count)
                         .Select(index => hintList.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem)
@@ -929,8 +969,7 @@ internal static class Program
                     }
                     SaveRender(surface, size, Path.Combine(renderDir, $"HistoryPanel-hint-{size.Width}x{size.Height}.png"));
                     window.DataContext = populated;
-                    ((TextBlock)window.FindName("HistoryCountText")).Text = $"{sampleRows.Length} 条";
-                    surface.UpdateLayout();
+                            surface.UpdateLayout();
                 }
             }
             // Settings window (0.9.1): every page in every theme lays out inside its scroller without
@@ -1103,6 +1142,10 @@ internal static class Program
             if (ReferenceEquals(current, ancestor)) return true;
         return false;
     }
+
+    /// <summary>Compiled XAML names its own assembly's namespaces without assembly=; loose parsing needs it.</summary>
+    private static string QualifyLocalNamespaces(string xaml) =>
+        xaml.Replace("\"clr-namespace:ClipboardManager.Windows.Services\"", "\"clr-namespace:ClipboardManager.Windows.Services;assembly=ClipboardManager\"");
 
     /// <summary>WCAG contrast ratio between two opaque colours.</summary>
     private static double Contrast(Color a, Color b)

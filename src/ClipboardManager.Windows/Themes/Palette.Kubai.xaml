@@ -1,0 +1,121 @@
+<!-- Kubai（清透）主题：白底、冷灰三级文字、#5393FF 主色，配彩色分层图标。只覆盖与标准主题不同的键，
+     须作为最后一个合并字典加载（见 ThemeService）；键必须是 Palette.xaml 键的子集（LayoutCheck 断言）。
+     设计依据：docs/design/2026-11-05-layout-redesign/claude-code-kubai-theme.md 与 prototype.html。
+     图标 PNG 由 scripts/build-kubai-icons.ps1 生成（来源与许可见 Assets/Icons/Kubai/NOTICE.txt）。 -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <SolidColorBrush x:Key="LabelPrimaryBrush" Color="#FF1F2329" />
+    <SolidColorBrush x:Key="LabelSecondaryBrush" Color="#FF6B707A" />
+    <SolidColorBrush x:Key="LabelTertiaryBrush" Color="#FFA2A6AE" />
+
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF5393FF" />
+    <SolidColorBrush x:Key="AccentBrandBrush" Color="#FF5393FF" />
+    <SolidColorBrush x:Key="AccentBrandStrongBrush" Color="#FF3F7BE6" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#FF2F9E6E" />
+    <!-- 文档值 #D9822B 在白卡上对比度 2.93，低于共享页状态文字的 3.0 要求；同色相压暗到 3.23。 -->
+    <SolidColorBrush x:Key="WarningBrush" Color="#FFD07A25" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#FFE5484D" />
+
+    <!-- 窗口底：纯白。 -->
+    <SolidColorBrush x:Key="WindowSurfaceBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="SurfaceOpaqueBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="PopoverBrush" Color="#FFFFFFFF" />
+
+    <!-- 导航轨、标题栏：极浅冷灰。 -->
+    <SolidColorBrush x:Key="WindowChromeBrush" Color="#FFF7F7F8" />
+    <SolidColorBrush x:Key="ChromeBrush" Color="#FFF7F7F8" />
+    <SolidColorBrush x:Key="WindowVibrancyBrush" Color="#FFF7F7F8" />
+    <SolidColorBrush x:Key="WindowFallbackBrush" Color="#FFF7F7F8" />
+    <SolidColorBrush x:Key="ControlFillDisabledBrush" Color="#FFF7F7F8" />
+
+    <!-- 搜索框、图标块、选中页签底。 -->
+    <SolidColorBrush x:Key="SegmentedTrackBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="ControlFillBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="ThumbnailBackdropBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="SearchFillBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="SelectionInactiveBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="ControlFillHoverBrush" Color="#FFEBECEF" />
+    <SolidColorBrush x:Key="ControlFillPressedBrush" Color="#FFE3E5E9" />
+
+    <SolidColorBrush x:Key="SeparatorBrush" Color="#FFEDEEF0" />
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#FFEDEEF0" />
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#FFEDEEF0" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#FFDCDEE2" />
+
+    <SolidColorBrush x:Key="HoverOverlayBrush" Color="#09141820" />
+    <SolidColorBrush x:Key="PressedOverlayBrush" Color="#12141820" />
+
+    <!-- 选中：主色 11% 叠白的实色底 + 深色字；无左缘条、无装饰。 -->
+    <SolidColorBrush x:Key="SelectionBrush" Color="#FFECF3FF" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#FFECF3FF" />
+
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#FFD5D7DB" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#FFA2A6AE" />
+    <SolidColorBrush x:Key="TooltipBrush" Color="#FF1F2329" />
+
+    <CornerRadius x:Key="RadiusSmall">8</CornerRadius>
+    <CornerRadius x:Key="RadiusMedium">11</CornerRadius>
+    <CornerRadius x:Key="RadiusLarge">16</CornerRadius>
+    <CornerRadius x:Key="RadiusPill">8</CornerRadius>
+
+    <!-- 形状 token：大圆角行、无卡片边、无左缘条、无行分隔线与夹子装饰。 -->
+    <CornerRadius x:Key="RowCornerRadius">13</CornerRadius>
+    <Thickness x:Key="RowBorderThickness">0</Thickness>
+    <Thickness x:Key="RowCardInset">0</Thickness>
+    <SolidColorBrush x:Key="RowCardBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="RowBorderBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="RowSelectedBorderBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="RowHoverBrush" Color="#09141820" />
+    <SolidColorBrush x:Key="RowSelectedMetaBrush" Color="#FF6B707A" />
+    <Visibility x:Key="RowSeparatorVisibility">Collapsed</Visibility>
+    <Thickness x:Key="SelectionEdgeThickness">0</Thickness>
+    <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#00FFFFFF" />
+    <Visibility x:Key="SelectionDecorVisibility">Collapsed</Visibility>
+
+    <!-- 页签：选中为浅灰底、深色字，无下划线、无底边线。 -->
+    <CornerRadius x:Key="NavPillRadius">9</CornerRadius>
+    <Thickness x:Key="NavPillBorderThickness">0</Thickness>
+    <SolidColorBrush x:Key="NavPillBorderBrush" Color="#00FFFFFF" />
+    <Thickness x:Key="NavBottomBorderThickness">0</Thickness>
+    <SolidColorBrush x:Key="NavMarkBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="NavSelectedBackgroundBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="NavSelectedForegroundBrush" Color="#FF1F2329" />
+
+    <CornerRadius x:Key="ChipCornerRadius">8</CornerRadius>
+    <SolidColorBrush x:Key="ChipCheckedBackgroundBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="ChipMarkBrush" Color="#00FFFFFF" />
+
+    <CornerRadius x:Key="SearchCornerRadius">11</CornerRadius>
+
+    <sys:String x:Key="CopyEmptyHistory">复制点什么，它会出现在这里</sys:String>
+    <sys:String x:Key="CopyPausedHistory">监听已暂停</sys:String>
+    <sys:String x:Key="CopyNoResults">没有匹配的记录</sys:String>
+
+    <DropShadowEffect x:Key="PopoverShadow" BlurRadius="24" ShadowDepth="4" Direction="270" Opacity="0.12" Color="#FF000000" />
+
+    <!-- 彩色分层图标：只有本主题可见（其他主题 ThemeIconVisibility = Collapsed、图标键 = x:Null）。 -->
+    <Visibility x:Key="ThemeIconVisibility">Visible</Visibility>
+    <BitmapImage x:Key="IconNavHistory" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavHistory.png" />
+    <BitmapImage x:Key="IconNavHistoryHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavHistory-hover.png" />
+    <BitmapImage x:Key="IconNavConfig" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavConfig.png" />
+    <BitmapImage x:Key="IconNavConfigHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavConfig-hover.png" />
+    <BitmapImage x:Key="IconNavTodo" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavTodo.png" />
+    <BitmapImage x:Key="IconNavTodoHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavTodo-hover.png" />
+    <BitmapImage x:Key="IconNavCalc" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavCalc.png" />
+    <BitmapImage x:Key="IconNavCalcHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavCalc-hover.png" />
+    <BitmapImage x:Key="IconNavShare" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavShare.png" />
+    <BitmapImage x:Key="IconNavShareHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconNavShare-hover.png" />
+    <BitmapImage x:Key="IconRowText" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconRowText.png" />
+    <BitmapImage x:Key="IconRowTextHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconRowText-hover.png" />
+    <BitmapImage x:Key="IconRowLink" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconRowLink.png" />
+    <BitmapImage x:Key="IconRowLinkHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconRowLink-hover.png" />
+    <BitmapImage x:Key="IconRowFile" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconRowFile.png" />
+    <BitmapImage x:Key="IconRowFileHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconRowFile-hover.png" />
+    <BitmapImage x:Key="IconFolder" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconFolder.png" />
+    <BitmapImage x:Key="IconFolderHover" UriSource="pack://application:,,,/ClipboardManager;component/Assets/Icons/Kubai/IconFolder-hover.png" />
+
+</ResourceDictionary>

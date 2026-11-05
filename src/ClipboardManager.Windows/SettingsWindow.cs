@@ -295,8 +295,8 @@ public sealed class SettingsWindow : Window
     private FrameworkElement BuildAppearancePage()
     {
         var page = new StackPanel();
-        var cards = new UniformGrid { Columns = 3, Margin = new Thickness(12, 12, 2, 12) };
-        var themes = new (string Id, string Name, string Note)[] { ("standard", "暖纸", "默认"), ("jiajia", "夹夹", "活泼"), ("kami", "Kami", "纸感") };
+        var cards = new UniformGrid { Columns = 4, Margin = new Thickness(12, 12, 2, 12) };
+        var themes = new (string Id, string Name, string Note)[] { ("standard", "暖纸", "默认"), ("jiajia", "夹夹", "活泼"), ("kami", "Kami", "纸感"), ("kubai", "Kubai", "清透") };
         var themeButtons = new List<RadioButton>();
         foreach (var (id, name, note) in themes)
         {
@@ -372,6 +372,7 @@ public sealed class SettingsWindow : Window
         Merge("pack://application:,,,/ClipboardManager;component/Themes/Palette.xaml");
         if (theme == "jiajia") Merge("pack://application:,,,/ClipboardManager;component/Themes/Palette.Jiajia.xaml");
         if (theme == "kami") Merge("pack://application:,,,/ClipboardManager;component/Themes/Palette.Kami.xaml");
+        if (theme == "kubai") Merge("pack://application:,,,/ClipboardManager;component/Themes/Palette.Kubai.xaml");
         return result;
     }
 

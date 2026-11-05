@@ -4,7 +4,7 @@ namespace ClipboardManager.Windows.Services;
 
 /// <summary>
 /// Themes are override layers: Themes/Palette.xaml is the standard look, and every other theme
-/// ("jiajia", "kami") is a dictionary merged last so its keys win. All palette references are
+/// ("jiajia", "kami", "kubai") is a dictionary merged last so its keys win. All palette references are
 /// DynamicResource, so swapping the layer restyles open windows without a restart.
 /// </summary>
 public static class ThemeService
@@ -13,6 +13,7 @@ public static class ThemeService
     {
         ["jiajia"] = new("pack://application:,,,/Themes/Palette.Jiajia.xaml", UriKind.Absolute),
         ["kami"] = new("pack://application:,,,/Themes/Palette.Kami.xaml", UriKind.Absolute),
+        ["kubai"] = new("pack://application:,,,/Themes/Palette.Kubai.xaml", UriKind.Absolute),
     };
 
     private static ResourceDictionary? _layer;

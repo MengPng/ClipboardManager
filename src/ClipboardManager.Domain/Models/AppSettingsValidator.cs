@@ -11,7 +11,7 @@ public static class AppSettingsValidator
         if (settings.MaxPersistedImageBytes is < 1 or > 100 * 1024 * 1024) throw new ArgumentException("图片上限必须在 1 字节至 100 MB 之间。");
         if (settings.MaxImageCacheBytes < settings.MaxPersistedImageBytes) throw new ArgumentException("图片缓存上限不得小于单张图片上限。");
         if (!Enum.IsDefined(settings.ClipboardCalculatorMode)) throw new ArgumentException("剪切板算式模式只能是关闭、仅提示或直接改写。");
-        if (settings.Theme is not ("standard" or "jiajia" or "kami")) throw new ArgumentException("界面主题只能是标准、夹夹或 Kami。");
+        if (settings.Theme is not ("standard" or "jiajia" or "kami" or "kubai")) throw new ArgumentException("界面主题只能是标准、夹夹、Kami 或 Kubai。");
         if (settings.ExcludedProcesses is null || settings.ExcludedProcesses.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException("应用排除列表不得包含空项。");
         if (string.IsNullOrWhiteSpace(settings.GlobalHotkey)) throw new ArgumentException("呼出快捷键不能为空。");

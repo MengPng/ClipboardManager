@@ -311,7 +311,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var calculator = IsCalculatorTabActive;
         HistoryPanel.Visibility = !config && !share && !todo && !calculator ? Visibility.Visible : Visibility.Collapsed;
         CalculatorPanel.Visibility = calculator ? Visibility.Visible : Visibility.Collapsed;
-        // 历史页的条数在筛选条右侧（HistoryCountText），页脚只留快捷提示；其它页页脚计数不变。
+        // 历史页不显示条数，页脚只留快捷提示；其它页页脚计数不变。
         CountText.Visibility = HistoryPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         ShortcutHintText.Text = calculator ? "Esc 清空" : todo ? "本机待办" : share ? "仅限局域网" : "Enter 使用";
         if (calculator) UpdateCalculatorStatus();
@@ -355,7 +355,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (request.IsCancellationRequested || version != _historyVersion) return;
             Items.Clear(); foreach (var item in records) Items.Add(new HistoryItemViewModel(item, _calculatorMode == ClipboardCalculatorMode.Hint));
             SelectedItem = Items.FirstOrDefault(x => x.Item.Id == selectedId) ?? Items.FirstOrDefault();
-            HistoryCountText.Text = $"{Items.Count} 条";
             _emptyPaused = _monitorService.IsPaused;
             UpdateEmptyState();
         }
@@ -1362,6 +1361,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 }
 
+public enum HistoryIconKind { Text, Link, File, Image }
+
 public sealed class HistoryItemViewModel(ClipboardItem item, bool showCalculationHint = false)
 {
     private string[]? _files;
@@ -1461,6 +1462,15 @@ public sealed class HistoryItemViewModel(ClipboardItem item, bool showCalculatio
     public double IconFontSize => FileBadge is not null ? 9d : UsesLabelIcon ? 13d : 16d;
     public FontWeight IconFontWeight => UsesLabelIcon ? FontWeights.SemiBold : FontWeights.Normal;
     public Visibility IconVisibility => UsesLabelIcon || IsLink || Preview is null ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Which theme icon the row shows in themes with icons (Kubai); images keep their thumbnail.</summary>
+    public HistoryIconKind IconKind => Item.ItemType switch
+    {
+        ClipboardItemType.Text => IsLink ? HistoryIconKind.Link : HistoryIconKind.Text,
+        ClipboardItemType.Files => HistoryIconKind.File,
+        ClipboardItemType.Image or ClipboardItemType.ImageFile => HistoryIconKind.Image,
+        _ => HistoryIconKind.Text
+    };
 
     /// <summary>
     /// The "= result" hint for a short single-line arithmetic text. Computed on first display of the row and cached,

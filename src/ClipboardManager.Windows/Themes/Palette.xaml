@@ -134,4 +134,26 @@
 
     <DropShadowEffect x:Key="PopoverShadow" BlurRadius="18" ShadowDepth="3" Direction="270" Opacity="0.16" Color="#FF000000" />
 
+    <!-- 主题图标：只有 Kubai 主题显示（Palette.Kubai.xaml 覆盖为 Visible 与 PNG）；其余主题隐藏且无图源，
+         模板里的 Image 不参与布局，三套旧主题像素不变。 -->
+    <Visibility x:Key="ThemeIconVisibility">Collapsed</Visibility>
+    <x:Null x:Key="IconNavHistory" />
+    <x:Null x:Key="IconNavHistoryHover" />
+    <x:Null x:Key="IconNavConfig" />
+    <x:Null x:Key="IconNavConfigHover" />
+    <x:Null x:Key="IconNavTodo" />
+    <x:Null x:Key="IconNavTodoHover" />
+    <x:Null x:Key="IconNavCalc" />
+    <x:Null x:Key="IconNavCalcHover" />
+    <x:Null x:Key="IconNavShare" />
+    <x:Null x:Key="IconNavShareHover" />
+    <x:Null x:Key="IconRowText" />
+    <x:Null x:Key="IconRowTextHover" />
+    <x:Null x:Key="IconRowLink" />
+    <x:Null x:Key="IconRowLinkHover" />
+    <x:Null x:Key="IconRowFile" />
+    <x:Null x:Key="IconRowFileHover" />
+    <x:Null x:Key="IconFolder" />
+    <x:Null x:Key="IconFolderHover" />
+
 </ResourceDictionary>
