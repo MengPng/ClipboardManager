@@ -129,8 +129,13 @@ public sealed class SelectionTextCapture(
         if (NativeMethods.GetForegroundWindow() != target) return SelectionCapture.Fail(target, "目标窗口已切换，已取消。");
         var handle = new WindowInteropHelper(owner).EnsureHandle();
         var initialOwner = foreground.GetClipboardOwner();
-        if (!CapturePrivacyPolicy.CanRead(config, initialOwner.Source, DateTimeOffset.UtcNow, initialOwner.IsKnown))
-            return SelectionCapture.Fail(target, "当前剪切板来源已排除或无法确认，划词未读取内容。");
+        if (!CapturePrivacyPolicy.CanHoldForRestore(
+                config, initialOwner.Source, initialOwner.Window != IntPtr.Zero, initialOwner.IsKnown, DateTimeOffset.UtcNow))
+        {
+            logger.LogInformation("Selection capture refused current clipboard: ownerWindow={HasOwner}, ownerProcess={Process}",
+                initialOwner.Window != IntPtr.Zero, initialOwner.Source.ProcessName ?? "(unknown)");
+            return SelectionCapture.Fail(target, "剪切板里现有的内容来自排除的应用（或来源无法确认），划词不会触碰它。请手动复制选中的文字，再粘贴到搜索框。");
+        }
         SelectionClipboardSnapshot? snapshot = null;
         for (int attempt = 0; attempt < 4; attempt++)
         {

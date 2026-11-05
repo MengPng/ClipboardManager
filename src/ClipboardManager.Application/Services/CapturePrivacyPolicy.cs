@@ -31,4 +31,16 @@ public static class CapturePrivacyPolicy
         !IsPaused(settings, now)
         && (sourceIsKnown || !HasConfiguredExclusions(settings.ExcludedProcesses))
         && !IsExcluded(source.ProcessName, settings.ExcludedProcesses);
+
+    /// <summary>
+    /// Selection search (ADR-0007) holds the current clipboard in memory only to put it back after
+    /// its own Ctrl+C; nothing is persisted or logged. With no owner window there is nobody to ask
+    /// for delayed rendering, so the data is already materialized and may be held. An owner window
+    /// that cannot be attributed is still refused when exclusions exist, as is any excluded owner.
+    /// </summary>
+    public static bool CanHoldForRestore(
+        AppSettings settings, ClipboardSource source, bool hasOwnerWindow, bool sourceIsKnown, DateTimeOffset now) =>
+        !IsPaused(settings, now)
+        && (!hasOwnerWindow || sourceIsKnown || !HasConfiguredExclusions(settings.ExcludedProcesses))
+        && !IsExcluded(source.ProcessName, settings.ExcludedProcesses);
 }

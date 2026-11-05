@@ -38,4 +38,18 @@ public sealed class CapturePrivacyPolicyTests
             unknown,
             now));
     }
+
+    [Fact]
+    public void HoldForRestore_AllowsOwnerlessClipboardEvenWithExclusions()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var settings = new AppSettings { ExcludedProcesses = ["KeePass"] };
+        var unknown = new ClipboardSource(null, null);
+
+        Assert.True(CapturePrivacyPolicy.CanHoldForRestore(settings, unknown, hasOwnerWindow: false, sourceIsKnown: false, now));
+        Assert.False(CapturePrivacyPolicy.CanHoldForRestore(settings, unknown, hasOwnerWindow: true, sourceIsKnown: false, now));
+        Assert.True(CapturePrivacyPolicy.CanHoldForRestore(settings, new ClipboardSource("Weixin", "Weixin"), true, true, now));
+        Assert.False(CapturePrivacyPolicy.CanHoldForRestore(settings, new ClipboardSource("KeePass", "KeePass"), true, true, now));
+        Assert.False(CapturePrivacyPolicy.CanHoldForRestore(settings with { IsCapturePaused = true }, unknown, false, false, now));
+    }
 }
