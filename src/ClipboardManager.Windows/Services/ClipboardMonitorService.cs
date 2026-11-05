@@ -44,6 +44,9 @@ public sealed class ClipboardMonitorService(
     }
     public event EventHandler<bool>? PauseChanged;
 
+    /// <summary>End of a timed pause, or null for a manual pause or no pause.</summary>
+    public DateTimeOffset? PausedUntil => _pausedUntil > DateTimeOffset.UtcNow ? _pausedUntil : null;
+
     public async Task StartAsync(Window window, CancellationToken cancellationToken = default)
     {
         if (_registered)

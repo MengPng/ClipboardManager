@@ -153,8 +153,8 @@ internal static class Program
             petHost.UpdateLayout();
             var petCheck = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             petCheck.Render(petHost);
-            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.9.0", "layout"));
-            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.9.0", "layout", "PanelPet-probe.png"));
+            Directory.CreateDirectory(Path.Combine(root, "artifacts", "review", "0.9.1", "layout"));
+            SavePng(petCheck, Path.Combine(root, "artifacts", "review", "0.9.1", "layout", "PanelPet-probe.png"));
             var petBytes = new byte[56 * 40 * 4];
             petCheck.CopyPixels(petBytes, 56 * 4, 0);
             if (ClipboardManager.Windows.Services.PetCompanion.LoadError is not null)
@@ -171,14 +171,14 @@ internal static class Program
             System.Threading.Thread.Sleep(350);
             var probeBitmap = new RenderTargetBitmap(56, 40, 96, 96, PixelFormats.Pbgra32);
             probeBitmap.Render(collapsedProbe);
-            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.9.0", "layout", "CollapsedPetWindow-probe.png"));
+            SavePng(probeBitmap, Path.Combine(root, "artifacts", "review", "0.9.1", "layout", "CollapsedPetWindow-probe.png"));
             var probeBytes = new byte[56 * 40 * 4];
             probeBitmap.CopyPixels(probeBytes, 56 * 4, 0);
             collapsedProbe.Close();
             if (probeBytes.All(b => b == 0))
                 throw new InvalidOperationException("CollapsedPetWindow renders an empty visual tree; the pet never draws inside the collapsed host.");
             Console.WriteLine("PASS CollapsedPetWindow visual probe");
-            var output = Path.Combine(root, "artifacts", "review", "0.9.0", "layout");
+            var output = Path.Combine(root, "artifacts", "review", "0.9.1", "layout");
             Directory.CreateDirectory(output);
             // Rows are the production view-models, so the icon, link, badge and time rules under
             // test are the shipped ones. The xlsx exists on disk so the row is not marked as stale.
@@ -933,6 +933,52 @@ internal static class Program
                     surface.UpdateLayout();
                 }
             }
+            // Settings window (0.9.1): every page in every theme lays out inside its scroller without
+            // horizontal overflow, binds the stored values, and takes its colours from the theme.
+            var settingsStore = new MemorySettingsStore();
+            foreach (var (theme, layer) in themeLayers)
+            {
+                if (!ReferenceEquals(activeLayer, layer))
+                {
+                    if (activeLayer is not null) app.Resources.MergedDictionaries.Remove(activeLayer);
+                    if (layer is not null) app.Resources.MergedDictionaries.Add(layer);
+                    activeLayer = layer;
+                }
+                var renderDir = Path.Combine(output, theme);
+                Directory.CreateDirectory(renderDir);
+                foreach (var page in ClipboardManager.Windows.SettingsWindow.Pages)
+                {
+                    var dialog = new ClipboardManager.Windows.SettingsWindow(new ClipboardManager.Windows.SettingsWindowContext(
+                        settingsStore, DataFolder: @"C:\Data", LogFolder: @"C:\Data\logs", IsFileSearchAvailable: () => false), page)
+                    {
+                        WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = -20000, ShowActivated = false,
+                    };
+                    dialog.Show();
+                    for (var i = 0; i < 3; i++)
+                        dialog.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                    var settingsRoot = (FrameworkElement)dialog.Content;
+                    settingsRoot.UpdateLayout();
+                    var scroller = VisualDescendants(settingsRoot).OfType<ScrollViewer>().First(v => v.Content is StackPanel);
+                    if (scroller.ExtentWidth > scroller.ViewportWidth + 0.5)
+                        throw new InvalidOperationException($"Settings page {page} ({theme}) scrolls horizontally: {scroller.ExtentWidth} > {scroller.ViewportWidth}.");
+                    foreach (var element in VisualDescendants((DependencyObject)scroller.Content).OfType<FrameworkElement>()
+                                 .Where(element => element.IsVisible && element.ActualWidth > 0))
+                    {
+                        var bounds = Bounds(element, (FrameworkElement)scroller.Content);
+                        if (bounds.Right > scroller.ViewportWidth + 1)
+                            throw new InvalidOperationException($"Settings page {page} ({theme}): {element.GetType().Name} '{(element as TextBlock)?.Text}' overflows to {bounds.Right:0} of {scroller.ViewportWidth:0}.");
+                    }
+                    var texts = VisualDescendants(settingsRoot).OfType<TextBlock>().Select(text => text.Text).ToArray();
+                    if (!texts.Contains(page)) throw new InvalidOperationException($"Settings page {page} did not open.");
+                    if (page == "常规" && !VisualDescendants(settingsRoot).OfType<Button>().Any(button => Equals(button.Content, "Alt + V") || Equals(button.Content, "Alt+V")))
+                        throw new InvalidOperationException("Settings did not bind the stored panel hotkey.");
+                    Console.WriteLine($"SETTINGS {theme}/{page}: viewport={scroller.ViewportWidth:0}x{scroller.ViewportHeight:0}, extent={scroller.ExtentWidth:0}x{scroller.ExtentHeight:0}");
+                    SaveRender(settingsRoot, new Size(Math.Floor(settingsRoot.ActualWidth), Math.Floor(settingsRoot.ActualHeight)),
+                        Path.Combine(renderDir, $"Settings-{Array.IndexOf(ClipboardManager.Windows.SettingsWindow.Pages.ToArray(), page)}-{page}.png"));
+                    dialog.Close();
+                }
+            }
+            if (settingsStore.Saves != 0) throw new InvalidOperationException("Opening settings must not write settings.");
             window.Close();
             return 0;
         }
@@ -946,6 +992,24 @@ internal static class Program
     /// <summary>Fill of the container's template root once selected (the colour a row paints, not the token).</summary>
     private static Color SelectedBackground(ListBoxItem row) =>
         ((SolidColorBrush)((Border)row.Template.FindName("Root", row)).Background).Color;
+
+    private static IEnumerable<DependencyObject> VisualDescendants(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var descendant in VisualDescendants(child)) yield return descendant;
+        }
+    }
+
+    private sealed class MemorySettingsStore : IAppSettingsStore
+    {
+        private AppSettings _settings = new();
+        public int Saves { get; private set; }
+        public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(_settings);
+        public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default) { Saves++; _settings = settings; return Task.CompletedTask; }
+    }
 
     private static Rect Bounds(FrameworkElement element, FrameworkElement surface) =>
         element.TransformToAncestor(surface).TransformBounds(new Rect(element.RenderSize));

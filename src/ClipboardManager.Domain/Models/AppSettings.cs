@@ -21,6 +21,12 @@ public sealed record AppSettings
     public DateTimeOffset? CapturePausedUntil { get; init; }
     public IReadOnlyList<string> ExcludedProcesses { get; init; } = ["KeePass", "1Password", "Bitwarden"];
     public string GlobalHotkey { get; init; } = "Alt+V";
+    /// <summary>0.9.1: select text anywhere, press the hotkey, find the matching local file via Everything.</summary>
+    public bool SelectionSearchEnabled { get; init; } = true;
+    public string SelectionSearchHotkey { get; init; } = "Ctrl+Alt+F";
+    /// <summary>Optional mouse-gesture toolbar; off by default and only active in <see cref="SelectionToolbarApps"/>.</summary>
+    public bool SelectionToolbarEnabled { get; init; }
+    public IReadOnlyList<string> SelectionToolbarApps { get; init; } = ["Weixin", "WeChat", "WXWork", "QQ", "DingTalk", "Feishu", "Lark"];
     public bool AutoBackupChoiceCompleted { get; init; }
     public int AutoBackupIntervalHours { get; init; }
     public DateTimeOffset? LastAutomaticBackupAt { get; init; }

@@ -111,7 +111,10 @@ public partial class App : System.Windows.Application
                     services.AddSingleton<ILocalAssetStore, WindowsLocalAssetStore>();
                     services.AddSingleton<ForegroundApplicationService>();
                     services.AddSingleton<ClipboardMonitorService>();
-                    services.AddSingleton<SelfWriteSequenceGate>();
+                    services.AddSingleton<SelectionClipboardGate>();
+                    services.AddSingleton(sp => new SelfWriteSequenceGate(sp.GetRequiredService<SelectionClipboardGate>()));
+                    services.AddSingleton<SelectionTextCapture>();
+                    services.AddSingleton<SelectionSearchService>();
                     services.AddSingleton<AutomaticPasteService>();
                     services.AddSingleton<WindowDockingService>();
                     services.AddSingleton<AutomaticBackupService>();
@@ -169,6 +172,7 @@ public partial class App : System.Windows.Application
                     Shutdown();
                 });
 
+            StartSelectionSearch(mainWindow, hotkey, tray, context.Settings, log);
             ShowMainWindow();
             StartConfigSync(tray, log);
             log.LogInformation("Startup complete; main window shown.");
@@ -296,6 +300,45 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>
+    /// 划词查找（ADR-0007）。快捷键被占用只提示，不影响剪切板主链路；设置页改快捷键时
+    /// 面板与划词快捷键一起重绑，任一失败都回到原来的组合。
+    /// </summary>
+    private void StartSelectionSearch(MainWindow mainWindow, GlobalHotkeyService panelHotkey, TrayIconService tray,
+        ClipboardManager.Domain.Models.AppSettings settings, ILogger<App> log)
+    {
+        var selection = _host!.Services.GetRequiredService<SelectionSearchService>();
+        mainWindow.FileSearchAvailability = SelectionSearchService.IsIndexAvailable;
+        mainWindow.SettingsApplied += (_, next) => selection.ApplyToolbar(next);
+        mainWindow.HotkeyApplier = next =>
+        {
+            var previousPanel = panelHotkey.Current;
+            panelHotkey.Rebind(mainWindow, HotkeyGesture.Parse(next.GlobalHotkey));
+            try
+            {
+                selection.ApplyHotkey(next);
+            }
+            catch
+            {
+                if (previousPanel is not null)
+                {
+                    try { panelHotkey.Rebind(mainWindow, previousPanel); } catch (Exception) { }
+                }
+                throw;
+            }
+        };
+        try
+        {
+            selection.Start(mainWindow, settings);
+        }
+        catch (Exception exception)
+        {
+            log.LogWarning("Selection search hotkey registration failed: {ExceptionType}", exception.GetType().Name);
+            tray.ShowBalloon("划词查找快捷键不可用",
+                $"{settings.SelectionSearchHotkey} 已被其他应用占用，可在 设置 → 划词查找 中换一个。");
+        }
+    }
+
+    /// <summary>
     /// 配置订阅同步的后台协调：自动检查更新、自动发布。放在启动最后，失败只记录，
     /// 不影响剪切板监听与本地功能；更新提示走托盘气泡，不抢焦点。
     /// </summary>
@@ -324,6 +367,7 @@ public partial class App : System.Windows.Application
         {
             _host.Services.GetService<ClipboardMonitorService>()?.Dispose();
             _host.Services.GetService<GlobalHotkeyService>()?.Dispose();
+            _host.Services.GetService<SelectionSearchService>()?.Dispose();
             _host.Services.GetService<TrayIconService>()?.Dispose();
             _host.Services.GetService<WindowDockingService>()?.Dispose();
             _host.Services.GetService<AutomaticBackupService>()?.Dispose();

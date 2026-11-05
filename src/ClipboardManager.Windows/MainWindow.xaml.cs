@@ -735,22 +735,50 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         finally { Interlocked.Decrement(ref _activeModalCount); }
     }
 
-    private async void SettingsButton_Click(object sender, RoutedEventArgs e)
+    private void SettingsButton_Click(object sender, RoutedEventArgs e) => OpenSettings();
+
+    /// <summary>Set by the app host: re-registers the panel and 划词 hotkeys, throwing (after rollback) when one is taken.</summary>
+    public Action<ClipboardManager.Domain.Models.AppSettings>? HotkeyApplier { get; set; }
+
+    /// <summary>Set by the app host: whether the local file index (Everything) answers right now.</summary>
+    public Func<bool>? FileSearchAvailability { get; set; }
+
+    public void OpenSettings(string? page = null)
     {
-        var dialog = new SettingsWindow(_settingsStore, _storageMaintenance, backupPath => RestoreBackupRequested?.Invoke(this, backupPath)) { Owner = this };
-        if (WithModal(() => dialog.ShowDialog()) == true) await RunActionAsync("应用设置", async () =>
+        if (OwnedWindows.OfType<SettingsWindow>().FirstOrDefault() is { } open) { open.Activate(); return; }
+        var paths = new ClipboardManager.Infrastructure.Paths.AppPaths();
+        var dialog = new SettingsWindow(new SettingsWindowContext(
+            _settingsStore,
+            _storageMaintenance,
+            backupPath => RestoreBackupRequested?.Invoke(this, backupPath),
+            HotkeyApplier,
+            ApplySettingsAsync,
+            _monitorService,
+            paths.Root,
+            paths.LogsPath,
+            FileSearchAvailability), page) { Owner = this };
+        WithModal(() => dialog.ShowDialog());
+    }
+
+    private async Task ApplySettingsAsync(ClipboardManager.Domain.Models.AppSettings settings)
+    {
+        UpdatePauseState(_monitorService.IsPaused);
+        UpdatePinVisualState(settings.AlwaysOnTop);
+        ApplyDensity(settings.CompactList);
+        ThemeService.Apply(settings.Theme);
+        _panelPet.Visibility = settings.ShowPanelPet ? Visibility.Visible : Visibility.Collapsed;
+        _emptyPet.Visibility = _panelPet.Visibility;
+        WindowTitleIcon.Visibility = settings.ShowPanelPet ? Visibility.Collapsed : Visibility.Visible;
+        SettingsApplied?.Invoke(this, settings);
+        await RunActionAsync("应用设置", async () =>
         {
-            var settings = await _settingsStore.LoadAsync();
-            UpdatePauseState(CapturePrivacyPolicy.IsPaused(settings, DateTimeOffset.UtcNow));
-            UpdatePinVisualState(settings.AlwaysOnTop);
-            ApplyDensity(settings.CompactList);
-            ThemeService.Apply(settings.Theme);
-            _panelPet.Visibility = settings.ShowPanelPet ? Visibility.Visible : Visibility.Collapsed;
-            _emptyPet.Visibility = _panelPet.Visibility;
-            WindowTitleIcon.Visibility = settings.ShowPanelPet ? Visibility.Collapsed : Visibility.Visible;
+            await LoadCalculatorSettingsAsync();
             await RefreshHistoryAsync();
         });
     }
+
+    /// <summary>Raised after a settings change is saved, so host services (划词 toolbar) can follow.</summary>
+    public event EventHandler<ClipboardManager.Domain.Models.AppSettings>? SettingsApplied;
     public event EventHandler<string>? RestoreBackupRequested;
     private void HistoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

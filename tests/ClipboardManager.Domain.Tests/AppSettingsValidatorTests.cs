@@ -44,4 +44,30 @@ public sealed class AppSettingsValidatorTests
     [Fact]
     public void HttpsCloudEndpoint_IsAccepted() =>
         AppSettingsValidator.Validate(new AppSettings { CloudApiBaseUrl = "https://cloud.example.test" });
+
+    [Fact]
+    public void SelectionSearch_DefaultsToHotkeyOnly()
+    {
+        var settings = new AppSettings();
+        Assert.True(settings.SelectionSearchEnabled);
+        Assert.Equal("Ctrl+Alt+F", settings.SelectionSearchHotkey);
+        Assert.False(settings.SelectionToolbarEnabled);
+        Assert.Contains("Weixin", settings.SelectionToolbarApps);
+    }
+
+    [Theory]
+    [InlineData("Alt+V")]
+    [InlineData("alt + v")]
+    public void SelectionHotkey_CannotEqualPanelHotkey(string hotkey) =>
+        Assert.Throws<ArgumentException>(() => AppSettingsValidator.Validate(new AppSettings { SelectionSearchHotkey = hotkey }));
+
+    [Fact]
+    public void HotkeyNormalization_IgnoresModifierOrderAndAliases() =>
+        Assert.Equal(AppSettingsValidator.NormalizeHotkey("Ctrl+Alt+F"), AppSettingsValidator.NormalizeHotkey("Alt+Control+F"));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(@"C:\Apps\Weixin.exe")]
+    public void ToolbarApps_RejectBlankOrPaths(string app) =>
+        Assert.Throws<ArgumentException>(() => AppSettingsValidator.Validate(new AppSettings { SelectionToolbarApps = [app] }));
 }

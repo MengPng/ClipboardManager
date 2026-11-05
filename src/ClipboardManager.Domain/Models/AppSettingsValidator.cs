@@ -15,6 +15,15 @@ public static class AppSettingsValidator
         if (settings.ExcludedProcesses is null || settings.ExcludedProcesses.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException("应用排除列表不得包含空项。");
         if (string.IsNullOrWhiteSpace(settings.GlobalHotkey)) throw new ArgumentException("呼出快捷键不能为空。");
+        if (string.IsNullOrWhiteSpace(settings.SelectionSearchHotkey)) throw new ArgumentException("划词查找快捷键不能为空。");
+        if (string.Equals(NormalizeHotkey(settings.GlobalHotkey), NormalizeHotkey(settings.SelectionSearchHotkey), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("划词查找快捷键不能与呼出快捷键相同。");
+        if (settings.SelectionToolbarApps is null || settings.SelectionToolbarApps.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("划词工具条应用列表不得包含空项。");
+        if (settings.SelectionToolbarApps.Count > 50)
+            throw new ArgumentException("划词工具条应用最多 50 个。");
+        if (settings.SelectionToolbarApps.Concat(settings.ExcludedProcesses).Any(name => name.IndexOfAny(['\\', '/', ':']) >= 0))
+            throw new ArgumentException("应用名称只需填写进程名，例如 Weixin，不要包含路径。");
         if (settings.AutoBackupIntervalHours is not (0 or 24 or 48 or 72))
             throw new ArgumentException("自动备份周期只能是关闭、24、48 或 72 小时。");
         if (string.IsNullOrWhiteSpace(settings.LanDeviceAlias) || settings.LanDeviceAlias.Trim().Length > 40)
@@ -27,5 +36,17 @@ public static class AppSettingsValidator
             (!Uri.TryCreate(settings.CloudApiBaseUrl, UriKind.Absolute, out var cloudApiUri) ||
              cloudApiUri.Scheme != Uri.UriSchemeHttps))
             throw new ArgumentException("云端服务地址必须是有效的 HTTPS 地址。");
+    }
+
+    /// <summary>Order-insensitive comparison key for "Ctrl+Alt+F" vs "Alt+Control+F".</summary>
+    public static string NormalizeHotkey(string? hotkey)
+    {
+        if (string.IsNullOrWhiteSpace(hotkey)) return string.Empty;
+        var parts = hotkey.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.ToUpperInvariant() switch { "CONTROL" => "CTRL", "WINDOWS" => "WIN", var other => other })
+            .ToList();
+        if (parts.Count == 0) return string.Empty;
+        var key = parts[^1];
+        return string.Join('+', parts[..^1].Distinct().Order(StringComparer.Ordinal).Append(key));
     }
 }

@@ -1241,5 +1241,153 @@
         </Setter>
     </Style>
 
+    <!--  Settings window  -->
+
+    <!-- Left navigation of the settings window. RadioButtons so arrow keys and screen readers
+         treat the categories as one group. -->
+    <Style x:Key="SettingsNavItemStyle" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource LabelSecondaryBrush}" />
+        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="Margin" Value="0,0,0,2" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Root" Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                            CornerRadius="{DynamicResource RadiusSmall}" SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource HoverOverlayBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource LabelPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource NavSelectedBackgroundBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource NavSelectedForegroundBrush}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="SettingsGroupHeaderStyle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource LabelSecondaryBrush}" />
+        <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+        <Setter Property="Margin" Value="2,4,0,6" />
+    </Style>
+
+    <Style x:Key="SettingsGroupStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{DynamicResource RadiusMedium}" />
+        <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+
+    <!-- On/off switch. Same CheckBox semantics (IsChecked, Space toggles, UIA toggle pattern),
+         drawn as a track and knob so a row reads as a setting rather than a form field. -->
+    <Style x:Key="SettingsSwitchStyle" TargetType="CheckBox">
+        <Setter Property="Focusable" Value="True" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Border x:Name="Ring" Padding="2" BorderThickness="1" BorderBrush="Transparent" CornerRadius="13" Background="Transparent">
+                        <Border x:Name="Track" Width="36" Height="20" CornerRadius="10" BorderThickness="1"
+                                Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderStrongBrush}">
+                            <Ellipse x:Name="Knob" Width="12" Height="12" Margin="3,0,0,0" HorizontalAlignment="Left"
+                                     Fill="{DynamicResource LabelSecondaryBrush}" />
+                        </Border>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrandBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentBrandBrush}" />
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentBrandBrush}" />
+                            <Setter TargetName="Knob" Property="Fill" Value="{DynamicResource WindowSurfaceBrush}" />
+                            <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Knob" Property="Margin" Value="0,0,3,0" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource LabelPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- One option of a segmented choice; the code wraps a group of these in a bordered StackPanel. -->
+    <Style x:Key="SettingsSegmentStyle" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource LabelSecondaryBrush}" />
+        <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+        <Setter Property="Padding" Value="10,5" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Root" Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                            CornerRadius="{DynamicResource RadiusSmall}" Margin="2">
+                        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource LabelPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource ChipCheckedBackgroundBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource LabelPrimaryBrush}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource LabelPrimaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Theme picker card: the content is a swatch drawn from that theme's own palette. -->
+    <Style x:Key="SettingsThemeCardStyle" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource LabelPrimaryBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Root" Padding="8" Background="Transparent" BorderThickness="1"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}" CornerRadius="{DynamicResource RadiusMedium}">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource AccentBrandBrush}" />
+                            <Setter TargetName="Root" Property="BorderThickness" Value="2" />
+                            <Setter TargetName="Root" Property="Padding" Value="7" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource LabelPrimaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
 </ResourceDictionary>

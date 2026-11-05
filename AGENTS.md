@@ -14,6 +14,8 @@
 
 ## 当前范围
 
+> 0.9.1 补充（2026-11-05）：新增「划词查找本地文件」（ADR-0007，见下「扩展能力实现状态」）与设置窗口重做；数据库仍为 schema 8；版本源 `Directory.Build.targets`（0.9.1 / `0.9.1-settings-selection-search`）与 `release/release-contract.json`（appVersion 0.9.1，schema 8）。
+>
 > 0.9.0 补充（2026-10-31）：新增「配置订阅同步」第一期（见下「扩展能力实现状态」），数据库 schema 8，版本源 `Directory.Build.targets`（0.9.0 / `0.9.0-config-sync`）与 `release/release-contract.json`（appVersion 0.9.0，schema 8）；以下 0.8.x 状态保留为历史基线，其中"schema 7"以此处为准。
 >
 > 状态对齐（2026-10-31）：正式发布版为 0.7.9；0.8.0–0.8.7（青序结构、暖纸赤陶、面板宠物、收起互动、桌面宠物、夹夹形象重绘与拖拽修复、夹夹主题与布局调整、Kami 主题与选中态统一、移除划词功能、计算页与算式识别重做）均在 CHANGELOG「Unreleased」，尚未整理为带日期的发布条目。版本源为 `Directory.Build.targets`（0.8.7 / `0.8.7-kami-theme`）与 `release/release-contract.json`（appVersion 0.8.7，schema 7）。0.8.7 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-31 构建于 `artifacts/release/0.8.7/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 160 项测试通过（移除划词前为 213 项），LayoutCheck 三套主题 × 4 页全部通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过，SHA256 复核一致），该目录已在移除划词后重新打包，未签名；三主题在真实桌面上的来回切换与逐页点验未完成，设置窗口实机界面与 MSI 升级未验证。0.8.6 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.6/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 211 项测试通过，LayoutCheck 两套主题全部通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过，SHA256 复核一致），未签名。0.8.5 的 win-x64 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt` 已于 2026-10-30 构建于 `artifacts/release/0.8.5/`（Release 构建 0 警告 0 错误，Domain/Application/Infrastructure 共 202 项测试通过，发布脚本内置的 EXE 与 MSI 版本/schema 校验通过）；0.8.4 产物仍在 `artifacts/release/0.8.4/`。均未签名，真实桌面点验与多显示器/DPI 验收待完成。Phase 2/3 已完成，Phase 4 收尾中；下述阶段条款保留为历史基线。当前在制内容见 `docs/design/2026-10-21-*` 与 CHANGELOG「Unreleased」。
@@ -35,7 +37,7 @@
 - 账号与登录：客户端已实现腾讯云账号登录（`src/ClipboardManager.Infrastructure/Cloud/`，ADR-0003）；令牌存 Windows 凭据管理器；`cloud/` 为预览服务端。
 - 跨设备同步：客户端已实现 Tencent Remote Sync Provider、Cloud Outbox 本地队列与本地匿名身份回退。
 - 局域网分享：`Infrastructure/Lan/LocalSendLanShareService` 已实现，入口暂不开放。
-- 划词 AI 与本地 AI 网关：曾在 0.7.9 实现（ADR-0004），已于 0.8.7 整体移除（鼠标选区监听、模拟 Ctrl+C 取词、浮动工具栏、模型调用、提示词模板、「划词」页签）。不得在未经新的架构决策前重新引入全局鼠标钩子、模拟按键取词或自动调用模型接口。旧设置文件里的 `selectionAi` 字段读取时必须被忽略；此前保存的 API Key 留在 Windows 凭据管理器（`ClipboardManager/SelectionAI/…`），不自动清除。主窗口导航在 0.9.0 起为「历史、配置、待办、计算、共享」五页（团队页签保持隐藏）。
+- 划词 AI 与本地 AI 网关：曾在 0.7.9 实现（ADR-0004），已于 0.8.7 整体移除（鼠标选区监听、模拟 Ctrl+C 取词、浮动工具栏、模型调用、提示词模板、「划词」页签）。不得在未经新的架构决策前重新引入全局鼠标钩子、模拟按键取词或自动调用模型接口；0.9.1 的「划词查找」依据 ADR-0007 恢复了按需取词与可选鼠标钩子，仅限本地文件查找，划词 AI 与模型调用仍不得恢复。旧设置文件里的 `selectionAi` 字段读取时必须被忽略；此前保存的 API Key 留在 Windows 凭据管理器（`ClipboardManager/SelectionAI/…`），不自动清除。主窗口导航在 0.9.0 起为「历史、配置、待办、计算、共享」五页（团队页签保持隐藏）。
 - 配置订阅同步（0.9.0 起，ADR-0006，schema 8）：局域网内一台设备发布个人配置（默认一次发布全部个人收藏文件夹，同一个包、同一个版本，也可只勾选部分；包内 1–200 个文件夹），其他设备配对后只读订阅，订阅方得到同数量的受管文件夹，更新/回退/取消订阅整体进行。「共享」页签分「发布」「订阅」两段；历史页的「发送到局域网」仍是 LocalSend（53317），与本能力（53318）互不影响。约束如下：
   - **订阅只读**：订阅得到的受管文件夹（`CollectionFolder.ManagedSubscriptionId` 非空）与个人配置物理隔离；任何用户写入路径必须拒绝，个人导出跳过，不可再发布。取消订阅须确认并说明会删除受管文件夹。
   - **版本单调**：拒收版本号 ≤ 当前版本的包；更新必须先快照（含当前最多 3 个）、再下载校验、最后原子替换，任一步失败保留原版本；回退后自动跳过被回退的版本。
@@ -54,6 +56,14 @@
   - 资源缺失时宠物静默隐藏但必须写日志；不得影响剪切板监听主链路。
   - 拖拽按窗口 DPI 把设备像素换算为 DIP，并限制在光标所在屏幕的工作区内（0.8.5）。
   - 已知待办：上述 DPI 换算与屏幕限位、Carry 状态、Esc 在未获得焦点的宠物窗口上是否生效，均需在 Windows 实机（100%/125%/150% 缩放、多显示器）验收。
+- 划词查找本地文件（0.9.1 起，ADR-0007）：选中文件名/路径/关键词后按 Ctrl+Alt+F（默认开，可改可关）或点可选浮动按钮，经 Everything IPC 在本机查找，结果可复制文件（CF_HDROP）、复制路径或在资源管理器定位。约束如下：
+  - 只在用户显式触发时读取选区；UIA `TextPattern` 优先（700 ms），失败才模拟 Ctrl+C，并先完整快照剪切板、读后恢复，过渡序号经 `SelectionClipboardGate` 交给 `SelfWriteSequenceGate`，不得进入历史；`SendInput` 返回值必须等于事件数。
+  - 暂停、应用排除在读取载荷前生效；终端/控制台拒绝模拟 Ctrl+C；本程序在前台时不取词；选区 ≤ 4000 字符。
+  - 浮动按钮默认关闭，仅在白名单进程（`SelectionToolbarApps`）显示，窗口 `WS_EX_NOACTIVATE`；关闭开关或白名单为空时必须卸载 `WH_MOUSE_LL` 钩子；钩子只判定手势，不读内容。
+  - 只走 Everything IPC，不扫描磁盘、不自建索引、不联网、不调用模型；Everything 未运行时如实提示，不得伪造结果。选中文字不入库、不入 Outbox，日志只记异常类型。
+  - 不自动粘贴、不自动发送。
+  - 验收状态：解析与排序有单元测试；微信/企业微信中 UIA 与 Ctrl+C 回退、浮动按钮不抢焦点、DPI/多显示器、无 Everything 的机器均待实机验收。
+- 设置窗口（0.9.1 重做）：左侧七页（常规、外观、记录与存储、隐私、划词查找、备份与恢复、关于），逐字段即时提交并串行化：读最新 → 修改 → 校验 → 需要时重绑快捷键 → 原子保存，失败回滚并显示原因；无"保存/取消"按钮。新增页面或字段须同步 LayoutCheck 的设置页渲染断言（三主题 × 全部页，无横向溢出、打开时不产生保存）。
 - 仍未实现：团队创建、成员管理、权限校验与团队内容分发；OCR；移动端与 macOS/Linux 客户端。
 - 计算页与剪切板算式识别（0.7.6 起；0.8.7 重做，设计依据 `docs/design/2026-10-31-calculator/`）：
   - 引擎 `CalculatorService` 在入口一次规范化后只处理规范串；支持十进制加减乘除、括号、后缀 `%`、紧邻括号的隐式乘法、整数 `^`（|指数|≤64）；限制 512 字符、嵌套 32、128 次运算、28/29 位；不做科学函数、进制、单位换算。错误分不完整（输入中不报错）、非法格式、除零/溢出三类。显示最多 12 位小数并以 `≈` 标注舍入；复制出去的是不带千分位的纯数字。
