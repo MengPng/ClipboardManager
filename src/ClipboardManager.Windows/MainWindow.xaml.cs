@@ -37,15 +37,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly ConfigSyncCoordinator _configSync;
     private readonly ClipboardManager.Domain.Contracts.IConfigDiscovery _configDiscovery;
     private readonly ClipboardManager.Domain.Contracts.IConfigSyncIdentity _configIdentity;
+    private readonly ClipboardManager.Application.Services.LanTransfer.LanDeviceService _lanDevices;
+    private readonly ClipboardManager.Application.Services.LanTransfer.LanTransferService _lanTransfer;
     private readonly ICloudModeService _cloudModeService;
     private readonly TodoService _todoService;
     private readonly System.Windows.Threading.DispatcherTimer _searchTimer;
     private bool _allowClose, _favoritesOnly, _pinnedOnly, _linksOnly, _refreshingFolders, _isPinnedTopmost;
     private bool _isCollapsed;
     private Services.CollapsedPetWindow? _collapsedPet;
-    private double _expandedWidth = 340;
-    private double _expandedHeight = 540;
-    private double _expandedMinWidth = 340;
+    private double _expandedWidth = 300;
+    private double _expandedHeight = 640;
+    private double _expandedMinWidth = 300;
     private double _expandedMinHeight = 450;
     private int _activeModalCount;
     private ClipboardItemType? _itemType;
@@ -87,7 +89,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ClipboardCalculationService calculationService,
         ConfigPublishService configPublish, ConfigSubscriptionService configSubscriptions,
         ConfigSyncCoordinator configSync, ClipboardManager.Domain.Contracts.IConfigDiscovery configDiscovery,
-        ClipboardManager.Domain.Contracts.IConfigSyncIdentity configIdentity)
+        ClipboardManager.Domain.Contracts.IConfigSyncIdentity configIdentity,
+        ClipboardManager.Application.Services.LanTransfer.LanDeviceService lanDevices,
+        ClipboardManager.Application.Services.LanTransfer.LanTransferService lanTransfer)
     {
         _historyService = historyService; _restoreService = restoreService; _monitorService = monitorService;
         _captureService = captureService; _payloadCaptureService = payloadCaptureService;
@@ -99,6 +103,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _lanShareService = lanShareService;
         _configPublish = configPublish; _configSubscriptions = configSubscriptions;
         _configSync = configSync; _configDiscovery = configDiscovery; _configIdentity = configIdentity;
+        _lanDevices = lanDevices; _lanTransfer = lanTransfer;
         _cloudModeService = cloudModeService;
         DataContext = this;
         InitializeComponent();
@@ -149,6 +154,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 await Task.Delay(80);
                 if (_isPinnedTopmost || _activeModalCount > 0 || _windowDockingService.ShouldRemainVisibleAfterDeactivation()) return;
+                // “共享 → 传输”要从资源管理器把文件拖进来：切到别的窗口去拖时不能自动隐藏。
+                if (IsShareTransferActive) return;
                 if ((await _settingsStore.LoadAsync()).AutoHideWhenDeactivated && IsVisible &&
                     !OwnedWindows.Cast<Window>().Any(window => window.IsActive)) Hide();
             }
@@ -447,6 +454,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.F)
         {
             (IsTodoTabActive ? TodoTitleBox : IsCollectionTabActive ? CollectionSearchBox : SearchBox).Focus();
+            e.Handled = true;
+        }
+        else if (key == Key.Escape && IsShareTransferActive && _transferPage != TransferPage.Home)
+        {
+            ShowTransferPage(TransferPage.Home);
             e.Handled = true;
         }
         else if (key == Key.Escape)
@@ -1132,6 +1144,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _historyService.SetPinnedAsync(item.Id, !item.IsPinned);
             await RefreshHistoryAsync();
         }, "Ctrl+P");
+        AddMenu(menu, "发送给已匹配设备…", () => SendHistoryItemToDeviceAsync(item));
         menu.Items.Add(new Separator());
         if (item.ItemType == ClipboardItemType.Image) AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.ImagePath));
         if (item.ItemType == ClipboardItemType.ImageFile)
@@ -1303,6 +1316,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     private void Window_DragOver(object sender, System.Windows.DragEventArgs e)
     {
+        if (IsShareTransferActive)
+        {
+            TransferDragOver(e);
+            return;
+        }
         var overFolder = IsWithin(e.OriginalSource as DependencyObject, FolderList);
         var overItems = IsWithin(e.OriginalSource as DependencyObject, CollectionList);
         var internalMove = IsCollectionTabActive &&
@@ -1323,6 +1341,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
     private async void Window_Drop(object sender, System.Windows.DragEventArgs e)
     {
+        if (IsShareTransferActive)
+        {
+            await TransferDropAsync(e);
+            return;
+        }
         if (e.Handled || !IsCollectionTabActive || SelectedFolder is null || e.Data.GetData(System.Windows.DataFormats.FileDrop) is not string[] paths) return;
         e.Handled = true;
         var target = FindItem<FolderViewModel>(e.OriginalSource as DependencyObject) ?? SelectedFolder;

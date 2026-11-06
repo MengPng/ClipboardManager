@@ -1,4 +1,5 @@
 using ClipboardManager.Application.Services.ConfigSync;
+using ClipboardManager.Application.Services.LanTransfer;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
 using ClipboardManager.Infrastructure.ConfigSync;
@@ -30,6 +31,15 @@ internal sealed class ConfigSyncTestHost : IAsyncDisposable
     public ConfigPublishService Publishing { get; }
     public ConfigSubscriptionService Subscriptions { get; }
     public ManualClock Clock { get; }
+    public MemorySettingsStore Settings { get; } = new();
+    public FakePrompt Prompt { get; } = new();
+    public FileTransferTracker Tracker { get; }
+    public LanFileInbox Inbox { get; }
+    public LanTransferService Transfers { get; }
+    public string ReceiveFolder => Path.Combine(Root, "received");
+
+    /// <summary>测试中每台设备的固定匹配码（真实运行时由凭据管理器生成并保存）。</summary>
+    public const string MatchCode = "482913";
 
     public string Address => $"127.0.0.1:{Server.Status.Port}";
     public string Fingerprint => Identity.Fingerprint;
@@ -45,13 +55,18 @@ internal sealed class ConfigSyncTestHost : IAsyncDisposable
         Packages = new PersonalConfigTransferService(Paths, Collections, new UnusedStorageMaintenance());
         Identity = new ConfigSyncIdentity(Paths, new MemoryVault(), NullLogger<ConfigSyncIdentity>.Instance);
         Pairing = new PairingSessions(clock);
+        Pairing.SetCode(MatchCode);
+        Settings.Current = new AppSettings { LanReceiveFolder = Path.Combine(root, "received") };
+        Tracker = new FileTransferTracker(clock);
+        Inbox = new LanFileInbox(Repository, Settings, Prompt, Tracker, clock, NullLogger<LanFileInbox>.Instance);
         Endpoint = new ConfigSyncEndpoint(Repository, Packages, Identity, Pairing, clock);
-        Server = new ConfigSyncServer(Identity, Endpoint, NullLogger<ConfigSyncServer>.Instance, new ConfigSyncServerOptions(0));
+        Server = new ConfigSyncServer(Identity, Endpoint, NullLogger<ConfigSyncServer>.Instance, new ConfigSyncServerOptions(0), Inbox);
         Client = new ConfigSyncClient(Identity, NullLogger<ConfigSyncClient>.Instance);
-        Publishing = new ConfigPublishService(Repository, Packages, Collections, Pairing, clock,
+        Publishing = new ConfigPublishService(Repository, Packages, Collections, clock,
             NullLogger<ConfigPublishService>.Instance);
         Subscriptions = new ConfigSubscriptionService(Repository, Client, Packages, Collections, new UnusedAssetStore(), clock,
             NullLogger<ConfigSubscriptionService>.Instance);
+        Transfers = new LanTransferService(Repository, Client, Tracker, clock, NullLogger<LanTransferService>.Instance);
     }
 
     public static async Task<ConfigSyncTestHost> CreateAsync(string name, ManualClock? clock = null)
@@ -122,6 +137,29 @@ internal sealed class ConfigSyncTestHost : IAsyncDisposable
         private DateTimeOffset now = new(2026, 10, 31, 12, 0, 0, TimeSpan.Zero);
         public override DateTimeOffset GetUtcNow() => now;
         public void Advance(TimeSpan by) => now += by;
+    }
+
+    public sealed class MemorySettingsStore : IAppSettingsStore
+    {
+        public AppSettings Current { get; set; } = new();
+        public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult(Current);
+        public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+        {
+            Current = settings;
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>“是否接收”确认的替身：记录请求并按 <see cref="Answer"/> 回答。</summary>
+    public sealed class FakePrompt : IIncomingFilePrompt
+    {
+        public bool Answer { get; set; } = true;
+        public List<IncomingFileRequest> Requests { get; } = [];
+        public Task<bool> ConfirmAsync(IncomingFileRequest request, CancellationToken cancellationToken = default)
+        {
+            lock (Requests) Requests.Add(request);
+            return Task.FromResult(Answer);
+        }
     }
 
     private sealed class MemoryVault : ICredentialVault

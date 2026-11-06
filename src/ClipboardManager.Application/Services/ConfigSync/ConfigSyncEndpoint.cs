@@ -16,18 +16,41 @@ public sealed class ConfigSyncEndpoint(
     public string DeviceName => identity.DeviceName;
 
     public Task<(byte[] ServerNonce, string DeviceName)> PairBeginAsync(string clientFingerprint, string clientName,
-        byte[] clientNonce, CancellationToken cancellationToken = default) =>
-        Task.FromResult((pairing.Begin(clientFingerprint, CleanName(clientName), clientNonce), identity.DeviceName));
+        byte[] clientNonce, int? clientPort = null, CancellationToken cancellationToken = default) =>
+        Task.FromResult((pairing.Begin(clientFingerprint, CleanName(clientName), clientNonce, clientPort), identity.DeviceName));
 
+    /// <summary>
+    /// 匹配成功后双向记录对方（ADR-0008）：既是订阅者（可拉取本机发布），也是发布者（本机可浏览它、可互发文件）。
+    /// 本机已经给它起过名字时保留本地名字。
+    /// </summary>
     public async Task<(byte[] ServerProof, string DeviceName)> PairFinishAsync(string clientFingerprint, string serverFingerprint,
-        byte[] clientProof, CancellationToken cancellationToken = default)
+        byte[] clientProof, string? clientHost = null, CancellationToken cancellationToken = default)
     {
-        var (serverProof, clientName) = pairing.Finish(clientFingerprint, serverFingerprint, clientProof);
-        await repository.SavePeerAsync(new PairedPeer(Guid.NewGuid(), PeerRole.Subscriber, clientName,
-            clientFingerprint.ToUpperInvariant(), null, time.GetUtcNow(), PeerStatus.Active), cancellationToken);
+        var accepted = pairing.Finish(clientFingerprint, serverFingerprint, clientProof);
+        var fingerprint = clientFingerprint.ToUpperInvariant();
+        var name = await LocalNameAsync(repository, fingerprint, accepted.ClientName, cancellationToken);
+        var address = clientHost is { Length: > 0 } && accepted.ClientPort is { } port ? FormatAddress(clientHost, port) : null;
+        var now = time.GetUtcNow();
+        await repository.SavePeerAsync(new PairedPeer(Guid.NewGuid(), PeerRole.Subscriber, name, fingerprint, address, now, PeerStatus.Active),
+            cancellationToken);
+        await repository.SavePeerAsync(new PairedPeer(Guid.NewGuid(), PeerRole.Publisher, name, fingerprint, address, now, PeerStatus.Active),
+            cancellationToken);
         PairingCompleted?.Invoke(this, EventArgs.Empty);
-        return (serverProof, identity.DeviceName);
+        return (accepted.ServerProof, identity.DeviceName);
     }
+
+    /// <summary>同一指纹已有本地名字（可能被用户改过）时沿用，否则用对方报的设备名。</summary>
+    internal static async Task<string> LocalNameAsync(IConfigSyncRepository repository, string fingerprint, string reported,
+        CancellationToken cancellationToken)
+    {
+        foreach (var role in new[] { PeerRole.Publisher, PeerRole.Subscriber })
+            if (await repository.FindActivePeerAsync(role, fingerprint, cancellationToken) is { } existing)
+                return existing.Name;
+        return reported;
+    }
+
+    internal static string FormatAddress(string host, int port) =>
+        host.Contains(':') && !host.StartsWith('[') ? $"[{host}]:{port}" : $"{host}:{port}";
 
     public async Task<bool> IsPinnedAsync(string clientFingerprint, CancellationToken cancellationToken = default) =>
         await repository.FindActivePeerAsync(PeerRole.Subscriber, clientFingerprint, cancellationToken) is not null;

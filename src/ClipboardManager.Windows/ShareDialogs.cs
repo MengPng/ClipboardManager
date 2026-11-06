@@ -58,7 +58,7 @@ internal sealed class SharePairDialog : ShareDialogBase
     public string Code => _code.Text.Trim();
 
     public SharePairDialog(Window owner, string deviceName, string address, string fingerprintPrefix)
-        : base(owner, "输入配对码", 400, 250)
+        : base(owner, "输入匹配码", 400, 260)
     {
         ResizeMode = ResizeMode.NoResize;
         var grid = new Grid { Margin = new Thickness(16) };
@@ -69,12 +69,12 @@ internal sealed class SharePairDialog : ShareDialogBase
 
         grid.Children.Add(new TextBlock
         {
-            Text = $"与“{deviceName}”配对\n{address} · 证书指纹 {fingerprintPrefix}",
+            Text = $"与“{deviceName}”匹配\n{address} · 证书指纹 {fingerprintPrefix}",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold
         });
         var hint = new TextBlock
         {
-            Text = "请核对对方屏幕上显示的指纹前缀与此处一致，然后输入对方“生成配对码”得到的 6 位数字。配对码 5 分钟内有效，连续输错 5 次作废。",
+            Text = "请核对对方屏幕上显示的指纹前缀与此处一致，然后输入对方“共享 → 传输 → 本机匹配码”里的 6 位数字。匹配后双方互相信任，之后在同一局域网内自动连接。",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10)
         };
         if (TryFindResource("MetaTextStyle") is Style meta) hint.Style = meta;
@@ -82,7 +82,7 @@ internal sealed class SharePairDialog : ShareDialogBase
         grid.Children.Add(hint);
 
         _code = new TextBox { MaxLength = 6, Padding = new Thickness(8, 6, 8, 6), FontSize = 16, Margin = new Thickness(0, 0, 0, 12) };
-        System.Windows.Automation.AutomationProperties.SetName(_code, "6 位配对码");
+        System.Windows.Automation.AutomationProperties.SetName(_code, "6 位匹配码");
         _code.PreviewTextInput += (_, e) => e.Handled = !e.Text.All(char.IsAsciiDigit);
         System.Windows.DataObject.AddPastingHandler(_code, (_, e) =>
         {
@@ -91,12 +91,12 @@ internal sealed class SharePairDialog : ShareDialogBase
         Grid.SetRow(_code, 2);
         grid.Children.Add(_code);
 
-        var ok = OkButton("配对");
+        var ok = OkButton("匹配");
         ok.Click += (_, _) =>
         {
             if (Code.Length != PairingProtocol.CodeLength)
             {
-                System.Windows.MessageBox.Show(this, "配对码是 6 位数字。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show(this, "匹配码是 6 位数字。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 _code.Focus();
                 return;
             }

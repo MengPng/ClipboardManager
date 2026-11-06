@@ -118,6 +118,7 @@ public partial class App : System.Windows.Application
                     services.AddSingleton<AutomaticPasteService>();
                     services.AddSingleton<WindowDockingService>();
                     services.AddSingleton<AutomaticBackupService>();
+                    services.AddSingleton<ClipboardManager.Domain.Contracts.IIncomingFilePrompt, IncomingFilePrompt>();
                 })
                 .Build();
 

@@ -79,6 +79,7 @@
     <!-- 页签：选中为浅灰底、深色字，无下划线、无底边线。 -->
     <CornerRadius x:Key="NavPillRadius">9</CornerRadius>
     <Thickness x:Key="NavPillBorderThickness">0</Thickness>
+    <Thickness x:Key="NavTabPadding">1,6</Thickness>
     <SolidColorBrush x:Key="NavPillBorderBrush" Color="#00FFFFFF" />
     <Thickness x:Key="NavBottomBorderThickness">0</Thickness>
     <SolidColorBrush x:Key="NavMarkBrush" Color="#00FFFFFF" />

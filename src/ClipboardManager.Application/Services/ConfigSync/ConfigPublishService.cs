@@ -11,7 +11,6 @@ public sealed class ConfigPublishService(
     IConfigSyncRepository repository,
     IConfigPackageService packages,
     ICollectionRepository collections,
-    PairingSessions pairing,
     TimeProvider time,
     ILogger<ConfigPublishService> logger)
 {
@@ -25,12 +24,6 @@ public sealed class ConfigPublishService(
 
     public Task<IReadOnlyList<PairedPeer>> GetSubscribersAsync(CancellationToken cancellationToken = default) =>
         repository.GetPeersAsync(PeerRole.Subscriber, cancellationToken);
-
-    public PairingCodeInfo IssuePairingCode() => pairing.Issue();
-
-    public PairingCodeInfo? CurrentPairingCode => pairing.Current;
-
-    public void CancelPairingCode() => pairing.Cancel();
 
     public async Task RemoveSubscriberAsync(Guid peerId, CancellationToken cancellationToken = default)
     {

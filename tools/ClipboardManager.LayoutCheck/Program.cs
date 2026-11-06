@@ -86,11 +86,11 @@ internal static class Program
             var document = XDocument.Load(Path.Combine(root, "src/ClipboardManager.Windows/MainWindow.xaml"));
             XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
             var presentation = document.Root!.Name.Namespace;
-            if (document.Root.Attribute("Width")?.Value != "340" ||
-                document.Root.Attribute("Height")?.Value != "540" ||
-                document.Root.Attribute("MinWidth")?.Value != "340" ||
+            if (document.Root.Attribute("Width")?.Value != "300" ||
+                document.Root.Attribute("Height")?.Value != "640" ||
+                document.Root.Attribute("MinWidth")?.Value != "300" ||
                 document.Root.Attribute("MinHeight")?.Value != "450")
-                throw new InvalidOperationException("The compact shell must default to 340x540 DIP with a 340x450 DIP minimum.");
+                throw new InvalidOperationException("The compact shell must default to 300x640 DIP with a 300x450 DIP minimum.");
             var historyList = document.Descendants(presentation + "ListBox")
                 .Single(element => element.Attribute(x + "Name")?.Value == "HistoryList");
             // Each history row keeps exactly one separator: a theme-switched hairline inside the row
@@ -131,7 +131,7 @@ internal static class Program
                 throw new InvalidOperationException("The keypad must be a named 4x5 grid of 20 keys.");
             if (System.Text.RegularExpressions.Regex.IsMatch(calculatorPanel.ToString(), @"#[0-9A-Fa-f]{3,8}\b|\bColor=|\bCornerRadius=""\d"))
                 throw new InvalidOperationException("The calculator page must take colours and corner radii from theme tokens, not literals.");
-            // Share page: publish / subscribe segments, every colour and radius from tokens, every action named.
+            // Share page: publish / subscribe / transfer segments, every colour and radius from tokens, every action named.
             var sharePanel = document.Descendants(presentation + "Grid")
                 .Single(element => element.Attribute(x + "Name")?.Value == "SharePanel");
             if (System.Text.RegularExpressions.Regex.IsMatch(sharePanel.ToString(), @"#[0-9A-Fa-f]{3,8}\b|\bColor=|\bCornerRadius=""\d"))
@@ -143,9 +143,9 @@ internal static class Program
             foreach (var shareButton in sharePanel.Descendants(presentation + "Button"))
                 if (string.IsNullOrEmpty(shareButton.Attribute("AutomationProperties.Name")?.Value ?? shareButton.Attribute("Content")?.Value))
                     throw new InvalidOperationException("Every share page button needs an accessible name.");
-            if (sharePanel.Descendants(presentation + "ScrollViewer").Count() != 2 ||
-                sharePanel.Descendants(presentation + "RadioButton").Count() != 2)
-                throw new InvalidOperationException("The share page must have exactly the publish and subscribe segments.");
+            if (sharePanel.Descendants(presentation + "ScrollViewer").Count() != 3 ||
+                sharePanel.Descendants(presentation + "RadioButton").Count() != 3)
+                throw new InvalidOperationException("The share page must have exactly the publish, subscribe and transfer segments.");
             // Keep the production templates and layout, without starting services or accessing user data.
             foreach (var element in document.Descendants())
                 foreach (var attribute in element.Attributes().ToArray())
@@ -261,6 +261,9 @@ internal static class Program
                 PublisherRows = new(SamplePublisherRows()),
                 PairedPublisherRows = new(SamplePairedPublisherRows()),
                 SubscriptionRows = new(SampleSubscriptionRows()),
+                MatchedDeviceRows = new(SampleMatchedDeviceRows()),
+                NearbyDeviceRows = new(SampleNearbyDeviceRows()),
+                TransferRows = new(SampleTransferRows()),
                 Calculations = new System.Collections.ObjectModel.ObservableCollection<CalculationResult>
                 {
                     new("200+10%", 220m, "200 + 20"),
@@ -299,10 +302,10 @@ internal static class Program
                 window.Height = 46;
                 window.UpdateLayout();
                 window.MaxWidth = double.PositiveInfinity;
-                window.MinWidth = 340;
+                window.MinWidth = 300;
                 window.MinHeight = 450;
                 foreach (var element in hidden) element.Visibility = Visibility.Visible;
-                window.Width = 340;
+                window.Width = 300;
                 window.Height = 900;
                 window.UpdateLayout();
                 var close = (FrameworkElement)window.FindName("CloseButton");
@@ -317,7 +320,7 @@ internal static class Program
             ResourceDictionary? activeLayer = null;
             Color? historySelectedColor = null;
             foreach (var (theme, layer) in themeLayers)
-            foreach (var size in new[] { new Size(340, 540), new Size(340, 450), new Size(520, 700) })
+            foreach (var size in new[] { new Size(300, 640), new Size(300, 450), new Size(520, 700) })
             foreach (var active in panels)
             {
                 if (!ReferenceEquals(activeLayer, layer))
@@ -361,6 +364,23 @@ internal static class Program
                 if (tabWidths.Max() - tabWidths.Min() > 1 ||
                     visibleTabs.Any(tab => Bounds(tab, surface).Right > size.Width - 5))
                     throw new InvalidOperationException("Navigation must use equal-width cells without clipping.");
+                // Each label (and the Kubai icon beside it) must fit inside its pill: a cell cut to "历" is not a tab name.
+                foreach (var tab in visibleTabs)
+                {
+                    var pill = (Border)tab.Template.FindName("Root", tab);
+                    var pillRect = Bounds(pill, surface);
+                    var parts = Descendants(tab).OfType<FrameworkElement>()
+                        .Where(element => element.IsVisible && element is TextBlock or Image && element.ActualWidth > 0).ToArray();
+                    if (!parts.OfType<TextBlock>().Any())
+                        throw new InvalidOperationException($"Navigation tab '{tab.Header}' renders no label ({theme} {size}).");
+                    foreach (var part in parts)
+                    {
+                        var rect = Bounds(part, surface);
+                        if (rect.Left < pillRect.Left + pill.Padding.Left - 0.5 || rect.Right > pillRect.Right - pill.Padding.Right + 0.5 ||
+                            part is TextBlock label && label.ActualWidth + 0.5 < DisplayWidth(label))
+                            throw new InvalidOperationException($"Navigation tab '{tab.Header}' is clipped ({theme} {size}): {part.GetType().Name} {rect} in pill {pillRect}");
+                    }
+                }
                 var pinBounds = Bounds(pin, surface);
                 var closeBounds = Bounds((FrameworkElement)window.FindName("CloseButton"), surface);
                 var windowTitleBounds = Bounds((FrameworkElement)window.FindName("WindowTitleText"), surface);
@@ -370,7 +390,7 @@ internal static class Program
                 if (active.Name == "TodoPanel")
                 {
                     var buttons = Descendants(active).OfType<Button>().ToArray();
-                    var export = buttons.Single(button => Equals(button.Content, "导出明细"));
+                    var export = buttons.Single(button => System.Windows.Automation.AutomationProperties.GetName(button) == "导出明细");
                     var exportBounds = Bounds(export, surface);
                     if (buttons.Any(button => Equals(button.Content, "标签管理")) ||
                         exportBounds.Left < 0 || exportBounds.Right > size.Width || exportBounds.Width < 1)
@@ -481,10 +501,10 @@ internal static class Program
                             throw new InvalidOperationException($"Unselected rows must not show selection decor '{part}'.");
                     }
 
-                    if (size.Width == 340 && size.Height == 540 && historyBox.ActualHeight / 56 < 5.4)
-                        throw new InvalidOperationException($"340x540 must show about 5.5 history rows: viewport {historyBox.ActualHeight} DIP");
-                    if (size.Width == 340 && size.Height == 450 && historyBox.ActualHeight < 56 * 2)
-                        throw new InvalidOperationException($"340x450 must keep two full history rows: viewport {historyBox.ActualHeight} DIP");
+                    if (size.Width == 300 && size.Height == 640 && historyBox.ActualHeight / 56 < 5.4)
+                        throw new InvalidOperationException($"300x640 must show about 5.5 history rows: viewport {historyBox.ActualHeight} DIP");
+                    if (size.Width == 300 && size.Height == 450 && historyBox.ActualHeight < 56 * 2)
+                        throw new InvalidOperationException($"300x450 must keep two full history rows: viewport {historyBox.ActualHeight} DIP");
                     Console.WriteLine($"  history viewport {historyBox.ActualHeight:F0} DIP = {historyBox.ActualHeight / 56:F2} rows at {size}");
                 }
                 if (active.Name == "ConfigPanel")
@@ -663,48 +683,88 @@ internal static class Program
                     var shareStatus = (TextBlock)window.FindName("ShareStatusText");
                     var publishChip = (RadioButton)window.FindName("SharePublishChip");
                     var subscribeChip = (RadioButton)window.FindName("ShareSubscribeChip");
+                    var transferChip = (RadioButton)window.FindName("ShareTransferChip");
                     var publishScroll = (ScrollViewer)window.FindName("SharePublishScroll");
                     var subscribeScroll = (ScrollViewer)window.FindName("ShareSubscribeScroll");
+                    var transferScroll = (ScrollViewer)window.FindName("ShareTransferScroll");
+                    var transferPanels = new Dictionary<string, StackPanel>
+                    {
+                        ["transfer"] = (StackPanel)window.FindName("TransferHomePanel"),
+                        ["transfer-device"] = (StackPanel)window.FindName("TransferDevicePanel"),
+                        ["transfer-match"] = (StackPanel)window.FindName("TransferMatchPanel"),
+                        ["transfer-settings"] = (StackPanel)window.FindName("TransferSettingsPanel")
+                    };
                     var emptyTexts = new[]
                     {
                         "SharePublishEmptyText", "ShareSubscriberEmptyText", "ShareSubscriptionEmptyText",
-                        "SharePublisherEmptyText", "SharePairedEmptyText"
+                        "SharePublisherEmptyText", "SharePairedEmptyText",
+                        "ShareMatchedEmptyText", "ShareTransferEmptyText", "ShareNearbyEmptyText"
                     }.Select(name => (FrameworkElement)window.FindName(name)).ToArray();
+                    var shareCollections = new System.Collections.IList[]
+                    {
+                        previewContext.PublishedRows, previewContext.SubscriberRows, previewContext.PublisherRows,
+                        previewContext.PairedPublisherRows, previewContext.SubscriptionRows,
+                        previewContext.MatchedDeviceRows, previewContext.NearbyDeviceRows, previewContext.TransferRows
+                    };
+                    void FillShareRows()
+                    {
+                        foreach (var row in SamplePublishedRows()) previewContext.PublishedRows.Add(row);
+                        foreach (var row in SampleSubscriberRows()) previewContext.SubscriberRows.Add(row);
+                        foreach (var row in SamplePublisherRows()) previewContext.PublisherRows.Add(row);
+                        foreach (var row in SamplePairedPublisherRows()) previewContext.PairedPublisherRows.Add(row);
+                        foreach (var row in SampleSubscriptionRows()) previewContext.SubscriptionRows.Add(row);
+                        foreach (var row in SampleMatchedDeviceRows()) previewContext.MatchedDeviceRows.Add(row);
+                        foreach (var row in SampleNearbyDeviceRows()) previewContext.NearbyDeviceRows.Add(row);
+                        foreach (var row in SampleTransferRows()) previewContext.TransferRows.Add(row);
+                    }
                     shareStatus.Text = "监听中 · 端口 53318";
-                    ((TextBlock)window.FindName("SharePairingCodeText")).Text = "482916";
+                    ((TextBlock)window.FindName("SharePairingCodeText")).Text = "482 916";
+                    ((TextBlock)window.FindName("ShareReceiveFolderText")).Text = @"C:\Users\同事\Downloads\剪切板传输\一个很长很长的子目录名称用来验证省略号";
                     ((TextBlock)window.FindName("ShareLocalAddressText")).Text = "本机地址：192.168.100.123:53318、10.0.0.5:53318";
                     footerHint.Text = "仅限局域网";
-                    foreach (var segment in new[] { "publish", "subscribe" })
+                    foreach (var segment in new[] { "publish", "subscribe", "transfer", "transfer-device", "transfer-match", "transfer-settings" })
                     foreach (var populated in new[] { true, false })
                     {
                         var publish = segment == "publish";
+                        var transfer = segment.StartsWith("transfer", StringComparison.Ordinal);
                         publishChip.IsChecked = publish;
-                        subscribeChip.IsChecked = !publish;
+                        subscribeChip.IsChecked = segment == "subscribe";
+                        transferChip.IsChecked = transfer;
                         publishScroll.Visibility = publish ? Visibility.Visible : Visibility.Collapsed;
-                        subscribeScroll.Visibility = publish ? Visibility.Collapsed : Visibility.Visible;
-                        foreach (var rows in new System.Collections.IList[]
-                                 { previewContext.PublishedRows, previewContext.SubscriberRows, previewContext.PublisherRows,
-                                   previewContext.PairedPublisherRows, previewContext.SubscriptionRows })
-                            rows.Clear();
-                        if (populated)
-                        {
-                            foreach (var row in SamplePublishedRows()) previewContext.PublishedRows.Add(row);
-                            foreach (var row in SampleSubscriberRows()) previewContext.SubscriberRows.Add(row);
-                            foreach (var row in SamplePublisherRows()) previewContext.PublisherRows.Add(row);
-                            foreach (var row in SamplePairedPublisherRows()) previewContext.PairedPublisherRows.Add(row);
-                            foreach (var row in SampleSubscriptionRows()) previewContext.SubscriptionRows.Add(row);
-                        }
+                        subscribeScroll.Visibility = segment == "subscribe" ? Visibility.Visible : Visibility.Collapsed;
+                        transferScroll.Visibility = transfer ? Visibility.Visible : Visibility.Collapsed;
+                        foreach (var rows in shareCollections) rows.Clear();
+                        if (populated) FillShareRows();
                         foreach (var empty in emptyTexts) empty.Visibility = populated ? Visibility.Collapsed : Visibility.Visible;
-                        footerCount.Text = publish ? $"{previewContext.PublishedRows.Count} 项发布" : $"{previewContext.SubscriptionRows.Count} 个订阅";
+                        // Transfer pages mirror MainWindow.Transfer: one panel at a time, device rows carry their own
+                        // latest activity, and the device page lists only that device's transfers.
+                        foreach (var (name, panel) in transferPanels) panel.Visibility = name == segment ? Visibility.Visible : Visibility.Collapsed;
+                        var allTransfers = previewContext.TransferRows.Select(row => row.Snapshot).ToList();
+                        foreach (var device in previewContext.MatchedDeviceRows)
+                            device.UpdateActivity(allTransfers.Where(item => item.PeerFingerprint == device.Device.Fingerprint).ToList());
+                        var pageDevice = previewContext.MatchedDeviceRows.FirstOrDefault() ?? SampleMatchedDeviceRows()[0];
+                        transferPanels["transfer-device"].DataContext = segment == "transfer-device" ? pageDevice : null;
+                        if (segment == "transfer-device")
+                            foreach (var other in previewContext.TransferRows.Where(row => row.Snapshot.PeerFingerprint != pageDevice.Device.Fingerprint).ToList())
+                                previewContext.TransferRows.Remove(other);
+                        var anyFinished = previewContext.TransferRows.Any(row => row.Snapshot.IsFinished);
+                        ((FrameworkElement)window.FindName("ShareClearTransfersDivider")).Visibility = anyFinished ? Visibility.Visible : Visibility.Collapsed;
+                        ((FrameworkElement)window.FindName("ShareClearTransfersRow")).Visibility = anyFinished ? Visibility.Visible : Visibility.Collapsed;
+                        footerCount.Text = publish ? $"{previewContext.PublishedRows.Count} 项发布"
+                            : segment == "transfer-device" ? $"{previewContext.TransferRows.Count} 条记录"
+                            : transfer ? $"{previewContext.MatchedDeviceRows.Count} 台设备"
+                            : $"{previewContext.SubscriptionRows.Count} 个订阅";
+                        shareStatus.Text = segment == "transfer-device" ? $"{pageDevice.Name} 在线"
+                            : transfer && populated ? "1 台已匹配设备在线" : "监听中 · 端口 53318";
                         surface.UpdateLayout();
                         var state = $"{theme} {size} {segment} {(populated ? "populated" : "empty")}";
-                        var scroll = publish ? publishScroll : subscribeScroll;
+                        var scroll = publish ? publishScroll : transfer ? transferScroll : subscribeScroll;
                         var viewport = Bounds(scroll, surface);
                         if (!scroll.IsVisible || viewport.Left < -0.5 || viewport.Right > size.Width + 0.5 ||
                             viewport.Top < contentBounds.Top - 1 || viewport.Bottom > contentBounds.Bottom + 1 || viewport.Height < 80)
                             throw new InvalidOperationException($"Share {segment} scroll area is clipped ({state}): {viewport} in content {contentBounds}");
                         // Segment switch row: chips and the status line must not collide.
-                        var chipRight = Math.Max(Bounds(publishChip, surface).Right, Bounds(subscribeChip, surface).Right);
+                        var chipRight = new[] { publishChip, subscribeChip, transferChip }.Max(chip => Bounds(chip, surface).Right);
                         var statusRect = Bounds(shareStatus, surface);
                         if (statusRect.Left < chipRight - 0.5 || statusRect.Right > size.Width + 0.5 ||
                             shareStatus.ActualWidth + 0.5 < DisplayWidth(shareStatus))
@@ -728,7 +788,7 @@ internal static class Program
                             if (button.ActualHeight < 22 || button.ActualWidth < 36)
                                 throw new InvalidOperationException($"Share button '{button.Content}' is too small to hit ({state}): {button.ActualWidth:F0}x{button.ActualHeight:F0}");
                             var label = Descendants(button).OfType<TextBlock>().FirstOrDefault();
-                            if (label is not null && label.ActualWidth + 0.5 < DisplayWidth(label))
+                            if (label is not null && label.TextTrimming == TextTrimming.None && label.ActualWidth + 0.5 < DisplayWidth(label))
                                 throw new InvalidOperationException($"Share button '{button.Content}' label is trimmed ({state}).");
                         }
                         for (var i = 0; i < buttonsInScroll.Length; i++)
@@ -751,7 +811,7 @@ internal static class Program
                         {
                             // Cards stay inside the viewport; a long name is ellipsised, never allowed to widen the card.
                             var cards = shown.OfType<Border>().Where(border => ReferenceEquals(border.Style, app.FindResource("SettingsGroupStyle"))).ToArray();
-                            if (cards.Length < (publish ? 3 : 4))
+                            if (cards.Length < (publish ? 2 : segment == "transfer" ? 3 : transfer ? 2 : 4))
                                 throw new InvalidOperationException($"Share page realized too few cards ({state}): {cards.Length}");
                             foreach (var card in cards)
                             {
@@ -759,7 +819,61 @@ internal static class Program
                                 if (cardRect.Left < viewport.Left - 0.5 || cardRect.Right > viewport.Right + 0.5)
                                     throw new InvalidOperationException($"Share card is wider than its viewport ({state}): {cardRect} in {viewport}");
                             }
-                            if (!publish)
+                            if (segment == "transfer")
+                            {
+                                // Home: one navigation row per matched device; a device's progress bar shows only while it has a running transfer.
+                                var deviceList = (ItemsControl)window.FindName("MatchedDeviceList");
+                                var navRows = buttonsInScroll.Where(button => IsInside(button, deviceList) && ReferenceEquals(button.Style, app.FindResource("SettingsNavRowStyle"))).ToArray();
+                                if (navRows.Length != previewContext.MatchedDeviceRows.Count)
+                                    throw new InvalidOperationException($"Every matched device needs one row that opens its page ({state}): {navRows.Length}");
+                                var busy = previewContext.MatchedDeviceRows.Count(row => row.ActiveProgressVisibility == Visibility.Visible);
+                                var bars = shown.OfType<ProgressBar>().ToArray();
+                                if (busy == 0 || bars.Length != busy)
+                                    throw new InvalidOperationException($"Device rows must show progress only while transferring ({state}): {bars.Length} of {busy}");
+                                foreach (var row in previewContext.MatchedDeviceRows)
+                                {
+                                    var statusBlock = shown.OfType<TextBlock>().FirstOrDefault(block => block.Text == row.StatusText);
+                                    if (statusBlock is null || Bounds(statusBlock, surface).Right > viewport.Right + 0.5)
+                                        throw new InvalidOperationException($"Device row status '{row.StatusText}' is missing or clipped ({state}).");
+                                }
+                                if (shown.OfType<Button>().Any(button => Equals(button.Content, "发送文件…") || Equals(button.Content, "取消")))
+                                    throw new InvalidOperationException($"Send and cancel belong on the device page, not the home list ({state}).");
+                            }
+                            else if (segment == "transfer-device")
+                            {
+                                // Device page: progress and cancel only while running, "open" only for saved files,
+                                // failed/declined lines in the warning token, browse only when the device can be browsed.
+                                var running = previewContext.TransferRows.Count(row => !row.Snapshot.IsFinished);
+                                var bars = shown.OfType<ProgressBar>().ToArray();
+                                if (bars.Length != running)
+                                    throw new InvalidOperationException($"Progress bars must show only on running transfers ({state}): {bars.Length} of {running}");
+                                foreach (var bar in bars)
+                                {
+                                    var barRect = Bounds(bar, surface);
+                                    if (barRect.Width < 80 || barRect.Right > viewport.Right + 0.5)
+                                        throw new InvalidOperationException($"Transfer progress bar is clipped ({state}): {barRect}");
+                                }
+                                if (buttonsInScroll.Count(button => Equals(button.Content, "取消")) != running)
+                                    throw new InvalidOperationException($"Cancel must show only on running transfers ({state}).");
+                                if (buttonsInScroll.Count(button => Equals(button.Content, "打开位置")) !=
+                                    previewContext.TransferRows.Count(row => row.OpenVisibility == Visibility.Visible))
+                                    throw new InvalidOperationException($"\"打开位置\" must show only on saved files ({state}).");
+                                if (buttonsInScroll.Count(button => Equals(button.Content, "浏览发布")) != (pageDevice.Device.CanBrowse ? 1 : 0))
+                                    throw new InvalidOperationException($"\"浏览发布\" must show only for a device that can be browsed ({state}).");
+                                if (!previewContext.TransferRows.Any(row => row.IsProblem))
+                                    throw new InvalidOperationException($"The device page sample must include a failed transfer ({state}).");
+                                var warning = ((SolidColorBrush)app.FindResource("WarningBrush")).Color;
+                                var surfaceColor = ((SolidColorBrush)app.FindResource("SurfaceBrush")).Color;
+                                foreach (var row in previewContext.TransferRows.Where(row => row.IsProblem))
+                                {
+                                    var detail = textsOutsideButtons.Single(block => block.Text == row.DeviceDetail);
+                                    if (((SolidColorBrush)detail.Foreground).Color != warning)
+                                        throw new InvalidOperationException($"Failed transfer line must use the warning token ({state}).");
+                                    if (Contrast(warning, surfaceColor) < 3.0)
+                                        throw new InvalidOperationException($"Transfer warning colour is hard to read on the card ({state}).");
+                                }
+                            }
+                            else if (segment == "subscribe")
                             {
                                 // Status line colour comes from tokens: warning for a problem or pending update, secondary otherwise.
                                 var warning = ((SolidColorBrush)app.FindResource("WarningBrush")).Color;
@@ -782,26 +896,56 @@ internal static class Program
                                     throw new InvalidOperationException($"Rollback must be enabled only where a snapshot exists ({state}).");
                             }
                         }
-                        else
+                        else if (segment != "transfer-settings")
                         {
-                            var visibleEmpty = emptyTexts.Where(empty => scroll.IsAncestorOf(empty)).ToArray();
+                            Visual page = transfer ? transferPanels[segment] : scroll;
+                            var visibleEmpty = emptyTexts.Where(empty => page.IsAncestorOf(empty)).ToArray();
                             if (visibleEmpty.Length == 0 || visibleEmpty.Any(empty => !empty.IsVisible || Bounds(empty, surface).Right > viewport.Right + 0.5))
                                 throw new InvalidOperationException($"Share empty-state hints must be visible and unclipped ({state}).");
                         }
-                        if (segment == "publish")
+                        if (segment == "transfer")
                         {
                             var code = (TextBlock)window.FindName("SharePairingCodeText");
+                            var matchPage = (Button)window.FindName("ShareOpenMatchPageButton");
+                            var settingsRow = (Button)window.FindName("ShareOpenTransferSettingsButton");
+                            if (Bounds(code, surface).Right > Bounds(matchPage, surface).Left + 0.5 || code.ActualWidth + 0.5 < DisplayWidth(code))
+                                throw new InvalidOperationException($"Match code collides with its button ({state}).");
+                            if (!settingsRow.IsVisible || Bounds(settingsRow, surface).Right > viewport.Right + 0.5)
+                                throw new InvalidOperationException($"Transfer settings must stay reachable from the home page ({state}).");
+                        }
+                        if (segment == "transfer-device")
+                        {
+                            // The drop zone sits inside the viewport and lights up (accent border) while files hover over it.
+                            var zone = (Border)window.FindName("TransferDropZone");
+                            var zoneRect = Bounds(zone, surface);
+                            if (!zone.IsVisible || zoneRect.Left < viewport.Left - 0.5 || zoneRect.Right > viewport.Right + 0.5 || zoneRect.Height < 80)
+                                throw new InvalidOperationException($"The drop zone must be visible inside the device page ({state}): {zoneRect}");
+                            var idle = ((SolidColorBrush)zone.BorderBrush).Color;
+                            pageDevice.IsDropTarget = true;
+                            surface.UpdateLayout();
+                            var lit = ((SolidColorBrush)zone.BorderBrush).Color;
+                            pageDevice.IsDropTarget = false;
+                            surface.UpdateLayout();
+                            if (lit != ((SolidColorBrush)app.FindResource("AccentBrandStrongBrush")).Color || lit == idle ||
+                                ((SolidColorBrush)zone.BorderBrush).Color != idle)
+                                throw new InvalidOperationException($"The drop zone must highlight with the accent token only while files hover ({state}).");
+                        }
+                        if (segment == "transfer-settings")
+                        {
                             var issue = (Button)window.FindName("ShareIssueCodeButton");
                             var firewall = (Button)window.FindName("ShareCopyFirewallButton");
-                            if (Bounds(code, surface).Right > Bounds(issue, surface).Left + 0.5 || code.ActualWidth + 0.5 < DisplayWidth(code))
-                                throw new InvalidOperationException($"Pairing code collides with its button ({state}).");
+                            if (!issue.IsVisible || Bounds(issue, surface).Right > viewport.Right + 0.5)
+                                throw new InvalidOperationException($"Changing the match code must stay reachable ({state}).");
                             if (!firewall.IsVisible || Bounds(firewall, surface).Right > viewport.Right + 0.5)
                                 throw new InvalidOperationException($"The firewall hint button must stay reachable ({state}).");
+                            var folderText = (TextBlock)window.FindName("ShareReceiveFolderText");
+                            if (folderText.TextTrimming == TextTrimming.None && folderText.TextWrapping == TextWrapping.NoWrap)
+                                throw new InvalidOperationException($"A long receive folder must be ellipsised or wrapped ({state}).");
                         }
-                        else
+                        if (segment is "subscribe" or "transfer-match")
                         {
-                            var address = (TextBox)window.FindName("ShareManualAddressBox");
-                            var connect = (Button)window.FindName("ShareManualConnectButton");
+                            var address = (TextBox)window.FindName(transfer ? "ShareTransferAddressBox" : "ShareManualAddressBox");
+                            var connect = (Button)window.FindName(transfer ? "ShareTransferMatchButton" : "ShareManualConnectButton");
                             var addressOverlap = Rect.Intersect(Bounds(address, surface), Bounds(connect, surface));
                             if (address.ActualWidth < 120 || !addressOverlap.IsEmpty && addressOverlap.Width > 0.5 && addressOverlap.Height > 0.5 || !connect.IsVisible)
                                 throw new InvalidOperationException($"Manual address box is too narrow or overlaps its button ({state}): {address.ActualWidth:F0}");
@@ -821,13 +965,15 @@ internal static class Program
                     // Leave the default state (publish segment, populated) for the shared render below.
                     publishChip.IsChecked = true;
                     subscribeChip.IsChecked = false;
+                    transferChip.IsChecked = false;
                     publishScroll.Visibility = Visibility.Visible;
                     subscribeScroll.Visibility = Visibility.Collapsed;
-                    foreach (var row in SamplePublishedRows()) previewContext.PublishedRows.Add(row);
-                    foreach (var row in SampleSubscriberRows()) previewContext.SubscriberRows.Add(row);
-                    foreach (var row in SamplePublisherRows()) previewContext.PublisherRows.Add(row);
-                    foreach (var row in SamplePairedPublisherRows()) previewContext.PairedPublisherRows.Add(row);
-                    foreach (var row in SampleSubscriptionRows()) previewContext.SubscriptionRows.Add(row);
+                    transferScroll.Visibility = Visibility.Collapsed;
+                    foreach (var (name, panel) in transferPanels) panel.Visibility = name == "transfer" ? Visibility.Visible : Visibility.Collapsed;
+                    transferPanels["transfer-device"].DataContext = null;
+                    shareStatus.Text = "监听中 · 端口 53318";
+                    foreach (var rows in shareCollections) rows.Clear();
+                    FillShareRows();
                     foreach (var empty in emptyTexts) empty.Visibility = Visibility.Collapsed;
                     footerCount.Text = $"{previewContext.PublishedRows.Count} 项发布";
                     surface.UpdateLayout();
@@ -1086,6 +1232,9 @@ internal static class Program
         public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.PublisherRowViewModel> PublisherRows { get; set; } = [];
         public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.PairedPublisherRowViewModel> PairedPublisherRows { get; set; } = [];
         public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.SubscriptionRowViewModel> SubscriptionRows { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.MatchedDeviceRowViewModel> MatchedDeviceRows { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.NearbyDeviceRowViewModel> NearbyDeviceRows { get; set; } = [];
+        public System.Collections.ObjectModel.ObservableCollection<ClipboardManager.Windows.TransferRowViewModel> TransferRows { get; set; } = [];
     }
 
     private const string SampleFingerprint = "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90";
@@ -1130,6 +1279,36 @@ internal static class Program
         new(SampleSubscription("一个名字特别特别长的发布配置名称用来验证省略号不会撑开行宽", 2, 4, null, true, false), "一台设备名称非常非常长的家用台式机", true),
         new(SampleSubscription("客服话术", 1, 1, "无法连接发布者：连接超时。请确认对方在线，并在对方电脑的 Windows 防火墙中放行 TCP/UDP 53318。", false, false), "办公室电脑", false),
         new(SampleSubscription("会议模板", 5, 6, null, false, true), "办公室电脑", true)
+    ];
+
+    private static string OfficeFingerprint => SampleFingerprint.ToUpperInvariant();
+    private static string HomeFingerprint => ("0F9E8D7C6B5A" + SampleFingerprint[12..]).ToUpperInvariant();
+
+    private static ClipboardManager.Windows.MatchedDeviceRowViewModel[] SampleMatchedDeviceRows() =>
+    [
+        new(new MatchedDevice(OfficeFingerprint, "办公室电脑", "192.168.100.123:53318", DateTimeOffset.Now.AddDays(-2), true, true, [])),
+        new(new MatchedDevice(HomeFingerprint, "一台设备名称非常非常长的家用台式机用来验证省略号", null,
+            DateTimeOffset.Now.AddDays(-9), false, false, []))
+    ];
+
+    private static ClipboardManager.Windows.NearbyDeviceRowViewModel[] SampleNearbyDeviceRows() =>
+    [
+        new(new DiscoveredPublisher("会议室投屏电脑", "192.168.100.77:53318", "7C6B5A0F9E8D", 1, [], DateTimeOffset.Now))
+    ];
+
+    private static ClipboardManager.Windows.TransferRowViewModel[] SampleTransferRows() =>
+    [
+        new(new FileTransferSnapshot(Guid.NewGuid(), FileTransferDirection.Send, "办公室电脑", OfficeFingerprint, "项目素材-2026-11-一个很长的文件名用来验证省略号.zip",
+            2_684_354_560, 1_208_000_000, FileTransferState.Transferring, null, null, DateTimeOffset.Now)),
+        new(new FileTransferSnapshot(Guid.NewGuid(), FileTransferDirection.Receive, "办公室电脑", OfficeFingerprint, "季度报表.xlsx",
+            3_145_728, 3_145_728, FileTransferState.Completed, null, @"C:\Users\同事\Downloads\剪切板传输\季度报表.xlsx", DateTimeOffset.Now)),
+        new(new FileTransferSnapshot(Guid.NewGuid(), FileTransferDirection.Send, "办公室电脑", OfficeFingerprint, "安装包.exe",
+            73_400_320, 10_485_760, FileTransferState.Failed, "无法连接对方：连接超时。请确认对方在线，并在对方电脑的 Windows 防火墙中放行 TCP/UDP 53318。", null,
+            DateTimeOffset.Now)),
+        new(new FileTransferSnapshot(Guid.NewGuid(), FileTransferDirection.Send, "办公室电脑", OfficeFingerprint, "说明.txt",
+            2048, 0, FileTransferState.WaitingForAccept, null, null, DateTimeOffset.Now)),
+        new(new FileTransferSnapshot(Guid.NewGuid(), FileTransferDirection.Receive, "一台设备名称非常非常长的家用台式机", HomeFingerprint, "照片.jpg",
+            1_048_576, 1_048_576, FileTransferState.Completed, null, @"C:\Users\同事\Downloads\剪切板传输\照片.jpg", DateTimeOffset.Now))
     ];
 
     private static ConfigSubscription SampleSubscription(string name, int local, int latest, string? error, bool auto, bool stay) =>

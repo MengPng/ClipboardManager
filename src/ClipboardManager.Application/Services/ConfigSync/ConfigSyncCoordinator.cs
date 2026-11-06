@@ -1,3 +1,4 @@
+using ClipboardManager.Application.Services.LanTransfer;
 using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -16,7 +17,8 @@ public sealed record ConfigSyncSchedule(
 }
 
 /// <summary>
-/// 配置同步的后台协调：按需启动监听与组播广播、定时检查订阅更新、自动发布。
+/// 配置同步与局域网传输的后台协调：载入本机匹配码；“保持局域网在线”或有发布时监听并广播；
+/// 根据广播更新已匹配设备地址；定时检查订阅更新、自动发布。
 /// 全部在后台线程运行，任何失败只记录，不影响剪切板监听主链路与本地功能。
 /// </summary>
 public sealed class ConfigSyncCoordinator(
@@ -27,6 +29,8 @@ public sealed class ConfigSyncCoordinator(
     ConfigSubscriptionService subscriptions,
     ConfigSyncEndpoint endpoint,
     PairingSessions pairing,
+    LanDeviceService devices,
+    IAppSettingsStore settingsStore,
     TimeProvider time,
     ILogger<ConfigSyncCoordinator> logger,
     ConfigSyncSchedule? schedule = null) : IDisposable
@@ -61,31 +65,27 @@ public sealed class ConfigSyncCoordinator(
         publishing.Changed += OnInnerChanged;
         subscriptions.Changed += OnInnerChanged;
         endpoint.PairingCompleted += OnInnerChanged;
+        devices.Changed += OnDevicesChanged;
+        discovery.Changed += OnDiscoveryChanged;
+        pairing.CodeDisabled += OnCodeDisabled;
         _ = Task.Run(() => RunAsync(token));
     }
 
-    /// <summary>生成配对码前确保监听已启动（没有发布内容时也需要接受配对）。</summary>
-    public async Task<PairingCodeInfo> IssuePairingCodeAsync(CancellationToken cancellationToken = default)
-    {
-        await server.StartAsync(cancellationToken);
-        if (!server.Status.IsRunning)
-            throw new ConfigSyncException(ConfigSyncError.Local,
-                "无法启动本机监听：" + (server.Status.LastError ?? "未知原因") + "。" + ConfigSyncPolicy.FirewallHint);
-        var info = publishing.IssuePairingCode();
-        Changed?.Invoke(this, EventArgs.Empty);
-        return info;
-    }
+    /// <summary>切换“保持局域网在线”后立即生效。</summary>
+    public Task SetKeepOnlineAsync(CancellationToken cancellationToken = default) => RefreshAsync(cancellationToken);
 
-    /// <summary>刷新监听与广播：有发布内容或配对码有效时监听，否则停止。</summary>
+    /// <summary>刷新监听与广播：保持局域网在线或有发布内容时监听，否则停止。</summary>
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         await refreshLock.WaitAsync(cancellationToken);
         try
         {
             var published = await repository.GetPublishedAsync(cancellationToken);
-            var needServer = published.Count > 0 || pairing.Current is not null;
+            var keepOnline = (await settingsStore.LoadAsync(cancellationToken)).LanKeepOnline;
+            var needServer = keepOnline || published.Count > 0;
             if (needServer) await server.StartAsync(cancellationToken);
             else await server.StopAsync();
+            discovery.SetAlwaysOn(keepOnline && server.Status.IsRunning);
             discovery.SetAnnouncement(server.Status.IsRunning
                 ? published.Select(config => new PublicationAnnouncement(config.Name, config.CurrentVersion)).ToList()
                 : []);
@@ -191,6 +191,9 @@ public sealed class ConfigSyncCoordinator(
             publishing.Changed -= OnInnerChanged;
             subscriptions.Changed -= OnInnerChanged;
             endpoint.PairingCompleted -= OnInnerChanged;
+            devices.Changed -= OnDevicesChanged;
+            discovery.Changed -= OnDiscoveryChanged;
+            pairing.CodeDisabled -= OnCodeDisabled;
         }
     }
 
@@ -198,6 +201,11 @@ public sealed class ConfigSyncCoordinator(
     {
         try
         {
+            try { await devices.LoadMatchCodeAsync(token); }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.LogWarning(exception, "载入本机匹配码失败");
+            }
             await RefreshAsync(token);
             await Task.WhenAll(CheckLoopAsync(token), AutoPublishLoopAsync(token));
         }
@@ -244,6 +252,20 @@ public sealed class ConfigSyncCoordinator(
             });
         Changed?.Invoke(this, EventArgs.Empty);
     }
+
+    private void OnDevicesChanged(object? sender, EventArgs e) => Changed?.Invoke(this, EventArgs.Empty);
+
+    private void OnDiscoveryChanged(object? sender, EventArgs e) => _ = Task.Run(async () =>
+    {
+        try { await devices.SyncAddressesFromDiscoveryAsync(); }
+        catch (Exception exception) { logger.LogWarning(exception, "根据广播更新设备地址失败"); }
+    });
+
+    private void OnCodeDisabled(object? sender, EventArgs e) => _ = Task.Run(async () =>
+    {
+        try { await devices.PersistDisabledAsync(); }
+        catch (Exception exception) { logger.LogWarning(exception, "保存匹配码停用状态失败"); }
+    });
 
     private void NotifyOnce(ConfigUpdateNotice notice)
     {

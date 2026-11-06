@@ -20,7 +20,8 @@ public sealed class ConfigSyncServer(
     ConfigSyncIdentity identity,
     IConfigSyncEndpoint endpoint,
     ILogger<ConfigSyncServer> logger,
-    ConfigSyncServerOptions? options = null) : IConfigSyncServer, IAsyncDisposable
+    ConfigSyncServerOptions? options = null,
+    IFileTransferInbox? inbox = null) : IConfigSyncServer, IAsyncDisposable
 {
     private const int MaxHeaderBytes = 8 * 1024;
     private const int MaxBodyBytes = 4 * 1024;
@@ -148,7 +149,9 @@ public sealed class ConfigSyncServer(
                 }, deadline.Token);
                 var clientFingerprint = ConfigSyncPolicy.Fingerprint(ssl.RemoteCertificate!.GetRawCertData());
                 var request = await ReadRequestAsync(ssl, deadline.Token);
-                await DispatchAsync(ssl, request, clientFingerprint, deadline, stop);
+                var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
+                if (remote is { IsIPv4MappedToIPv6: true }) remote = remote.MapToIPv4();
+                await DispatchAsync(ssl, request, clientFingerprint, remote?.ToString(), deadline, stop);
             }
         }
         catch (OperationCanceledException) { }
@@ -167,7 +170,7 @@ public sealed class ConfigSyncServer(
         }
     }
 
-    private async Task DispatchAsync(SslStream stream, HttpRequest request, string clientFingerprint,
+    private async Task DispatchAsync(SslStream stream, HttpRequest request, string clientFingerprint, string? clientHost,
         CancellationTokenSource deadline, CancellationToken stop)
     {
         var token = deadline.Token;
@@ -183,7 +186,7 @@ public sealed class ConfigSyncServer(
                 {
                     var body = ParseBody<PairBeginRequest>(request);
                     var nonce = DecodeBytes(body.Nonce, PairingProtocol.NonceBytes);
-                    var (serverNonce, name) = await endpoint.PairBeginAsync(clientFingerprint, body.Name ?? string.Empty, nonce, token);
+                    var (serverNonce, name) = await endpoint.PairBeginAsync(clientFingerprint, body.Name ?? string.Empty, nonce, body.Port, token);
                     await WriteJsonAsync(stream, 200, new PairBeginResponse(Convert.ToBase64String(serverNonce), name), token);
                     return;
                 }
@@ -192,8 +195,32 @@ public sealed class ConfigSyncServer(
                 {
                     var body = ParseBody<PairFinishRequest>(request);
                     var proof = DecodeBytes(body.Proof, 32);
-                    var (serverProof, name) = await endpoint.PairFinishAsync(clientFingerprint, identity.Fingerprint, proof, token);
+                    var (serverProof, name) = await endpoint.PairFinishAsync(clientFingerprint, identity.Fingerprint, proof, clientHost, token);
                     await WriteJsonAsync(stream, 200, new PairFinishResponse(Convert.ToBase64String(serverProof), name), token);
+                    return;
+                }
+
+                case ("POST", "/v1/transfer/offer") when inbox is not null:
+                {
+                    var body = ParseBody<TransferOfferRequest>(request);
+                    // 等待对方用户确认：把空闲超时放宽到确认时限之后。
+                    deadline.CancelAfter(FileTransferPolicy.DecisionTimeout + TimeSpan.FromSeconds(15));
+                    var decision = await inbox.OfferAsync(clientFingerprint,
+                        new FileOffer(body.Name ?? string.Empty, body.Size, body.Sha256 ?? string.Empty), token);
+                    deadline.CancelAfter(ConfigSyncPolicy.RequestTimeout);
+                    await WriteJsonAsync(stream, 200, new TransferOfferResponse(decision.TransferId, decision.Offset), token);
+                    return;
+                }
+
+                case ("PUT", "/v1/transfer/data") when inbox is not null:
+                {
+                    if (!request.Query.TryGetValue("id", out var idText) || !Guid.TryParse(idText, out var transferId) ||
+                        !request.Query.TryGetValue("offset", out var offsetText) || !long.TryParse(offsetText, out var offset) || offset < 0)
+                        throw new InvalidDataException("缺少或错误的传输编号/偏移。");
+                    var body = new LengthLimitedStream(request.Body, stream, request.ContentLength);
+                    var saved = await inbox.ReceiveAsync(clientFingerprint, transferId, offset, request.ContentLength, body,
+                        () => deadline.CancelAfter(ConfigSyncPolicy.RequestTimeout), token);
+                    await WriteJsonAsync(stream, 200, new TransferDoneResponse(saved), token);
                     return;
                 }
             }
@@ -266,6 +293,22 @@ public sealed class ConfigSyncServer(
             };
             await WriteErrorAsync(stream, code, ex.Error.ToString(), ex.Message, ex.RemainingAttempts, token);
         }
+        catch (FileTransferException ex)
+        {
+            var code = ex.Error switch
+            {
+                FileTransferError.NotMatched => 401,
+                FileTransferError.ReceiveDisabled or FileTransferError.Declined => 403,
+                FileTransferError.UnknownTransfer => 404,
+                FileTransferError.BadOffset => 409,
+                FileTransferError.HashMismatch => 422,
+                FileTransferError.Busy => 503,
+                FileTransferError.InsufficientSpace => 507,
+                _ => 400
+            };
+            deadline.CancelAfter(ConfigSyncPolicy.RequestTimeout);
+            await WriteJsonAsync(stream, code, new ErrorResponse(ex.Error.ToString(), ex.Message, null, ex.ExpectedOffset), deadline.Token);
+        }
         catch (InvalidDataException ex)
         {
             await WriteErrorAsync(stream, 400, nameof(ConfigSyncError.Protocol), ex.Message, null, token);
@@ -334,29 +377,43 @@ public sealed class ConfigSyncServer(
         var requestLine = lines[0].Split(' ');
         if (requestLine.Length != 3 || !requestLine[2].StartsWith("HTTP/1.", StringComparison.Ordinal))
             throw new InvalidDataException("请求行格式不正确。");
-        var contentLength = 0;
+        long contentLength = 0;
         foreach (var line in lines.Skip(1))
         {
             var colon = line.IndexOf(':');
             if (colon > 0 && line[..colon].Equals("Content-Length", StringComparison.OrdinalIgnoreCase) &&
-                !int.TryParse(line[(colon + 1)..].Trim(), out contentLength))
+                !long.TryParse(line[(colon + 1)..].Trim(), out contentLength))
                 throw new InvalidDataException("Content-Length 不正确。");
+            if (colon > 0 && line[..colon].Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("不支持分块传输编码。");
         }
-        if (contentLength is < 0 or > MaxBodyBytes) throw new InvalidDataException("请求内容过大。");
+        var method = requestLine[0].ToUpperInvariant();
+        var target = requestLine[1];
+        // 只有文件上传可以携带大请求体，并且以流的方式交给接收方，不在内存中缓存。
+        var streaming = method == "PUT" && target.StartsWith("/v1/transfer/data?", StringComparison.Ordinal);
+        if (contentLength < 0 || (!streaming && contentLength > MaxBodyBytes)) throw new InvalidDataException("请求内容过大。");
 
         var bodyStart = headerEnd + 4;
         var have = length - bodyStart;
-        var body = new byte[contentLength];
-        Array.Copy(buffer, bodyStart, body, 0, Math.Min(have, contentLength));
-        var filled = Math.Min(have, contentLength);
-        while (filled < contentLength)
+        byte[] body;
+        if (streaming)
         {
-            var read = await stream.ReadAsync(body.AsMemory(filled), token);
-            if (read == 0) throw new InvalidDataException("请求内容不完整。");
-            filled += read;
+            body = new byte[(int)Math.Min(have, contentLength)];
+            Array.Copy(buffer, bodyStart, body, 0, body.Length);
+        }
+        else
+        {
+            body = new byte[contentLength];
+            var filled = (int)Math.Min(have, contentLength);
+            Array.Copy(buffer, bodyStart, body, 0, filled);
+            while (filled < contentLength)
+            {
+                var read = await stream.ReadAsync(body.AsMemory(filled), token);
+                if (read == 0) throw new InvalidDataException("请求内容不完整。");
+                filled += read;
+            }
         }
 
-        var target = requestLine[1];
         var question = target.IndexOf('?');
         var path = question < 0 ? target : target[..question];
         var query = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -369,7 +426,7 @@ public sealed class ConfigSyncServer(
                 query[key] = eq < 0 ? string.Empty : Uri.UnescapeDataString(pair[(eq + 1)..]);
             }
         }
-        return new HttpRequest(requestLine[0].ToUpperInvariant(), path, query, body);
+        return new HttpRequest(method, path, query, body, contentLength);
     }
 
     private static int IndexOfHeaderEnd(byte[] buffer, int length)
@@ -391,7 +448,8 @@ public sealed class ConfigSyncServer(
         var reason = status switch
         {
             200 => "OK", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found",
-            410 => "Gone", 429 => "Too Many Requests", _ => "Error"
+            409 => "Conflict", 410 => "Gone", 422 => "Unprocessable Entity", 429 => "Too Many Requests",
+            503 => "Service Unavailable", 507 => "Insufficient Storage", _ => "Error"
         };
         var header = Encoding.ASCII.GetBytes(
             $"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
@@ -400,11 +458,57 @@ public sealed class ConfigSyncServer(
         await stream.FlushAsync(token);
     }
 
-    private sealed record HttpRequest(string Method, string Path, Dictionary<string, string> Query, byte[] Body);
+    /// <summary>Body 对普通请求是完整内容；对文件上传只是已随请求头读入的开头部分，其余仍在连接上。</summary>
+    private sealed record HttpRequest(string Method, string Path, Dictionary<string, string> Query, byte[] Body, long ContentLength);
+
+    /// <summary>先读已缓存的开头，再从连接读取，总计不超过 Content-Length。</summary>
+    private sealed class LengthLimitedStream(byte[] prefix, Stream inner, long length) : Stream
+    {
+        private readonly long total = length;
+        private int prefixOffset;
+        private long remaining = length;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => total;
+        public override long Position { get => total - remaining; set => throw new NotSupportedException(); }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (remaining <= 0 || buffer.Length == 0) return 0;
+            int read;
+            if (prefixOffset < prefix.Length)
+            {
+                read = (int)Math.Min(Math.Min(buffer.Length, prefix.Length - prefixOffset), remaining);
+                prefix.AsMemory(prefixOffset, read).CopyTo(buffer);
+                prefixOffset += read;
+            }
+            else
+            {
+                read = await inner.ReadAsync(buffer[..(int)Math.Min(buffer.Length, remaining)], cancellationToken);
+                if (read == 0) throw new IOException("对方在文件发送完成前断开了连接。");
+            }
+            remaining -= read;
+            return read;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count).GetAwaiter().GetResult();
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 }
 
-internal sealed record PairBeginRequest(string? Name, string? Nonce);
+internal sealed record PairBeginRequest(string? Name, string? Nonce, int? Port = null);
 internal sealed record PairBeginResponse(string Nonce, string Name);
 internal sealed record PairFinishRequest(string? Proof);
 internal sealed record PairFinishResponse(string Proof, string Name);
-internal sealed record ErrorResponse(string Error, string Message, int? Remaining);
+internal sealed record ErrorResponse(string Error, string Message, int? Remaining, long? Offset = null);
+internal sealed record TransferOfferRequest(string? Name, long Size, string? Sha256);
+internal sealed record TransferOfferResponse(Guid Id, long Offset);
+internal sealed record TransferDoneResponse(string SavedName);

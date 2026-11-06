@@ -615,7 +615,7 @@
         <Setter Property="Foreground" Value="{DynamicResource LabelSecondaryBrush}" />
         <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
         <Setter Property="MinHeight" Value="34" />
-        <Setter Property="Padding" Value="4,6" />
+        <Setter Property="Padding" Value="{DynamicResource NavTabPadding}" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="Template">
             <Setter.Value>
@@ -626,7 +626,7 @@
                                 BorderBrush="Transparent" BorderThickness="{DynamicResource NavPillBorderThickness}">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <!-- 主题图标：只在 ThemeIconVisibility = Visible 的主题（Kubai）里占位；静止/悬停两图叠放、160ms 渐变。 -->
-                                <Grid Width="20" Height="20" Margin="0,0,6,0" VerticalAlignment="Center"
+                                <Grid Width="16" Height="16" Margin="0,0,4,0" VerticalAlignment="Center"
                                       Visibility="{DynamicResource ThemeIconVisibility}">
                                     <Image x:Name="IconRest" Source="{Binding (services:ThemeIcon.Rest), RelativeSource={RelativeSource TemplatedParent}}"
                                            Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
@@ -959,8 +959,8 @@
 
     <!-- 待办统计小胶囊（可点击下钻的 ToggleButton）。圆角取 RadiusPill：标准主题仍是小圆角，夹夹为胶囊。 -->
     <Style x:Key="TodoStatPillStyle" TargetType="ToggleButton">
-        <Setter Property="Margin" Value="0,0,3,4" />
-        <Setter Property="Padding" Value="5,2" />
+        <Setter Property="Margin" Value="0,0,2,4" />
+        <Setter Property="Padding" Value="4,2" />
         <Setter Property="FontSize" Value="{DynamicResource FontSizeMeta}" />
         <Setter Property="Foreground" Value="{DynamicResource LabelSecondaryBrush}" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
@@ -1459,6 +1459,70 @@
         <Setter Property="Margin" Value="14,12,14,12" />
         <Setter Property="Foreground" Value="{DynamicResource LabelSecondaryBrush}" />
         <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+    </Style>
+
+    <!-- 卡片内可点击的整行（共享 → 传输的设备行、"传输设置"入口）：悬停淡底、按下加深、键盘焦点描边。 -->
+    <Style x:Key="SettingsNavRowStyle" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource LabelPrimaryBrush}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Root" Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                            CornerRadius="{DynamicResource RadiusMedium}" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource HoverOverlayBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource PressedOverlayBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 设备行在拖入文件时高亮（DataContext.IsDropTarget）。 -->
+    <Style x:Key="TransferDropHighlightStyle" TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{DynamicResource RadiusMedium}" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrandStrongBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- 设备页的拖放区：沿用分组卡片，拖入文件时换成强调色。 -->
+    <Style x:Key="TransferDropZoneStyle" TargetType="Border" BasedOn="{StaticResource SettingsGroupStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrandStrongBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- 在线状态点：在线用成功色，否则用三级文字色。 -->
+    <Style x:Key="TransferOnlineDotStyle" TargetType="Ellipse">
+        <Setter Property="Fill" Value="{DynamicResource LabelTertiaryBrush}" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsOnline}" Value="True">
+                <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
     </Style>
 
     <!-- Theme picker card: the content is a swatch drawn from that theme's own palette. -->

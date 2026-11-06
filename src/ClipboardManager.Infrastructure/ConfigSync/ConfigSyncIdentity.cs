@@ -22,6 +22,65 @@ public sealed class ConfigSyncIdentity(AppPaths paths, ICredentialVault vault, I
 
     public string Fingerprint => ConfigSyncPolicy.Fingerprint(Certificate.RawData);
 
+    private readonly SemaphoreSlim matchCodeLock = new(1, 1);
+
+    /// <summary>固定匹配码只存凭据管理器（ADR-0008）；格式为 6 位数字，停用时追加 ":disabled"。</summary>
+    public async Task<(string Code, bool Disabled)> GetMatchCodeAsync(CancellationToken cancellationToken = default)
+    {
+        await matchCodeLock.WaitAsync(cancellationToken);
+        try
+        {
+            var stored = await vault.ReadAsync(LanMatchPolicy.VaultKey, cancellationToken);
+            if (stored is not null)
+            {
+                var disabled = stored.EndsWith(LanMatchPolicy.DisabledSuffix, StringComparison.Ordinal);
+                var code = disabled ? stored[..^LanMatchPolicy.DisabledSuffix.Length] : stored;
+                if (PairingProtocol.IsWellFormedCode(code)) return (code, disabled);
+                logger.LogWarning("凭据管理器中的匹配码格式不正确，将重新生成。");
+            }
+            var created = PairingProtocol.GenerateCode();
+            await vault.WriteAsync(LanMatchPolicy.VaultKey, created, cancellationToken);
+            return (created, false);
+        }
+        finally
+        {
+            matchCodeLock.Release();
+        }
+    }
+
+    public async Task<string> RegenerateMatchCodeAsync(CancellationToken cancellationToken = default)
+    {
+        await matchCodeLock.WaitAsync(cancellationToken);
+        try
+        {
+            var previous = await vault.ReadAsync(LanMatchPolicy.VaultKey, cancellationToken);
+            string created;
+            do created = PairingProtocol.GenerateCode();
+            while (previous is not null && previous.StartsWith(created, StringComparison.Ordinal));
+            await vault.WriteAsync(LanMatchPolicy.VaultKey, created, cancellationToken);
+            return created;
+        }
+        finally
+        {
+            matchCodeLock.Release();
+        }
+    }
+
+    public async Task DisableMatchCodeAsync(CancellationToken cancellationToken = default)
+    {
+        await matchCodeLock.WaitAsync(cancellationToken);
+        try
+        {
+            var stored = await vault.ReadAsync(LanMatchPolicy.VaultKey, cancellationToken);
+            if (stored is null || stored.EndsWith(LanMatchPolicy.DisabledSuffix, StringComparison.Ordinal)) return;
+            await vault.WriteAsync(LanMatchPolicy.VaultKey, stored + LanMatchPolicy.DisabledSuffix, cancellationToken);
+        }
+        finally
+        {
+            matchCodeLock.Release();
+        }
+    }
+
     private static X509Certificate2 LoadOrCreate(AppPaths paths, ICredentialVault vault, ILogger logger)
     {
         var certPath = Path.Combine(paths.Root, "sync", "identity.cer");

@@ -109,6 +109,8 @@
     <!-- 顶部页签：标准 = 沙色圆角块 + 赤陶下划线 + 底部发线；夹夹 = 描边胶囊，无下划线。 -->
     <CornerRadius x:Key="NavPillRadius">6</CornerRadius>
     <Thickness x:Key="NavPillBorderThickness">0</Thickness>
+    <!-- 导航页签内边距：Kubai 页签多一个图标，300 宽下收窄左右内边距，保证两字标签不被截断。 -->
+    <Thickness x:Key="NavTabPadding">4,6</Thickness>
     <SolidColorBrush x:Key="NavPillBorderBrush" Color="#00FFFFFF" />
     <Thickness x:Key="NavBottomBorderThickness">0,0,0,1</Thickness>
     <SolidColorBrush x:Key="NavMarkBrush" Color="#FFD97757" />

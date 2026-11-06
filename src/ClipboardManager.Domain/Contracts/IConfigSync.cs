@@ -16,6 +16,8 @@ public interface IConfigSyncRepository
     Task SavePeerAsync(PairedPeer peer, CancellationToken cancellationToken = default);
     Task UpdatePeerAddressAsync(Guid peerId, string address, CancellationToken cancellationToken = default);
     Task RevokePeerAsync(Guid peerId, CancellationToken cancellationToken = default);
+    /// <summary>重命名：同一指纹的全部有效配对记录一起改名（只影响本机显示）。</summary>
+    Task RenamePeersAsync(string fingerprint, string name, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ConfigSubscription>> GetSubscriptionsAsync(CancellationToken cancellationToken = default);
     Task<ConfigSubscription?> GetSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken = default);
@@ -64,10 +66,12 @@ public interface IConfigPackageService
 public interface IConfigSyncEndpoint
 {
     string DeviceName { get; }
+    /// <param name="clientPort">匹配方声明的自身监听端口（用于反向连接）；旧版本客户端不提供。</param>
     Task<(byte[] ServerNonce, string DeviceName)> PairBeginAsync(string clientFingerprint, string clientName,
-        byte[] clientNonce, CancellationToken cancellationToken = default);
+        byte[] clientNonce, int? clientPort = null, CancellationToken cancellationToken = default);
+    /// <param name="clientHost">连接来源 IP；与 clientPort 组成对方地址。</param>
     Task<(byte[] ServerProof, string DeviceName)> PairFinishAsync(string clientFingerprint, string serverFingerprint,
-        byte[] clientProof, CancellationToken cancellationToken = default);
+        byte[] clientProof, string? clientHost = null, CancellationToken cancellationToken = default);
     Task<bool> IsPinnedAsync(string clientFingerprint, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationInfo>> ListPublicationsAsync(CancellationToken cancellationToken = default);
     Task<ConfigManifest?> GetManifestAsync(Guid publishedId, CancellationToken cancellationToken = default);
@@ -84,13 +88,22 @@ public interface IConfigSyncServer
 public interface IConfigSyncClient
 {
     Task<HelloInfo> HelloAsync(string address, CancellationToken cancellationToken = default);
-    Task<PairResult> PairAsync(string address, string code, CancellationToken cancellationToken = default);
+    /// <param name="listenPort">本机监听端口，告诉对方以便反向连接（双向匹配）。</param>
+    Task<PairResult> PairAsync(string address, string code, int? listenPort = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationInfo>> ListPublicationsAsync(string address, string pinnedFingerprint,
         CancellationToken cancellationToken = default);
     Task<ConfigManifest> GetManifestAsync(string address, string pinnedFingerprint, Guid publishedId,
         CancellationToken cancellationToken = default);
     Task DownloadPackageAsync(string address, string pinnedFingerprint, Guid publishedId, int version,
         string destinationPath, CancellationToken cancellationToken = default);
+
+    /// <summary>请对方接收一个文件；对方确认前最多等待 <see cref="FileTransferPolicy.DecisionTimeout"/>。</summary>
+    Task<OfferDecision> OfferFileAsync(string address, string pinnedFingerprint, FileOffer offer,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>从 <paramref name="offset"/> 起上传文件剩余部分；返回对方保存的文件名。</summary>
+    Task<string> UploadFileAsync(string address, string pinnedFingerprint, Guid transferId, string path, long offset,
+        IProgress<long>? progress = null, CancellationToken cancellationToken = default);
 }
 
 public interface IConfigDiscovery
@@ -102,6 +115,8 @@ public interface IConfigDiscovery
     void StopListening();
     /// <summary>开始/停止广播本机发布（仅名称与版本号、指纹前缀）。</summary>
     void SetAnnouncement(IReadOnlyList<PublicationAnnouncement> publications);
+    /// <summary>保持局域网在线：持续监听并广播（即使没有发布内容），已匹配设备据此自动更新地址。</summary>
+    void SetAlwaysOn(bool enabled);
 }
 
 public interface IConfigSyncIdentity
@@ -109,4 +124,10 @@ public interface IConfigSyncIdentity
     string DeviceName { get; }
     /// <summary>本机自签证书的 SHA-256 指纹（十六进制，首次访问时生成并持久化）。</summary>
     string Fingerprint { get; }
+    /// <summary>本机固定匹配码（只存凭据管理器）；首次读取时生成。</summary>
+    Task<(string Code, bool Disabled)> GetMatchCodeAsync(CancellationToken cancellationToken = default);
+    /// <summary>更换匹配码：旧码立即失效，已匹配设备不受影响。</summary>
+    Task<string> RegenerateMatchCodeAsync(CancellationToken cancellationToken = default);
+    /// <summary>累计输错过多：把当前匹配码标记为停用，重启后仍保持停用，直到更换。</summary>
+    Task DisableMatchCodeAsync(CancellationToken cancellationToken = default);
 }

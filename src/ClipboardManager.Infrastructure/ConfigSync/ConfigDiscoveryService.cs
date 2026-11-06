@@ -63,8 +63,8 @@ public static class ConfigDiscoveryMessage
 }
 
 /// <summary>
-/// UDP 组播发现（239.255.53.18:53318）。仅在订阅页打开时监听、发布存在时广播；
-/// 组播被网络屏蔽时不影响手动输入 IP:端口。
+/// UDP 组播发现（239.255.53.18:53318）。“保持局域网在线”时常驻监听并广播（ADR-0008）；
+/// 否则仅在订阅页打开时监听、发布存在时广播。组播被网络屏蔽时不影响手动输入 IP:端口。
 /// </summary>
 public sealed class ConfigDiscoveryService(
     ConfigSyncIdentity identity,
@@ -80,6 +80,7 @@ public sealed class ConfigDiscoveryService(
     private IReadOnlyList<PublicationAnnouncement> announcement = [];
     private bool listening;
     private bool announcing;
+    private bool alwaysOn;
     private UdpClient? socket;
     private CancellationTokenSource? cts;
     private bool disposed;
@@ -112,8 +113,11 @@ public sealed class ConfigDiscoveryService(
         {
             if (!listening) return;
             listening = false;
-            changed = seen.Count > 0;
-            seen.Clear();
+            if (!alwaysOn)
+            {
+                changed = seen.Count > 0;
+                seen.Clear();
+            }
             ReleaseIfIdle();
         }
         if (changed) Changed?.Invoke(this, EventArgs.Empty);
@@ -125,10 +129,32 @@ public sealed class ConfigDiscoveryService(
         {
             if (disposed) return;
             announcement = publications.ToList();
-            announcing = announcement.Count > 0;
+            announcing = alwaysOn || announcement.Count > 0;
             if (announcing) EnsureRunning();
             else ReleaseIfIdle();
         }
+    }
+
+    public void SetAlwaysOn(bool enabled)
+    {
+        var changed = false;
+        lock (sync)
+        {
+            if (disposed || alwaysOn == enabled) return;
+            alwaysOn = enabled;
+            announcing = alwaysOn || announcement.Count > 0;
+            if (alwaysOn) EnsureRunning();
+            else
+            {
+                if (!listening)
+                {
+                    changed = seen.Count > 0;
+                    seen.Clear();
+                }
+                ReleaseIfIdle();
+            }
+        }
+        if (changed) Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public void Dispose()
@@ -138,6 +164,7 @@ public sealed class ConfigDiscoveryService(
             disposed = true;
             listening = false;
             announcing = false;
+            alwaysOn = false;
             ReleaseIfIdle();
         }
     }
@@ -173,7 +200,7 @@ public sealed class ConfigDiscoveryService(
 
     private void ReleaseIfIdle()
     {
-        if (listening || announcing || socket is null) return;
+        if (listening || announcing || alwaysOn || socket is null) return;
         cts?.Cancel();
         socket.Dispose();
         cts?.Dispose();
@@ -216,7 +243,7 @@ public sealed class ConfigDiscoveryService(
             bool changed;
             lock (sync)
             {
-                if (!listening) continue;
+                if (!listening && !alwaysOn) continue;
                 var key = $"{publisher.FingerprintPrefix}@{publisher.Address}";
                 changed = !seen.TryGetValue(key, out var previous) || !SameContent(previous, publisher);
                 seen[key] = publisher;

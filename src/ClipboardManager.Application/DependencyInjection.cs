@@ -1,5 +1,6 @@
 using ClipboardManager.Application.Services;
 using ClipboardManager.Application.Services.ConfigSync;
+using ClipboardManager.Application.Services.LanTransfer;
 using ClipboardManager.Domain.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -27,6 +28,9 @@ public static class DependencyInjection
         services.AddSingleton<IConfigSyncEndpoint>(provider => provider.GetRequiredService<ConfigSyncEndpoint>());
         services.AddSingleton<ConfigPublishService>();
         services.AddSingleton<ConfigSubscriptionService>();
+        services.AddSingleton<FileTransferTracker>();
+        services.AddSingleton<LanTransferService>();
+        services.AddSingleton<LanDeviceService>();
         services.AddSingleton<ConfigSyncCoordinator>();
         return services;
     }

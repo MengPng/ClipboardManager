@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Threading;
 using ClipboardManager.Application.Services.ConfigSync;
+using ClipboardManager.Application.Services.LanTransfer;
 using ClipboardManager.Domain.Models;
 
 namespace ClipboardManager.Windows;
@@ -16,13 +17,16 @@ namespace ClipboardManager.Windows;
 /// </summary>
 public partial class MainWindow
 {
-    private const string PairingHintDefault = "对方在“订阅”页输入本机地址和配对码；码 5 分钟有效，输错 5 次作废。";
+    private const string MatchHintDefault = "在另一台电脑输入这个码，即可互相匹配。";
 
-    private readonly DispatcherTimer _pairingTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private enum ShareSegment { Publish, Subscribe, Transfer }
+
     private IReadOnlyList<PairedPeer> _sharePeers = [];
+    private IReadOnlyList<MatchedDevice> _matchedDevices = [];
     private string _sharePublisherSignature = string.Empty;
     private string _shareFingerprintPrefix = string.Empty;
-    private bool _shareSubscribeSegment, _shareListening;
+    private ShareSegment _shareSegment = ShareSegment.Publish;
+    private bool _shareListening;
     private long _shareVersion;
     private int _shareRefreshQueued;
 
@@ -31,26 +35,35 @@ public partial class MainWindow
     public ObservableCollection<PublisherRowViewModel> PublisherRows { get; } = [];
     public ObservableCollection<PairedPublisherRowViewModel> PairedPublisherRows { get; } = [];
     public ObservableCollection<SubscriptionRowViewModel> SubscriptionRows { get; } = [];
+    public ObservableCollection<MatchedDeviceRowViewModel> MatchedDeviceRows { get; } = [];
+    public ObservableCollection<NearbyDeviceRowViewModel> NearbyDeviceRows { get; } = [];
+    public ObservableCollection<TransferRowViewModel> TransferRows { get; } = [];
 
     private void InitializeShare()
     {
-        _pairingTimer.Tick += (_, _) => UpdatePairingCodeText();
         _configSync.Changed += (_, _) => OnShareChanged();
+        _lanDevices.Changed += (_, _) => OnShareChanged();
+        _lanTransfer.Tracker.Changed += (_, _) => OnTransfersChanged();
         _configSync.AutoUpdated += (_, _) => Dispatcher.InvokeAsync(async () =>
         {
             try { if (IsVisible && IsCollectionTabActive) await RefreshFoldersAsync(); }
             catch (Exception exception) { Debug.WriteLine($"订阅自动更新后刷新配置页失败: {exception}"); }
         });
-        _configDiscovery.Changed += (_, _) => Dispatcher.InvokeAsync(RebuildPublisherRows);
+        _configDiscovery.Changed += (_, _) =>
+        {
+            Dispatcher.InvokeAsync(RebuildPublisherRows);
+            // 设备上线/下线只在发现列表变化时发生；“已匹配的设备”的在线状态随之刷新。
+            if (_shareSegment == ShareSegment.Transfer) OnShareChanged();
+        };
         IsVisibleChanged += (_, _) =>
         {
             if (!IsVisible || !IsShareTabActive) return;
-            if (_shareSubscribeSegment) StartShareListening();
+            if (_shareSegment != ShareSegment.Publish) StartShareListening();
             OnShareChanged();
         };
     }
 
-    // ---- 订阅页监听组播：只在“共享 → 订阅”可见时开启 ----
+    // ---- 订阅/传输段监听组播：可见时开启（“保持可被发现”打开时协调器另外常驻监听） ----
 
     private void StartShareListening()
     {
@@ -113,24 +126,40 @@ public partial class MainWindow
             subscriptionRows.Add(new SubscriptionRowViewModel(subscription, peerName,
                 snapshots.Any(snapshot => snapshot.Version < subscription.LocalVersion)));
         }
+        var devices = await _lanDevices.GetDevicesAsync();
+        var settings = await _settingsStore.LoadAsync();
         var prefix = await Task.Run(() => ConfigSyncPolicy.FingerprintPrefix(_configIdentity.Fingerprint));
         if (version != Interlocked.Read(ref _shareVersion)) return;
 
         _shareFingerprintPrefix = prefix;
         _sharePeers = peers;
+        _matchedDevices = devices;
         Replace(PublishedRows, publishedRows);
         Replace(SubscriberRows, subscribers.Select(peer => new SubscriberRowViewModel(peer)));
         Replace(PairedPublisherRows, peers.Select(peer => new PairedPublisherRowViewModel(peer)));
         Replace(SubscriptionRows, subscriptionRows);
+        Replace(MatchedDeviceRows, devices.Select(device => new MatchedDeviceRowViewModel(device)));
+        ReattachTransferDevice();
         _sharePublisherSignature = string.Empty;
         RebuildPublisherRows();
+        SyncTransferRows();
 
         SharePublishEmptyText.Visibility = VisibleIf(PublishedRows.Count == 0);
         ShareSubscriberEmptyText.Visibility = VisibleIf(SubscriberRows.Count == 0);
         ShareSubscriptionEmptyText.Visibility = VisibleIf(SubscriptionRows.Count == 0);
         SharePairedEmptyText.Visibility = VisibleIf(PairedPublisherRows.Count == 0);
+        ShareMatchedEmptyText.Visibility = VisibleIf(MatchedDeviceRows.Count == 0);
+        ShareKeepOnlineCheck.IsChecked = settings.LanKeepOnline;
+        ShareReceiveCheck.IsChecked = settings.LanReceiveEnabled;
+        ShareAutoAcceptCheck.IsChecked = settings.LanAutoAccept;
+        ShareAutoAcceptCheck.IsEnabled = settings.LanReceiveEnabled;
+        TransferSettingsSummaryText.Text =
+            $"{(!settings.LanReceiveEnabled ? "不接收文件" : settings.LanAutoAccept ? "直接接收" : "接收前询问")} · {(settings.LanKeepOnline ? "保持可被发现" : "不常驻监听")}";
+        var receiveFolder = LanTransferPaths.ResolveReceiveFolder(settings);
+        ShareReceiveFolderText.Text = receiveFolder;
+        ShareReceiveFolderText.ToolTip = receiveFolder;
         UpdateShareLocalAddress();
-        UpdatePairingCodeText();
+        UpdateMatchCodeText();
         UpdateShareStatus();
     }
 
@@ -152,32 +181,58 @@ public partial class MainWindow
             .ToList();
         var signature = string.Join("|", discovered.Select(publisher =>
             $"{publisher.Address}/{publisher.FingerprintPrefix}/{publisher.DeviceName}/{string.Join(",", publisher.Publications.Select(item => $"{item.Name}:{item.Version}"))}")) +
-            "#" + string.Join(",", _sharePeers.Select(peer => peer.Id));
+            "#" + string.Join(",", _sharePeers.Select(peer => peer.Id)) +
+            "#" + string.Join(",", _matchedDevices.Select(device => device.Fingerprint));
         if (signature == _sharePublisherSignature) { UpdateShareStatus(); return; }
         _sharePublisherSignature = signature;
-        Replace(PublisherRows, discovered.Select(publisher => new PublisherRowViewModel(publisher,
-            _sharePeers.FirstOrDefault(peer => peer.Status == PeerStatus.Active &&
-                ConfigSyncPolicy.FingerprintPrefix(peer.Fingerprint).Equals(publisher.FingerprintPrefix, StringComparison.OrdinalIgnoreCase)))));
+        Replace(PublisherRows, discovered.Where(publisher => publisher.Publications.Count > 0 || PairedPeerOf(publisher) is not null)
+            .Select(publisher => new PublisherRowViewModel(publisher, PairedPeerOf(publisher))));
         SharePublisherEmptyText.Visibility = VisibleIf(PublisherRows.Count == 0);
+        // “匹配新设备”：附近开着本软件、但还没有和本机匹配的设备（任一方向的匹配都算已匹配）。
+        var matched = _matchedDevices.Select(device => ConfigSyncPolicy.FingerprintPrefix(device.Fingerprint))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Replace(NearbyDeviceRows, discovered
+            .Where(publisher => !matched.Contains(publisher.FingerprintPrefix))
+            .GroupBy(publisher => publisher.FingerprintPrefix, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new NearbyDeviceRowViewModel(group.OrderByDescending(item => item.LastSeen).First())));
+        ShareNearbyEmptyText.Visibility = VisibleIf(NearbyDeviceRows.Count == 0);
         UpdateShareStatus();
     }
 
+    private PairedPeer? PairedPeerOf(DiscoveredPublisher publisher) =>
+        _sharePeers.FirstOrDefault(peer => peer.Status == PeerStatus.Active &&
+            ConfigSyncPolicy.FingerprintPrefix(peer.Fingerprint).Equals(publisher.FingerprintPrefix, StringComparison.OrdinalIgnoreCase));
+
     private void UpdateShareStatus()
     {
-        if (_shareSubscribeSegment)
-        {
-            ShareStatusText.Text = PublisherRows.Count == 0 ? "未发现设备" : $"发现 {PublisherRows.Count} 台设备";
-            CountText.Text = $"{SubscriptionRows.Count} 个订阅";
-            return;
-        }
         var status = _configSync.ServerStatus;
-        ShareStatusText.Text = status.IsRunning ? $"监听中 · 端口 {status.Port}"
-            : status.LastError is not null ? "监听失败" : "未监听（发布后自动开启）";
         ShareStatusText.ToolTip = status.LastError;
         SharePairingHintText.Text = !status.IsRunning && status.LastError is not null
             ? $"无法启动本机监听：{status.LastError}。{ConfigSyncPolicy.FirewallHint}"
-            : PairingHintDefault;
-        CountText.Text = $"{PublishedRows.Count} 项发布";
+            : MatchCodeHint();
+        switch (_shareSegment)
+        {
+            case ShareSegment.Subscribe:
+                ShareStatusText.Text = PublisherRows.Count == 0 ? "未发现发布者" : $"发现 {PublisherRows.Count} 个发布者";
+                CountText.Text = $"{SubscriptionRows.Count} 个订阅";
+                break;
+            case ShareSegment.Transfer when _transferPage == TransferPage.Device && TransferDevicePanel.DataContext is MatchedDeviceRowViewModel device:
+                ShareStatusText.Text = device.IsOnline ? $"{device.Name} 在线" : $"{device.Name} 未在线";
+                CountText.Text = $"{TransferRows.Count} 条记录";
+                break;
+            case ShareSegment.Transfer:
+                var online = MatchedDeviceRows.Count(row => row.Device.IsOnline);
+                ShareStatusText.Text = !status.IsRunning
+                    ? status.LastError is not null ? "监听失败" : "未监听（打开“保持可被发现”）"
+                    : MatchedDeviceRows.Count == 0 ? $"监听中 · 端口 {status.Port}" : $"{online} 台已匹配设备在线";
+                CountText.Text = $"{MatchedDeviceRows.Count} 台设备";
+                break;
+            default:
+                ShareStatusText.Text = status.IsRunning ? $"监听中 · 端口 {status.Port}"
+                    : status.LastError is not null ? "监听失败" : "未监听（发布后自动开启）";
+                CountText.Text = $"{PublishedRows.Count} 项发布";
+                break;
+        }
     }
 
     private void UpdateShareLocalAddress()
@@ -186,7 +241,7 @@ public partial class MainWindow
         var addresses = LocalIPv4Addresses();
         ShareLocalAddressText.Text = addresses.Count == 0
             ? "未检测到可用的局域网地址，请检查网络连接。"
-            : $"本机地址（对方手动输入）：{string.Join(" 或 ", addresses.Select(address => $"{address}:{port}"))}\n证书指纹 {_shareFingerprintPrefix}（配对时请与对方屏幕上的指纹核对）";
+            : $"本机地址（对方手动输入）：{string.Join(" 或 ", addresses.Select(address => $"{address}:{port}"))}\n证书指纹 {_shareFingerprintPrefix}（匹配时请与对方屏幕上的指纹核对）";
     }
 
     private static IReadOnlyList<string> LocalIPv4Addresses()
@@ -211,17 +266,20 @@ public partial class MainWindow
 
     // ---- 段切换 ----
 
-    private async void SharePublishChip_Click(object sender, RoutedEventArgs e) => await SwitchShareSegmentAsync(false);
-    private async void ShareSubscribeChip_Click(object sender, RoutedEventArgs e) => await SwitchShareSegmentAsync(true);
+    private async void SharePublishChip_Click(object sender, RoutedEventArgs e) => await SwitchShareSegmentAsync(ShareSegment.Publish);
+    private async void ShareSubscribeChip_Click(object sender, RoutedEventArgs e) => await SwitchShareSegmentAsync(ShareSegment.Subscribe);
+    private async void ShareTransferChip_Click(object sender, RoutedEventArgs e) => await SwitchShareSegmentAsync(ShareSegment.Transfer);
 
-    private async Task SwitchShareSegmentAsync(bool subscribe)
+    private async Task SwitchShareSegmentAsync(ShareSegment segment)
     {
-        _shareSubscribeSegment = subscribe;
-        SharePublishChip.IsChecked = !subscribe;
-        ShareSubscribeChip.IsChecked = subscribe;
-        SharePublishScroll.Visibility = VisibleIf(!subscribe);
-        ShareSubscribeScroll.Visibility = VisibleIf(subscribe);
-        if (subscribe) StartShareListening(); else StopShareListening();
+        _shareSegment = segment;
+        SharePublishChip.IsChecked = segment == ShareSegment.Publish;
+        ShareSubscribeChip.IsChecked = segment == ShareSegment.Subscribe;
+        ShareTransferChip.IsChecked = segment == ShareSegment.Transfer;
+        SharePublishScroll.Visibility = VisibleIf(segment == ShareSegment.Publish);
+        ShareSubscribeScroll.Visibility = VisibleIf(segment == ShareSegment.Subscribe);
+        ShareTransferScroll.Visibility = VisibleIf(segment == ShareSegment.Transfer);
+        if (segment == ShareSegment.Publish) StopShareListening(); else StartShareListening();
         await RunShareActionAsync("刷新共享页", RefreshShareAsync);
     }
 
@@ -338,28 +396,37 @@ public partial class MainWindow
     }
 
     private async void ShareIssueCodeButton_Click(object sender, RoutedEventArgs e) =>
-        await RunShareActionAsync("生成配对码", async () =>
+        await RunShareActionAsync("更换匹配码", async () =>
         {
-            await _configSync.IssuePairingCodeAsync();
-            UpdateShareLocalAddress();
-            UpdatePairingCodeText();
-            UpdateShareStatus();
+            var disabled = _lanDevices.MatchCode.Disabled || _lanDevices.MatchCode.Code is null;
+            if (!disabled && !Confirm("更换匹配码",
+                    "更换后旧的匹配码立即失效，还没匹配的设备需要输入新码。\n\n已经匹配的设备不受影响，不需要重新匹配。",
+                    "更换", null, out _)) return;
+            await _lanDevices.RegenerateMatchCodeAsync();
+            UpdateMatchCodeText();
         });
 
-    private void UpdatePairingCodeText()
+    private void UpdateMatchCodeText()
     {
-        var current = _configPublish.CurrentPairingCode;
-        var remaining = current is null ? TimeSpan.Zero : current.ExpiresAt - DateTimeOffset.UtcNow;
-        if (current is null || remaining <= TimeSpan.Zero)
+        var status = _lanDevices.MatchCode;
+        ShareIssueCodeButton.Content = status.Code is null || status.Disabled ? "生成新码" : "更换";
+        if (status.Code is not { Length: > 3 } code)
         {
-            _pairingTimer.Stop();
             SharePairingCodeText.Text = "——";
-            ShareIssueCodeButton.Content = "生成配对码";
             return;
         }
-        SharePairingCodeText.Text = $"{current.Code[..3]} {current.Code[3..]}  ·  {(int)remaining.TotalMinutes:00}:{remaining.Seconds:00}";
-        ShareIssueCodeButton.Content = "重新生成";
-        if (!_pairingTimer.IsEnabled) _pairingTimer.Start();
+        SharePairingCodeText.Text = status.Disabled ? $"{code[..3]} {code[3..]}  ·  已停用" : $"{code[..3]} {code[3..]}";
+        UpdateShareStatus();
+    }
+
+    private string MatchCodeHint()
+    {
+        var status = _lanDevices.MatchCode;
+        if (status.Disabled)
+            return "输错次数过多，这个码已停用，防止被人反复猜测。点“生成新码”换一个；已匹配的设备不受影响。";
+        if (status.LockedUntil is { } until && until > DateTimeOffset.UtcNow)
+            return $"连续输错多次，暂时锁定到 {until.LocalDateTime:HH:mm}，期间无法用它匹配。";
+        return MatchHintDefault;
     }
 
     private async void ShareCopyFirewallButton_Click(object sender, RoutedEventArgs e) =>
@@ -374,7 +441,7 @@ public partial class MainWindow
         if (RowOf<SubscriberRowViewModel>(sender) is not { } row) return;
         await RunShareActionAsync("移除订阅设备", async () =>
         {
-            var body = $"移除“{row.Name}”？\n\n它将不能再检查或下载你发布的配置，需要重新配对才能订阅。它已经安装的内容保留在它自己的电脑上。";
+            var body = $"移除“{row.Name}”？\n\n它将不能再检查或下载你发布的配置，需要重新匹配才能订阅。它已经安装的内容保留在它自己的电脑上。";
             if (!Confirm("移除订阅设备", body, "移除", null, out _)) return;
             await _configPublish.RemoveSubscriberAsync(row.Peer.Id);
             await RefreshShareAsync();
@@ -386,7 +453,7 @@ public partial class MainWindow
     private async void PublisherAction_Click(object sender, RoutedEventArgs e)
     {
         if (RowOf<PublisherRowViewModel>(sender) is not { } row) return;
-        await RunShareActionAsync(row.Paired is null ? "配对" : "浏览发布", () => row.Paired is { } paired
+        await RunShareActionAsync(row.Paired is null ? "匹配" : "浏览发布", () => row.Paired is { } paired
             ? BrowseAsync(paired, row.Publisher.Address)
             : PairAndBrowseAsync(row.Publisher.Address, row.Publisher.FingerprintPrefix));
     }
@@ -418,7 +485,7 @@ public partial class MainWindow
         var prefix = ConfigSyncPolicy.FingerprintPrefix(hello.Fingerprint);
         if (advertisedPrefix is not null && !prefix.Equals(advertisedPrefix, StringComparison.OrdinalIgnoreCase))
             throw new ConfigSyncException(ConfigSyncError.PinMismatch,
-                "该设备出示的证书指纹与它广播的指纹不一致，已停止配对。请确认地址是否正确，或稍后重试。");
+                "该设备出示的证书指纹与它广播的指纹不一致，已停止匹配。请确认地址是否正确，或稍后重试。");
         var peers = await _configSubscriptions.GetPublisherPeersAsync();
         var known = peers.FirstOrDefault(peer => peer.Status == PeerStatus.Active &&
             peer.Fingerprint.Equals(hello.Fingerprint, StringComparison.OrdinalIgnoreCase));
@@ -429,7 +496,7 @@ public partial class MainWindow
         }
         var dialog = new SharePairDialog(this, hello.DeviceName, address, prefix);
         if (WithModal(() => dialog.ShowDialog()) != true) return;
-        var peer = await _configSubscriptions.PairAsync(address, dialog.Code);
+        var peer = await _lanDevices.MatchAsync(address, dialog.Code);
         await RefreshShareAsync();
         await BrowseAsync(peer, address);
     }
@@ -443,11 +510,11 @@ public partial class MainWindow
     private async void RemovePublisher_Click(object sender, RoutedEventArgs e)
     {
         if (RowOf<PairedPublisherRowViewModel>(sender) is not { } row) return;
-        await RunShareActionAsync("移除配对", async () =>
+        await RunShareActionAsync("移除匹配", async () =>
         {
-            var body = $"移除与“{row.Name}”的配对？之后需要重新配对才能订阅它的配置。\n\n如果你仍订阅着它的配置，需要先取消那些订阅。";
-            if (!Confirm("移除配对", body, "移除", null, out _)) return;
-            await _configSubscriptions.RemovePublisherAsync(row.Peer.Id);
+            var body = $"移除与“{row.Name}”的匹配？之后双方不能再互相发文件、订阅配置，需要重新输入匹配码。\n\n如果你仍订阅着它的配置，需要先取消那些订阅。";
+            if (!Confirm("移除匹配", body, "移除", null, out _)) return;
+            await _lanDevices.RemoveAsync(row.Peer.Fingerprint);
             await RefreshShareAsync();
         });
     }

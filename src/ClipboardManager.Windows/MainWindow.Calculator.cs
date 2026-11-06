@@ -224,7 +224,7 @@ public partial class MainWindow
         await _restoreService.CopyTextAsync(text);
         CopyCalculatorValueButton.Content = "已复制";
         await Task.Delay(1200);
-        CopyCalculatorValueButton.Content = "复制结果";
+        CopyCalculatorValueButton.Content = "复制";
     });
 
     // ---- keyboard ----

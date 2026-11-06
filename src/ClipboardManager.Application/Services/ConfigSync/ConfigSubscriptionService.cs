@@ -34,15 +34,25 @@ public sealed class ConfigSubscriptionService(
     public Task<HelloInfo> HelloAsync(string address, CancellationToken cancellationToken = default) =>
         client.HelloAsync(address, cancellationToken);
 
-    public async Task<PairedPeer> PairAsync(string address, string code, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 输入对方的固定匹配码完成匹配（ADR-0008）。双向记录：对方既是发布者（可浏览、订阅、发文件），
+    /// 也是订阅者（可拉取本机发布）；本机给它起过的名字保留。
+    /// </summary>
+    public async Task<PairedPeer> PairAsync(string address, string code, int? listenPort = null,
+        CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeAddress(address);
-        var result = await client.PairAsync(normalized, code, cancellationToken);
-        await repository.SavePeerAsync(new PairedPeer(Guid.NewGuid(), PeerRole.Publisher, result.ServerName,
-            result.ServerFingerprint.ToUpperInvariant(), normalized, time.GetUtcNow(), PeerStatus.Active), cancellationToken);
+        var result = await client.PairAsync(normalized, code, listenPort, cancellationToken);
+        var fingerprint = result.ServerFingerprint.ToUpperInvariant();
+        var name = await ConfigSyncEndpoint.LocalNameAsync(repository, fingerprint, result.ServerName, cancellationToken);
+        var now = time.GetUtcNow();
+        await repository.SavePeerAsync(new PairedPeer(Guid.NewGuid(), PeerRole.Publisher, name, fingerprint, normalized, now,
+            PeerStatus.Active), cancellationToken);
+        await repository.SavePeerAsync(new PairedPeer(Guid.NewGuid(), PeerRole.Subscriber, name, fingerprint, normalized, now,
+            PeerStatus.Active), cancellationToken);
         Changed?.Invoke(this, EventArgs.Empty);
-        return await repository.FindActivePeerAsync(PeerRole.Publisher, result.ServerFingerprint, cancellationToken)
-            ?? throw new InvalidOperationException("配对完成后无法读取配对记录。");
+        return await repository.FindActivePeerAsync(PeerRole.Publisher, fingerprint, cancellationToken)
+            ?? throw new InvalidOperationException("匹配完成后无法读取匹配记录。");
     }
 
     public async Task RemovePublisherAsync(Guid peerId, CancellationToken cancellationToken = default)

@@ -139,6 +139,13 @@ public sealed class SqliteConfigSyncRepository(SqliteConnectionFactory connectio
             ("$address", address), ("$id", peerId.ToString("D")));
     }
 
+    public async Task RenamePeersAsync(string fingerprint, string name, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await ExecuteAsync(connection, null, "UPDATE paired_peer SET name=$name WHERE fingerprint=$fp AND status=0;", cancellationToken,
+            ("$name", name), ("$fp", fingerprint.ToUpperInvariant()));
+    }
+
     public async Task RevokePeerAsync(Guid peerId, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);

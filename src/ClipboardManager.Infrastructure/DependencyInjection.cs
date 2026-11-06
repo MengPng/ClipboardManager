@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.AddSingleton<IConfigSyncIdentity>(provider => provider.GetRequiredService<ConfigSyncIdentity>());
         services.AddSingleton<IConfigSyncServer, ConfigSyncServer>();
         services.AddSingleton<IConfigSyncClient, ConfigSyncClient>();
+        services.AddSingleton<IFileTransferInbox, LanFileInbox>();
         services.AddSingleton<IConfigDiscovery, ConfigDiscoveryService>();
         services.AddSingleton<ILanShareService, LocalSendLanShareService>();
         services.AddSingleton<ICredentialVault, WindowsCredentialVault>();

@@ -1,0 +1,6 @@
+Kubai 主题图标（*.png）
+
+来源：https://github.com/kubai087/kubai-icons 中 src/icons.js 的示例图标，
+用其 scripts/export.mjs 导出静态 SVG 后栅格化为 96×96 PNG（scripts/build-kubai-icons.ps1）。
+许可：Kubai Icons License（Copyright (c) 2026 Kubai087）。示例图标可在产品内使用，无需署名；
+不得将这些图标单独作为图标集、图标包或图标库分发。

@@ -551,7 +551,11 @@ public sealed class ConfigAutoPublishTests : IAsyncLifetime
         _host = await ConfigSyncTestHost.CreateAsync("autopublish");
         _coordinator = new ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator(
             _host.Server, new NoDiscovery(), _host.Repository, _host.Publishing, _host.Subscriptions, _host.Endpoint,
-            _host.Pairing, _host.Clock, NullLogger<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>.Instance);
+            _host.Pairing,
+            new ClipboardManager.Application.Services.LanTransfer.LanDeviceService(_host.Repository, new NoDiscovery(), _host.Identity,
+                _host.Server, _host.Pairing, _host.Subscriptions,
+                NullLogger<ClipboardManager.Application.Services.LanTransfer.LanDeviceService>.Instance),
+            _host.Settings, _host.Clock, NullLogger<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>.Instance);
     }
 
     public async Task DisposeAsync()
@@ -620,5 +624,6 @@ public sealed class ConfigAutoPublishTests : IAsyncLifetime
         public void StartListening() { }
         public void StopListening() { }
         public void SetAnnouncement(IReadOnlyList<PublicationAnnouncement> publications) { }
+        public void SetAlwaysOn(bool enabled) { }
     }
 }

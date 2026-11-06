@@ -203,7 +203,7 @@ public sealed class ConfigSyncMultiFolderTests : IAsyncLifetime
 
     private async Task<PairedPeer> PairAsync()
     {
-        var code = _publisher.Publishing.IssuePairingCode().Code;
+        var code = ConfigSyncTestHost.MatchCode;
         return await _subscriber.Subscriptions.PairAsync(_publisher.Address, code);
     }
 }

@@ -36,6 +36,11 @@ if ($contract.appVersion -ne $Version -or $prefix -ne $Version) {
     throw "版本不一致：release-contract.json=$($contract.appVersion)，Directory.Build.targets=$prefix，本次发布=$Version。"
 }
 if (-not (Test-Path "release/notes/$Version.md")) { throw "缺少面向用户的更新说明 release/notes/$Version.md。" }
+# Kubai 主题的图标由 scripts/build-kubai-icons.ps1 生成（9 个键 × 静止/悬停）；缺图标时切换到 Kubai 会因资源加载失败而报错。
+$kubaiIcons = "src/ClipboardManager.Windows/Assets/Icons/Kubai"
+if (@(Get-ChildItem $kubaiIcons -Filter *.png -ErrorAction SilentlyContinue).Count -ne 18 -or -not (Test-Path "$kubaiIcons/NOTICE.txt")) {
+    throw "缺少 Kubai 图标（应有 18 个 PNG 与 NOTICE.txt）。先运行 pwsh ./scripts/build-kubai-icons.ps1，跑 LayoutCheck 后提交。"
+}
 if ((git rev-parse --abbrev-ref HEAD) -ne "main") { throw "只能从 main 分支发布。" }
 if (git status --porcelain) { throw "工作区有未提交改动。先提交（建议信息：release: $tag），再发布。" }
 if (-not $DryRun -and -not $SshTarget) { throw "缺少下载服务器 SSH 目标：设置环境变量 CM_DEPLOY_SSH（如 ubuntu@1.2.3.4）或传 -SshTarget。" }

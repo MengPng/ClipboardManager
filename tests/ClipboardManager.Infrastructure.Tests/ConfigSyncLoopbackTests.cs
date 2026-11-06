@@ -3,7 +3,7 @@ using ClipboardManager.Domain.Models;
 namespace ClipboardManager.Infrastructure.Tests;
 
 /// <summary>
-/// 两个进程内对等端经真实自签 TLS 回环完成：配对 → 发布 → 订阅 → 更新 → 回退 → 取消订阅。
+/// 两个进程内对等端经真实自签 TLS 回环完成：匹配 → 发布 → 订阅 → 更新 → 回退 → 取消订阅。
 /// 未覆盖：组播发现、真实防火墙、跨机器网络。
 /// </summary>
 public sealed class ConfigSyncLoopbackTests : IAsyncLifetime
@@ -33,10 +33,10 @@ public sealed class ConfigSyncLoopbackTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Pairing_WrongCodeCountsDown_ThenCorrectCodePinsBothSides()
+    public async Task Matching_WrongCodeCountsDown_ThenCorrectCodeRecordsBothRolesOnBothSides()
     {
-        var code = _publisher.Publishing.IssuePairingCode().Code;
-        var wrong = code == "000000" ? "111111" : "000000";
+        const string code = ConfigSyncTestHost.MatchCode;
+        const string wrong = "000000";
 
         var failure = await Assert.ThrowsAsync<PairingException>(() => _subscriber.Subscriptions.PairAsync(_publisher.Address, wrong));
         Assert.Equal(ConfigSyncError.PairingCodeInvalid, failure.Error);
@@ -45,35 +45,63 @@ public sealed class ConfigSyncLoopbackTests : IAsyncLifetime
 
         var peer = await _subscriber.Subscriptions.PairAsync(_publisher.Address, code);
         Assert.Equal(_publisher.Fingerprint, peer.Fingerprint, ignoreCase: true);
-        var subscriberPeer = Assert.Single(await _publisher.Repository.GetPeersAsync(PeerRole.Subscriber));
-        Assert.Equal(_subscriber.Fingerprint, subscriberPeer.Fingerprint, ignoreCase: true);
 
-        // 码已一次性消耗：再次使用同一个码必须失败。
-        var again = await Assert.ThrowsAsync<PairingException>(() => _subscriber.Subscriptions.PairAsync(_publisher.Address, code));
-        Assert.Equal(ConfigSyncError.PairingCodeExpired, again.Error);
+        // 匹配是双向的：两边都同时记录对方为发布者与订阅者。
+        foreach (var role in new[] { PeerRole.Publisher, PeerRole.Subscriber })
+        {
+            Assert.Equal(_subscriber.Fingerprint,
+                Assert.Single(await _publisher.Repository.GetPeersAsync(role)).Fingerprint, ignoreCase: true);
+            Assert.Equal(_publisher.Fingerprint,
+                Assert.Single(await _subscriber.Repository.GetPeersAsync(role)).Fingerprint, ignoreCase: true);
+        }
+
+        // 固定码：成功后不作废，可以再次使用。
+        await _subscriber.Subscriptions.PairAsync(_publisher.Address, code);
+        Assert.Equal(code, _publisher.Pairing.Status.Code);
     }
 
     [Fact]
-    public async Task Pairing_FiveWrongCodesRevokeTheCode()
+    public async Task Matching_FiveWrongCodesLockForAMinute_EvenForTheCorrectCode()
     {
-        var code = _publisher.Publishing.IssuePairingCode().Code;
-        var wrong = code == "000000" ? "111111" : "000000";
+        const string wrong = "000000";
         for (var attempt = 1; attempt <= 4; attempt++)
             await Assert.ThrowsAsync<PairingException>(() => _subscriber.Subscriptions.PairAsync(_publisher.Address, wrong));
         var last = await Assert.ThrowsAsync<PairingException>(() => _subscriber.Subscriptions.PairAsync(_publisher.Address, wrong));
         Assert.Equal(ConfigSyncError.PairingRevoked, last.Error);
-        // 即使随后输入正确码也不再有效。
-        await Assert.ThrowsAsync<PairingException>(() => _subscriber.Subscriptions.PairAsync(_publisher.Address, code));
+        Assert.Contains("1 分钟", last.Message);
+
+        // 锁定期间即使输入正确码也拒绝。
+        await Assert.ThrowsAsync<PairingException>(() =>
+            _subscriber.Subscriptions.PairAsync(_publisher.Address, ConfigSyncTestHost.MatchCode));
         Assert.Empty(await _publisher.Repository.GetPeersAsync(PeerRole.Subscriber));
+
+        _publisher.Clock.Advance(TimeSpan.FromMinutes(1));
+        await _subscriber.Subscriptions.PairAsync(_publisher.Address, ConfigSyncTestHost.MatchCode);
+        Assert.Single(await _publisher.Repository.GetPeersAsync(PeerRole.Subscriber));
     }
 
     [Fact]
-    public async Task Pairing_ExpiredCodeIsRefused()
+    public async Task Matching_OldCodeIsRefusedAfterTheCodeChanges()
     {
-        var code = _publisher.Publishing.IssuePairingCode().Code;
-        _publisher.Clock.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
-        var error = await Assert.ThrowsAsync<PairingException>(() => _subscriber.Subscriptions.PairAsync(_publisher.Address, code));
-        Assert.Equal(ConfigSyncError.PairingCodeExpired, error.Error);
+        _publisher.Clock.Advance(TimeSpan.FromHours(6));
+        _publisher.Pairing.SetCode("135790");
+        var error = await Assert.ThrowsAsync<PairingException>(() =>
+            _subscriber.Subscriptions.PairAsync(_publisher.Address, ConfigSyncTestHost.MatchCode));
+        Assert.Equal(ConfigSyncError.PairingCodeInvalid, error.Error);
+
+        await _subscriber.Subscriptions.PairAsync(_publisher.Address, "135790");
+        Assert.Single(await _subscriber.Repository.GetPeersAsync(PeerRole.Publisher));
+    }
+
+    [Fact]
+    public async Task Matching_AgainKeepsTheLocalName()
+    {
+        await _subscriber.Subscriptions.PairAsync(_publisher.Address, ConfigSyncTestHost.MatchCode);
+        await _subscriber.Repository.RenamePeersAsync(_publisher.Fingerprint.ToUpperInvariant(), "会议室电脑");
+
+        await _subscriber.Subscriptions.PairAsync(_publisher.Address, ConfigSyncTestHost.MatchCode);
+        foreach (var role in new[] { PeerRole.Publisher, PeerRole.Subscriber })
+            Assert.Equal("会议室电脑", Assert.Single(await _subscriber.Repository.GetPeersAsync(role)).Name);
     }
 
     [Fact]
@@ -338,7 +366,7 @@ public sealed class ConfigSyncLoopbackTests : IAsyncLifetime
 
     private async Task<PairedPeer> PairAsync()
     {
-        var code = _publisher.Publishing.IssuePairingCode().Code;
+        var code = ConfigSyncTestHost.MatchCode;
         return await _subscriber.Subscriptions.PairAsync(_publisher.Address, code);
     }
 }

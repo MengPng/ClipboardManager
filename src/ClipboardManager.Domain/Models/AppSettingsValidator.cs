@@ -32,6 +32,10 @@ public static class AppSettingsValidator
             throw new ArgumentException("局域网端口必须为 1024–65535。");
         if (settings.LanDiscoverySeconds is < 1 or > 10)
             throw new ArgumentException("设备发现等待时间必须为 1–10 秒。");
+        if (settings.LanReceiveFolder is null ||
+            (settings.LanReceiveFolder.Length > 0 && (!Path.IsPathFullyQualified(settings.LanReceiveFolder) ||
+                                                      settings.LanReceiveFolder.IndexOfAny(Path.GetInvalidPathChars()) >= 0)))
+            throw new ArgumentException("接收文件的保存位置必须是完整的文件夹路径。");
         if (!string.IsNullOrWhiteSpace(settings.CloudApiBaseUrl) &&
             (!Uri.TryCreate(settings.CloudApiBaseUrl, UriKind.Absolute, out var cloudApiUri) ||
              cloudApiUri.Scheme != Uri.UriSchemeHttps))

@@ -35,16 +35,17 @@ public sealed class ConfigSyncClient(ConfigSyncIdentity identity, ILogger<Config
         });
     }
 
-    public async Task<PairResult> PairAsync(string address, string code, CancellationToken cancellationToken = default)
+    public async Task<PairResult> PairAsync(string address, string code, int? listenPort = null,
+        CancellationToken cancellationToken = default)
     {
         if (!PairingProtocol.IsWellFormedCode(code))
-            throw new PairingException(ConfigSyncError.PairingCodeInvalid, "配对码应为 6 位数字。");
+            throw new PairingException(ConfigSyncError.PairingCodeInvalid, "匹配码应为 6 位数字。");
         var pin = new PinState(allowFirstUse: true);
         return await RunAsync(address, pin, cancellationToken, async (http, root, token) =>
         {
             var clientNonce = PairingProtocol.NewNonce();
             var begin = await PostAsync<PairBeginRequest, PairBeginResponse>(http, new Uri(root, "/v1/pair/begin"),
-                new PairBeginRequest(identity.DeviceName, Convert.ToBase64String(clientNonce)), token);
+                new PairBeginRequest(identity.DeviceName, Convert.ToBase64String(clientNonce), listenPort), token);
             var serverNonce = DecodeBytes(begin.Nonce, PairingProtocol.NonceBytes);
             var serverFingerprint = pin.Fingerprint ?? throw new ConfigSyncException(ConfigSyncError.Protocol, "未能取得对方证书指纹。");
 
@@ -55,7 +56,7 @@ public sealed class ConfigSyncClient(ConfigSyncIdentity identity, ILogger<Config
             // 发布方也必须证明自己知道配对码，防止假冒的发布方骗取订阅。
             var expected = PairingProtocol.ComputeProof(code, 'S', identity.Fingerprint, serverFingerprint, clientNonce, serverNonce);
             if (!PairingProtocol.VerifyProof(expected, DecodeBytes(finish.Proof, 32)))
-                throw new PairingException(ConfigSyncError.PairingCodeInvalid, "对方未能通过配对码验证，已放弃配对。");
+                throw new PairingException(ConfigSyncError.PairingCodeInvalid, "对方未能通过匹配码验证，已放弃匹配。");
             return new PairResult(serverFingerprint, begin.Name);
         });
     }
@@ -136,6 +137,123 @@ public sealed class ConfigSyncClient(ConfigSyncIdentity identity, ILogger<Config
         }
     }
 
+    public async Task<OfferDecision> OfferFileAsync(string address, string pinnedFingerprint, FileOffer offer,
+        CancellationToken cancellationToken = default)
+    {
+        var pin = new PinState(pinnedFingerprint);
+        return await RunAsync(address, pin, cancellationToken, async (http, root, token) =>
+        {
+            // 对方需要用户确认，最多等待 DecisionTimeout；这里自己计时，不用 60 秒的整体超时。
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(token);
+            wait.CancelAfter(FileTransferPolicy.DecisionTimeout + TimeSpan.FromSeconds(30));
+            using var content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(
+                new TransferOfferRequest(offer.Name, offer.Size, offer.Sha256), ConfigSyncPolicy.Json));
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using var response = await http.PostAsync(new Uri(root, "/v1/transfer/offer"), content, wait.Token);
+            await EnsureTransferSuccessAsync(response, wait.Token);
+            var decision = await ReadJsonAsync<TransferOfferResponse>(response, 64 * 1024, wait.Token);
+            if (decision.Offset < 0 || decision.Offset > offer.Size)
+                throw new FileTransferException(FileTransferError.Protocol, "对方返回的续传位置不正确。");
+            return new OfferDecision(decision.Id, decision.Offset);
+        }, totalTimeout: false);
+    }
+
+    public async Task<string> UploadFileAsync(string address, string pinnedFingerprint, Guid transferId, string path, long offset,
+        IProgress<long>? progress = null, CancellationToken cancellationToken = default)
+    {
+        var pin = new PinState(pinnedFingerprint);
+        return await RunAsync(address, pin, cancellationToken, async (http, root, token) =>
+        {
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(token);
+            idle.CancelAfter(ConfigSyncPolicy.RequestTimeout);
+            await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, true);
+            if (offset > file.Length)
+                throw new FileTransferException(FileTransferError.BadOffset, "对方已有的部分比文件还大，请重新发送。");
+            file.Seek(offset, SeekOrigin.Begin);
+            using var content = new FileRangeContent(file, file.Length - offset, offset, progress, idle);
+            using var request = new HttpRequestMessage(HttpMethod.Put, new Uri(root, $"/v1/transfer/data?id={transferId:D}&offset={offset}"))
+            {
+                Content = content
+            };
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, idle.Token);
+            // 对方收完后还要计算整文件哈希（大文件可能要几十秒），等待响应时不按空闲超时计。
+            idle.CancelAfter(TimeSpan.FromMinutes(10));
+            await EnsureTransferSuccessAsync(response, idle.Token);
+            var done = await ReadJsonAsync<TransferDoneResponse>(response, 64 * 1024, idle.Token);
+            return done.SavedName;
+        }, totalTimeout: false);
+    }
+
+    private static async Task EnsureTransferSuccessAsync(HttpResponseMessage response, CancellationToken token)
+    {
+        if (response.IsSuccessStatusCode) return;
+        ErrorResponse? error = null;
+        try
+        {
+            var bytes = await ReadLimitedAsync(response.Content, 8 * 1024, token);
+            error = JsonSerializer.Deserialize<ErrorResponse>(bytes, ConfigSyncPolicy.Json);
+        }
+        catch (Exception ex) when (ex is JsonException or ConfigSyncException) { }
+
+        if (error is not null && Enum.TryParse<FileTransferError>(error.Error, out var kind))
+            throw new FileTransferException(kind, error.Message) { ExpectedOffset = error.Offset };
+        if ((int)response.StatusCode == 404)
+            throw new FileTransferException(FileTransferError.Protocol, "对方的版本不支持文件传输，请两边都升级到 0.9.2 或更高版本。");
+        if ((int)response.StatusCode == 401)
+            throw new FileTransferException(FileTransferError.NotMatched, error?.Message ?? "对方没有和本机匹配，或已移除匹配。");
+        throw new FileTransferException(FileTransferError.Protocol, error?.Message ?? $"对方返回了异常响应（HTTP {(int)response.StatusCode}）。");
+    }
+
+    /// <summary>从当前位置流式发送文件剩余部分；每写一块重置空闲超时并报告进度（含已存在的偏移）。</summary>
+    private sealed class FileRangeContent : HttpContent
+    {
+        private readonly FileStream file;
+        private readonly long length;
+        private readonly long offset;
+        private readonly IProgress<long>? progress;
+        private readonly CancellationTokenSource idle;
+
+        public FileRangeContent(FileStream file, long length, long offset, IProgress<long>? progress, CancellationTokenSource idle)
+        {
+            this.file = file;
+            this.length = length;
+            this.offset = offset;
+            this.progress = progress;
+            this.idle = idle;
+            Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            Headers.ContentLength = length;
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+        {
+            var buffer = new byte[1 << 16];
+            long sent = 0;
+            var lastReport = 0L;
+            while (sent < length)
+            {
+                idle.CancelAfter(ConfigSyncPolicy.RequestTimeout);
+                var read = await file.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, length - sent)), idle.Token);
+                if (read == 0) throw new FileTransferException(FileTransferError.Local, "文件在发送过程中被修改或截断，请重新发送。");
+                await stream.WriteAsync(buffer.AsMemory(0, read), idle.Token);
+                sent += read;
+                if (sent - lastReport >= 1 << 20 || sent == length)
+                {
+                    lastReport = sent;
+                    progress?.Report(offset + sent);
+                }
+            }
+        }
+
+        protected override bool TryComputeLength(out long result)
+        {
+            result = length;
+            return true;
+        }
+    }
+
     private async Task<T> RunAsync<T>(string address, PinState pin, CancellationToken cancellationToken,
         Func<HttpClient, Uri, CancellationToken, Task<T>> action, bool totalTimeout = true)
     {
@@ -156,6 +274,10 @@ public sealed class ConfigSyncClient(ConfigSyncIdentity identity, ILogger<Config
             throw new ConfigSyncException(ConfigSyncError.Timeout,
                 $"连接 {host}:{port} 超过 60 秒没有响应。对方可能已离线、地址不对，或被防火墙拦截。{ConfigSyncPolicy.FirewallHint}");
         }
+        catch (HttpRequestException ex) when (FindInner<FileTransferException>(ex) is { } transfer)
+        {
+            throw transfer;
+        }
         catch (HttpRequestException ex)
         {
             throw Map(ex, pin, host, port);
@@ -168,6 +290,13 @@ public sealed class ConfigSyncClient(ConfigSyncIdentity identity, ILogger<Config
         {
             throw Map(ex, pin, host, port);
         }
+    }
+
+    private static T? FindInner<T>(Exception exception) where T : Exception
+    {
+        for (var current = exception.InnerException; current is not null; current = current.InnerException)
+            if (current is T match) return match;
+        return null;
     }
 
     private HttpClient CreateClient(PinState pin)

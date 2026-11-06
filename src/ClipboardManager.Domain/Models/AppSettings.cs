@@ -33,6 +33,14 @@ public sealed record AppSettings
     public string LanDeviceAlias { get; init; } = Environment.MachineName;
     public int LanPort { get; init; } = 53317;
     public int LanDiscoverySeconds { get; init; } = 2;
+    /// <summary>0.9.2（ADR-0008）：常驻监听 53318 并广播，已匹配设备在同一局域网内自动连上。</summary>
+    public bool LanKeepOnline { get; init; } = true;
+    /// <summary>是否接收已匹配设备发来的文件。</summary>
+    public bool LanReceiveEnabled { get; init; } = true;
+    /// <summary>已匹配设备发来的文件不再逐个确认，直接接收（默认关）。</summary>
+    public bool LanAutoAccept { get; init; }
+    /// <summary>接收文件的保存目录；空表示“下载\剪切板传输”。</summary>
+    public string LanReceiveFolder { get; init; } = string.Empty;
     public bool CloudModeEnabled { get; init; }
     public string CloudApiBaseUrl { get; init; } = "https://clipboard.netkaize.com";
 }
