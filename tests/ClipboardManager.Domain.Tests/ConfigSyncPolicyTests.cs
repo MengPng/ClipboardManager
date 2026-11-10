@@ -232,4 +232,20 @@ public sealed class PairingProtocolTests
         Assert.False(PairingProtocol.VerifyProof(expected, expected[..16]));
         Assert.False(PairingProtocol.VerifyProof(expected, [.. expected, 0]));
     }
+
+    [Theory]
+    [InlineData(3, 4, false, null, true)]
+    [InlineData(3, 3, false, null, false)]
+    [InlineData(3, null, false, null, false)]
+    [InlineData(3, 4, true, null, false)]
+    [InlineData(3, 4, false, 4, false)]
+    [InlineData(3, 5, false, 4, true)]
+    public void HasPendingUpdate_IgnoresStayOnCurrentAndSkippedVersions(int local, int? latest, bool stay, int? skipped, bool expected)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var subscription = new ConfigSubscription(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "常用回复", local,
+            Guid.NewGuid(), true, stay, skipped, now, latest, null, "{}", "hash", now, now);
+
+        Assert.Equal(expected, ConfigSyncPolicy.HasPendingUpdate(subscription));
+    }
 }

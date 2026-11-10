@@ -52,8 +52,7 @@ public sealed class SubscriptionRowViewModel(ConfigSubscription subscription, st
         (Subscription.LastCheckedAt is { } at ? at.LocalDateTime.ToString("MM-dd HH:mm") : "尚未检查");
 
     public bool HasNewer => Subscription.LatestKnownVersion is { } latest && latest > Subscription.LocalVersion;
-    public bool IsProblem => !string.IsNullOrEmpty(Subscription.LastError) || (HasNewer && !IsHeldBack);
-    private bool IsHeldBack => Subscription.StayOnCurrent || Subscription.SkippedVersion == Subscription.LatestKnownVersion;
+    public bool IsProblem => !string.IsNullOrEmpty(Subscription.LastError) || ConfigSyncPolicy.HasPendingUpdate(Subscription);
 
     public string StatusText
     {

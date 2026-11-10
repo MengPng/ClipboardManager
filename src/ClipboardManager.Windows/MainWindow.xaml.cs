@@ -61,6 +61,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// <summary>配置页当前来源：null 为“我的”（个人文件夹），否则为某台发布者（PeerId）订阅来的受管文件夹。</summary>
     private Guid? _configSource;
     private string? _configSourceChipsKey;
+    /// <summary>每台发布者下有新版本可更新的订阅（<see cref="ConfigSyncPolicy.HasPendingUpdate"/>）。</summary>
+    private Dictionary<Guid, List<ConfigSubscription>> _configSourceUpdates = [];
     private CancellationTokenSource? _historySearch, _collectionSearch;
     private bool _compactList;
     private string _lanSessionPin = string.Empty;
@@ -383,12 +385,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // 来源按发布者分组：同一台发布者的多份订阅合成一枚胶囊，名称用发布者的设备名。
         // 只列出还有受管文件夹的发布者；当前选中的发布者没有订阅后回到“我的”。
         var managedIds = result.Folders.Select(folder => folder.ManagedSubscriptionId).OfType<Guid>().ToHashSet();
-        var subscriptionPeer = (await _configSubscriptions.GetSubscriptionsAsync(cancellationToken))
+        var subscriptions = (await _configSubscriptions.GetSubscriptionsAsync(cancellationToken))
             .Where(subscription => subscription.WorkspaceId == workspaceId && managedIds.Contains(subscription.Id))
-            .ToDictionary(subscription => subscription.Id, subscription => subscription.PeerId);
+            .ToList();
+        var subscriptionPeer = subscriptions.ToDictionary(subscription => subscription.Id, subscription => subscription.PeerId);
+        var updates = subscriptions.Where(ConfigSyncPolicy.HasPendingUpdate)
+            .GroupBy(subscription => subscription.PeerId)
+            .ToDictionary(group => group.Key, group => group.ToList());
         var peers = await _configSubscriptions.GetPublisherPeersAsync(cancellationToken);
         var sources = subscriptionPeer.Values.Distinct()
-            .Select(peerId => (Id: peerId, Name: peers.FirstOrDefault(peer => peer.Id == peerId)?.Name ?? "未知设备"))
+            .Select(peerId => (Id: peerId, Name: peers.FirstOrDefault(peer => peer.Id == peerId)?.Name ?? "未知设备", HasUpdate: updates.ContainsKey(peerId)))
             .OrderBy(item => item.Name, StringComparer.CurrentCulture)
             .ToList();
         if (version != _foldersVersion || workspaceId != ActiveConfigWorkspaceId) return;
@@ -403,6 +409,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // A space switch bumps the version and changes the active workspace, so folders
         // loaded for the space the user just left must never replace the current list.
         if (version != _foldersVersion || workspaceId != ActiveConfigWorkspaceId || source != _configSource) return;
+        _configSourceUpdates = updates;
         UpdateConfigSourceChips(sources);
         var selectedId = SelectedFolder?.Folder.Id;
         _refreshingFolders = true;
@@ -416,31 +423,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     /// <summary>“我的”+ 每台发布者一枚胶囊；发布者列表没变时只更新选中状态，不重建。</summary>
-    private void UpdateConfigSourceChips(IReadOnlyList<(Guid Id, string Name)> sources)
+    private void UpdateConfigSourceChips(IReadOnlyList<(Guid Id, string Name, bool HasUpdate)> sources)
     {
-        var key = string.Join("|", sources.Select(item => $"{item.Id}:{item.Name}"));
+        var key = string.Join("|", sources.Select(item => $"{item.Id}:{item.Name}:{item.HasUpdate}"));
         if (key != _configSourceChipsKey)
         {
             _configSourceChipsKey = key;
             ConfigSourceChips.Children.Clear();
-            ConfigSourceChips.Children.Add(ConfigSourceChip("我的", null));
-            foreach (var item in sources) ConfigSourceChips.Children.Add(ConfigSourceChip(item.Name, item.Id));
+            ConfigSourceChips.Children.Add(ConfigSourceChip("我的", null, false));
+            foreach (var item in sources) ConfigSourceChips.Children.Add(ConfigSourceChip(item.Name, item.Id, item.HasUpdate));
         }
         foreach (var chip in ConfigSourceChips.Children.OfType<RadioButton>()) chip.IsChecked = (Guid?)chip.Tag == _configSource;
-        ConfigSourceChips.Visibility = sources.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ConfigSourceBar.Visibility = sources.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ConfigSourceUpdateButton.Visibility = _configSource is { } current && _configSourceUpdates.ContainsKey(current)
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private RadioButton ConfigSourceChip(string name, Guid? source)
+    private RadioButton ConfigSourceChip(string name, Guid? source, bool hasUpdate)
     {
+        var label = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+        label.Children.Add(new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 130 });
+        if (hasUpdate)
+        {
+            var dot = new System.Windows.Shapes.Ellipse { Width = 6, Height = 6, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            dot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "DangerBrush");
+            label.Children.Add(dot);
+        }
         var chip = new RadioButton
         {
             GroupName = "ConfigSource",
             Tag = source,
             MaxWidth = 150,
-            ToolTip = name,
-            Content = new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis },
+            ToolTip = hasUpdate ? $"{name} · 有新版本" : name,
+            Content = label,
         };
-        System.Windows.Automation.AutomationProperties.SetName(chip, source is null ? "我的配置" : $"发布者：{name}");
+        System.Windows.Automation.AutomationProperties.SetName(chip,
+            source is null ? "我的配置" : hasUpdate ? $"发布者：{name}，有新版本" : $"发布者：{name}");
+        if (hasUpdate && source is { } peerId)
+        {
+            var update = new MenuItem { Header = "更新" };
+            update.Click += async (_, _) => await UpdateConfigSourceAsync(peerId);
+            chip.ContextMenu = new ContextMenu { Items = { update } };
+        }
         if (TryFindResource("FilterChipStyle") is Style style) chip.Style = style;
         chip.Click += async (_, _) =>
         {
@@ -449,6 +473,42 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await RunActionAsync("切换配置来源", () => RefreshFoldersAsync());
         };
         return chip;
+    }
+
+    private async void ConfigSourceUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_configSource is { } peerId) await UpdateConfigSourceAsync(peerId);
+    }
+
+    /// <summary>
+    /// 从发布者胶囊直接更新这台发布者下有新版本的订阅：逐个重新询问发布者，确认后更新（与「共享 → 订阅」的「更新」同一流程）。
+    /// </summary>
+    private async Task UpdateConfigSourceAsync(Guid peerId)
+    {
+        if (!_configSourceUpdates.TryGetValue(peerId, out var pending)) return;
+        ConfigSourceUpdateButton.IsEnabled = false;
+        try
+        {
+            await RunShareActionAsync("更新订阅", async () =>
+            {
+                var messages = new List<string>();
+                foreach (var subscription in pending)
+                {
+                    var check = await _configSubscriptions.CheckAsync(subscription.Id);
+                    if (check.Remote is { } remote && remote.Version > subscription.LocalVersion)
+                        await ConfirmAndApplyAsync(subscription, check);
+                    else
+                        messages.Add($"“{subscription.Name}”：{check.Message}");
+                }
+                if (messages.Count > 0)
+                    System.Windows.MessageBox.Show(this, string.Join("\n", messages), "更新订阅", MessageBoxButton.OK, MessageBoxImage.Information);
+            });
+        }
+        finally
+        {
+            ConfigSourceUpdateButton.IsEnabled = true;
+            await RunActionAsync("刷新配置", () => RefreshFoldersAsync());
+        }
     }
 
     private async Task RefreshCollectionItemsAsync(CancellationToken cancellationToken = default)

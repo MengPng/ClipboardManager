@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using ClipboardManager.Application.Services.ConfigSync;
 using ClipboardManager.Application.Services.LanTransfer;
 using ClipboardManager.Domain.Models;
+using ClipboardManager.Windows.Services;
 
 namespace ClipboardManager.Windows;
 
@@ -281,6 +282,7 @@ public partial class MainWindow
         ShareTransferScroll.Visibility = VisibleIf(segment == ShareSegment.Transfer);
         if (segment == ShareSegment.Publish) StopShareListening(); else StartShareListening();
         await RunShareActionAsync("刷新共享页", RefreshShareAsync);
+        if (segment == ShareSegment.Transfer) await RunShareActionAsync("放行防火墙", OfferFirewallOnceAsync);
     }
 
     /// <summary>共享页统一的错误出口：中文原因；连不上或超时时补充防火墙放行提示。</summary>
@@ -433,8 +435,53 @@ public partial class MainWindow
         await RunShareActionAsync("复制防火墙命令", async () =>
         {
             await _restoreService.CopyTextAsync(string.Join(Environment.NewLine, ConfigSyncPolicy.FirewallCommands));
-            Info("已复制两条 netsh 命令。请在“以管理员身份运行”的 PowerShell 或命令提示符中粘贴运行，放行 TCP/UDP 53318。\n\n（安装包版自动添加防火墙规则尚未实现。）");
+            Info("已复制两条 netsh 命令。请在“以管理员身份运行”的 PowerShell 或命令提示符中粘贴运行，放行 TCP/UDP 53318。");
         });
+
+    private async void ShareAllowFirewallButton_Click(object sender, RoutedEventArgs e) =>
+        await RunShareActionAsync("放行防火墙", AllowFirewallAsync);
+
+    /// <summary>以管理员身份添加两条入站规则（弹出 UAC）；取消 UAC 不提示，失败时给出复制命令的退路。</summary>
+    private async Task AllowFirewallAsync()
+    {
+        ShareAllowFirewallButton.IsEnabled = false;
+        try
+        {
+            var result = await FirewallRules.InstallAsync();
+            if (result == FirewallInstallResult.Failed)
+                System.Windows.MessageBox.Show(this, "没有放行成功。可以在「传输设置 → 防火墙」点「复制命令」，在管理员 PowerShell 中运行。",
+                    "放行防火墙", MessageBoxButton.OK, MessageBoxImage.Warning);
+            else if (result == FirewallInstallResult.Installed)
+                Info("已放行 TCP/UDP 53318。", "放行防火墙");
+        }
+        finally
+        {
+            ShareAllowFirewallButton.IsEnabled = true;
+            await RefreshFirewallStateAsync();
+        }
+    }
+
+    private async Task RefreshFirewallStateAsync()
+    {
+        var installed = await FirewallRules.AreInstalledAsync();
+        ShareFirewallStateText.Visibility = VisibleIf(installed);
+        ShareAllowFirewallButton.Visibility = VisibleIf(!installed);
+    }
+
+    /// <summary>
+    /// 第一次进入「共享 → 传输」且保持可被发现时问一次是否放行防火墙；规则已存在就不问。
+    /// 无论选择什么都只问一次，之后可在「传输设置 → 防火墙」放行。
+    /// </summary>
+    private async Task OfferFirewallOnceAsync()
+    {
+        var settings = await _settingsStore.LoadAsync();
+        if (settings.LanFirewallPrompted || !settings.LanKeepOnline) return;
+        var installed = await FirewallRules.AreInstalledAsync();
+        await _settingsStore.SaveAsync((await _settingsStore.LoadAsync()) with { LanFirewallPrompted = true });
+        if (installed || _shareSegment != ShareSegment.Transfer || !IsVisible) return;
+        if (!Confirm("放行防火墙", "让已匹配的设备连接这台电脑，需要在 Windows 防火墙中放行 TCP/UDP 53318，会请求管理员权限。", "放行", null, out _)) return;
+        await AllowFirewallAsync();
+    }
 
     private async void RemoveSubscriber_Click(object sender, RoutedEventArgs e)
     {

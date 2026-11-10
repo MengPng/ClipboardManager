@@ -60,6 +60,7 @@ public partial class MainWindow
             if (!settings.LanDeviceNameConfirmed) await RenameThisDeviceAsync(firstTime: true);
         });
         ShowTransferPage(TransferPage.Settings);
+        await RunShareActionAsync("防火墙", RefreshFirewallStateAsync);
     }
 
     private async void ShareRenameDeviceButton_Click(object sender, RoutedEventArgs e) =>

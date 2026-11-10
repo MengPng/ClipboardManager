@@ -111,6 +111,14 @@ public static class ConfigSyncPolicy
     public static string FingerprintPrefix(string fingerprint) =>
         fingerprint.Length <= 12 ? fingerprint : fingerprint[..12];
 
+    /// <summary>
+    /// 0.9.5：订阅有可以更新的新版本——发布者有更高版本，且没有选“停在当前版本”或跳过这个版本。
+    /// 配置页发布者胶囊的红点和「更新」按钮只看这个结果。
+    /// </summary>
+    public static bool HasPendingUpdate(ConfigSubscription subscription) =>
+        subscription.LatestKnownVersion is { } latest && latest > subscription.LocalVersion &&
+        !subscription.StayOnCurrent && subscription.SkippedVersion != latest;
+
     public const string FirewallHint = "如果对方设备在线并已开启共享，请在对方电脑的 Windows 防火墙中放行 TCP/UDP 53318。";
 
     public static readonly IReadOnlyList<string> FirewallCommands =

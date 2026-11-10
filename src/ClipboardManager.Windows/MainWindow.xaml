@@ -491,8 +491,13 @@
                     </Border>
 
                     <!-- 配置来源：“我的”与每台发布者（设备名）一枚胶囊，靠左；没有订阅时整行隐藏。 -->
-                    <WrapPanel x:Name="ConfigSourceChips" Grid.Row="1" Margin="0,0,0,8" HorizontalAlignment="Left"
-                               Visibility="Collapsed" />
+                    <!-- 选中的发布者有新版本时右侧显示「更新」，胶囊上有红点。 -->
+                    <DockPanel x:Name="ConfigSourceBar" Grid.Row="1" Margin="0,0,0,8" LastChildFill="True" Visibility="Collapsed">
+                        <Button x:Name="ConfigSourceUpdateButton" DockPanel.Dock="Right" Margin="8,0,0,4" Padding="10,3"
+                                VerticalAlignment="Top" Content="更新" Visibility="Collapsed"
+                                AutomationProperties.Name="更新这台发布者的订阅" Click="ConfigSourceUpdate_Click" />
+                        <WrapPanel x:Name="ConfigSourceChips" HorizontalAlignment="Left" />
+                    </DockPanel>
 
                     <Grid Grid.Row="2">
                         <Grid.ColumnDefinitions>
@@ -1350,9 +1355,16 @@
                                                 <StackPanel Style="{StaticResource SettingsRowTextStyle}">
                                                     <TextBlock TextWrapping="Wrap" Text="防火墙" />
                                                 </StackPanel>
-                                                <Button x:Name="ShareCopyFirewallButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
-                                                        VerticalAlignment="Center" Content="复制命令" AutomationProperties.Name="复制防火墙放行命令"
-                                                        Click="ShareCopyFirewallButton_Click" ToolTip="复制放行 TCP/UDP 53318 的 netsh 命令" />
+                                                <StackPanel Grid.Column="1" Margin="0,8,14,8" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="ShareFirewallStateText" VerticalAlignment="Center" Margin="0,0,8,0" Text="已放行"
+                                                               Foreground="{DynamicResource LabelSecondaryBrush}" Visibility="Collapsed" />
+                                                    <Button x:Name="ShareAllowFirewallButton" Padding="12,5" Margin="0,0,8,0" Content="放行"
+                                                            Style="{StaticResource PrimaryButtonStyle}" AutomationProperties.Name="放行防火墙"
+                                                            Click="ShareAllowFirewallButton_Click" ToolTip="以管理员身份放行 TCP/UDP 53318" />
+                                                    <Button x:Name="ShareCopyFirewallButton" Padding="12,5"
+                                                            Content="复制命令" AutomationProperties.Name="复制防火墙放行命令"
+                                                            Click="ShareCopyFirewallButton_Click" ToolTip="复制放行 TCP/UDP 53318 的 netsh 命令" />
+                                                </StackPanel>
                                             </Grid>
                                             <Border Style="{StaticResource SettingsDividerStyle}" />
                                             <StackPanel Style="{StaticResource SettingsRowTextStyle}">

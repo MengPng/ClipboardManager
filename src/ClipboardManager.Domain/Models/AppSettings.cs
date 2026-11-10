@@ -34,6 +34,8 @@ public sealed record AppSettings
     public string LanDeviceAlias { get; init; } = Environment.MachineName;
     /// <summary>0.9.4：用户是否确认过本机名称；第一次打开「传输设置」时未确认就先要求起名。</summary>
     public bool LanDeviceNameConfirmed { get; init; }
+    /// <summary>0.9.5：是否已在第一次进入「共享 → 传输」时问过放行防火墙（无论放行与否只问一次）。</summary>
+    public bool LanFirewallPrompted { get; init; }
     public int LanPort { get; init; } = 53317;
     public int LanDiscoverySeconds { get; init; } = 2;
     /// <summary>0.9.2（ADR-0008）：常驻监听 53318 并广播，已匹配设备在同一局域网内自动连上。</summary>
