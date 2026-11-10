@@ -2,7 +2,7 @@
   <PropertyGroup>
     <Product>本地剪切板管理工具</Product>
     <Company>ClipboardManager</Company>
-    <VersionPrefix>0.9.3</VersionPrefix>
-    <InformationalVersion>0.9.3-update-check</InformationalVersion>
+    <VersionPrefix>0.9.4</VersionPrefix>
+    <InformationalVersion>0.9.4-share-cleanup</InformationalVersion>
   </PropertyGroup>
 </Project>
