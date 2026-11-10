@@ -30,6 +30,7 @@ public sealed class ConfigSyncCoordinator(
     ConfigSyncEndpoint endpoint,
     PairingSessions pairing,
     LanDeviceService devices,
+    IConfigSyncIdentity identity,
     IAppSettingsStore settingsStore,
     TimeProvider time,
     ILogger<ConfigSyncCoordinator> logger,
@@ -81,7 +82,10 @@ public sealed class ConfigSyncCoordinator(
         try
         {
             var published = await repository.GetPublishedAsync(cancellationToken);
-            var keepOnline = (await settingsStore.LoadAsync(cancellationToken)).LanKeepOnline;
+            var settings = await settingsStore.LoadAsync(cancellationToken);
+            // 广播与匹配握手用用户起的本机名称；改名后调用本方法即生效（下一次广播起）。
+            identity.UseDeviceName(settings.LanDeviceAlias);
+            var keepOnline = settings.LanKeepOnline;
             var needServer = keepOnline || published.Count > 0;
             if (needServer) await server.StartAsync(cancellationToken);
             else await server.StopAsync();

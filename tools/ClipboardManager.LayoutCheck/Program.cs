@@ -709,9 +709,9 @@ internal static class Program
                     };
                     var emptyTexts = new[]
                     {
-                        "SharePublishEmptyText", "ShareSubscriberEmptyText", "ShareSubscriptionEmptyText",
+                        "ShareSubscriberEmptyText",
                         "SharePublisherEmptyText", "SharePairedEmptyText",
-                        "ShareMatchedEmptyText", "ShareTransferEmptyText", "ShareNearbyEmptyText"
+                        "ShareMatchedEmptyCard", "ShareTransferEmptyText", "ShareNearbyEmptyText"
                     }.Select(name => (FrameworkElement)window.FindName(name)).ToArray();
                     var shareCollections = new System.Collections.IList[]
                     {
@@ -734,6 +734,7 @@ internal static class Program
                     ((TextBlock)window.FindName("SharePairingCodeText")).Text = "482 916";
                     ((TextBlock)window.FindName("ShareReceiveFolderText")).Text = @"C:\Users\同事\Downloads\剪切板传输\一个很长很长的子目录名称用来验证省略号";
                     ((TextBlock)window.FindName("ShareLocalAddressText")).Text = "本机地址：192.168.100.123:53318、10.0.0.5:53318";
+                    ((TextBlock)window.FindName("ShareDeviceNameText")).Text = "财务部-张三的笔记本电脑（三楼东侧工位）";
                     footerHint.Text = "仅限局域网";
                     foreach (var segment in new[] { "publish", "subscribe", "transfer", "transfer-device", "transfer-match", "transfer-settings" })
                     foreach (var populated in new[] { true, false })
@@ -749,6 +750,7 @@ internal static class Program
                         foreach (var rows in shareCollections) rows.Clear();
                         if (populated) FillShareRows();
                         foreach (var empty in emptyTexts) empty.Visibility = populated ? Visibility.Collapsed : Visibility.Visible;
+                        ((FrameworkElement)window.FindName("ShareSubscriptionHeader")).Visibility = populated ? Visibility.Visible : Visibility.Collapsed;
                         // Transfer pages mirror MainWindow.Transfer: one panel at a time, device rows carry their own
                         // latest activity, and the device page lists only that device's transfers.
                         foreach (var (name, panel) in transferPanels) panel.Visibility = name == segment ? Visibility.Visible : Visibility.Collapsed;
@@ -834,21 +836,64 @@ internal static class Program
                             }
                             if (segment == "transfer")
                             {
-                                // Home: one navigation row per matched device; a device's progress bar shows only while it has a running transfer.
+                                // Home: one card per matched device, two per row; a device's progress bar shows only while it has a running transfer.
                                 var deviceList = (ItemsControl)window.FindName("MatchedDeviceList");
                                 var navRows = buttonsInScroll.Where(button => IsInside(button, deviceList) && ReferenceEquals(button.Style, app.FindResource("SettingsNavRowStyle"))).ToArray();
                                 if (navRows.Length != previewContext.MatchedDeviceRows.Count)
                                     throw new InvalidOperationException($"Every matched device needs one row that opens its page ({state}): {navRows.Length}");
+                                if (navRows.Length < 3)
+                                    throw new InvalidOperationException($"The device sample must fill more than one row of cards ({state}): {navRows.Length}");
+                                var navRects = navRows.Select(button => Bounds(button, surface)).ToArray();
+                                var listRect = Bounds(deviceList, surface);
+                                for (var i = 0; i < navRects.Length; i++)
+                                {
+                                    // Cards alternate left/right; each takes about half the list width with a small gutter.
+                                    if (i % 2 == 1 && (Math.Abs(navRects[i - 1].Top - navRects[i].Top) > 0.5 || navRects[i].Left < navRects[i - 1].Right + 4 ||
+                                        Math.Abs(navRects[i - 1].Height - navRects[i].Height) > 0.5))
+                                        throw new InvalidOperationException($"Matched devices must sit two per row at equal height ({state}): {navRects[i - 1]} / {navRects[i]}");
+                                    if (i >= 2 && navRects[i].Top < navRects[i - 2].Bottom)
+                                        throw new InvalidOperationException($"Device card rows overlap ({state}).");
+                                    if (navRects[i].Width < listRect.Width / 2 - 12 || navRects[i].Width > listRect.Width / 2 + 0.5)
+                                        throw new InvalidOperationException($"Device card is not half the list width ({state}): {navRects[i].Width:F0} of {listRect.Width:F0}");
+                                }
+                                // Rows size to their own cards: a lone idle card is not stretched to the busy first row.
+                                if (navRects.Length % 2 == 1 && navRects[^1].Height > navRects[0].Height - 10)
+                                    throw new InvalidOperationException($"A lone idle device card must stay compact ({state}): {navRects[^1].Height:F0} vs {navRects[0].Height:F0}");
                                 var busy = previewContext.MatchedDeviceRows.Count(row => row.ActiveProgressVisibility == Visibility.Visible);
                                 var bars = shown.OfType<ProgressBar>().ToArray();
                                 if (busy == 0 || bars.Length != busy)
                                     throw new InvalidOperationException($"Device rows must show progress only while transferring ({state}): {bars.Length} of {busy}");
-                                foreach (var row in previewContext.MatchedDeviceRows)
+                                var onlineColor = ((SolidColorBrush)app.FindResource("SuccessBrush")).Color;
+                                var offlineColor = ((SolidColorBrush)app.FindResource("LabelTertiaryBrush")).Color;
+                                for (var i = 0; i < navRows.Length; i++)
                                 {
-                                    var statusBlock = shown.OfType<TextBlock>().FirstOrDefault(block => block.Text == row.StatusText);
-                                    if (statusBlock is null || Bounds(statusBlock, surface).Right > viewport.Right + 0.5)
-                                        throw new InvalidOperationException($"Device row status '{row.StatusText}' is missing or clipped ({state}).");
+                                    var row = (ClipboardManager.Windows.MatchedDeviceRowViewModel)navRows[i].DataContext;
+                                    var texts = Descendants(navRows[i]).OfType<TextBlock>().Where(block => block.IsVisible).ToArray();
+                                    var name = texts.First(block => block.Text == row.Name);
+                                    var tag = texts.FirstOrDefault(block => block.Text == row.OnlineText && !ReferenceEquals(block, name));
+                                    if (tag is null)
+                                        throw new InvalidOperationException($"Device card {row.Name} needs an online tag ({state}).");
+                                    var nameRect = Bounds(name, surface);
+                                    var tagRect = Bounds(tag, surface);
+                                    // The tag follows the name on the same line and stays inside the card, however long the name.
+                                    if (tagRect.Left < nameRect.Right - 0.5 || tagRect.Left > nameRect.Right + 14 ||
+                                        Math.Abs((tagRect.Top + tagRect.Bottom) / 2 - (nameRect.Top + nameRect.Bottom) / 2) > 2 ||
+                                        tagRect.Right > navRects[i].Right - 4 || tag.ActualWidth + 0.5 < DisplayWidth(tag))
+                                        throw new InvalidOperationException($"Online tag must follow the name inside the card ({state}): name={nameRect} tag={tagRect} card={navRects[i]}");
+                                    if (name.ActualWidth + 0.5 < DisplayWidth(name) && name.TextTrimming == TextTrimming.None)
+                                        throw new InvalidOperationException($"A long device name must be ellipsised ({state}).");
+                                    if (((SolidColorBrush)tag.Foreground).Color != (row.IsOnline ? onlineColor : offlineColor))
+                                        throw new InvalidOperationException($"Online tag colour must come from the {(row.IsOnline ? "success" : "tertiary")} token ({state}).");
+                                    var activity = row.ActivityText.Length == 0 ? null : texts.FirstOrDefault(block => block.Text == row.ActivityText);
+                                    if ((row.ActivityText.Length > 0) != (activity is not null) ||
+                                        activity is not null && Bounds(activity, surface).Right > navRects[i].Right + 0.5)
+                                        throw new InvalidOperationException($"Device activity {row.ActivityText} is missing or clipped ({state}).");
+                                    if (row.ActivityText.Length == 0 && texts.Length != 2)
+                                        throw new InvalidOperationException($"An idle device card shows only its name and tag ({state}): {texts.Length} texts");
                                 }
+                                if (!previewContext.MatchedDeviceRows.Any(row => row.IsOnline) || previewContext.MatchedDeviceRows.All(row => row.IsOnline) ||
+                                    !previewContext.MatchedDeviceRows.Any(row => row.ActivityText.Length == 0))
+                                    throw new InvalidOperationException($"The device sample must mix online, offline and idle devices ({state}).");
                                 if (shown.OfType<Button>().Any(button => Equals(button.Content, "发送文件…") || Equals(button.Content, "取消")))
                                     throw new InvalidOperationException($"Send and cancel belong on the device page, not the home list ({state}).");
                             }
@@ -919,10 +964,24 @@ internal static class Program
                         if (segment == "transfer")
                         {
                             var code = (TextBlock)window.FindName("SharePairingCodeText");
+                            var codeLabel = (TextBlock)window.FindName("SharePairingCodeLabel");
+                            var codeHint = (TextBlock)window.FindName("SharePairingHintText");
                             var matchPage = (Button)window.FindName("ShareOpenMatchPageButton");
                             var settingsRow = (Button)window.FindName("ShareOpenTransferSettingsButton");
-                            if (Bounds(code, surface).Right > Bounds(matchPage, surface).Left + 0.5 || code.ActualWidth + 0.5 < DisplayWidth(code))
-                                throw new InvalidOperationException($"Match code collides with its button ({state}).");
+                            var labelRect = Bounds(codeLabel, surface);
+                            var matchRect = Bounds(matchPage, surface);
+                            // The match button shares the match-code label line: same font size, centred on it, above the code.
+                            if (!Equals(matchPage.Content, "匹配设备") || Math.Abs(matchPage.FontSize - codeLabel.FontSize) > 0.01 ||
+                                Math.Abs((matchRect.Top + matchRect.Bottom) / 2 - (labelRect.Top + labelRect.Bottom) / 2) > 1 ||
+                                matchRect.Bottom > Bounds(code, surface).Top + 4 || matchRect.Height > 26 || labelRect.Right > matchRect.Left)
+                                throw new InvalidOperationException($"The match button must sit on the match-code label line at the same size ({state}): label={labelRect} button={matchRect}");
+                            if (code.ActualWidth + 0.5 < DisplayWidth(code))
+                                throw new InvalidOperationException($"Match code is trimmed ({state}).");
+                            // The hint spans the card width on one line.
+                            var hintRect = Bounds(codeHint, surface);
+                            if (codeHint.TextWrapping != TextWrapping.NoWrap || hintRect.Right < matchRect.Left || hintRect.Right > viewport.Right + 0.5 ||
+                                codeHint.ActualWidth + 0.5 < DisplayWidth(codeHint))
+                                throw new InvalidOperationException($"The match hint must fit on one line across the card ({state}): {hintRect}");
                             if (!settingsRow.IsVisible || Bounds(settingsRow, surface).Right > viewport.Right + 0.5)
                                 throw new InvalidOperationException($"Transfer settings must stay reachable from the home page ({state}).");
                         }
@@ -945,6 +1004,14 @@ internal static class Program
                         }
                         if (segment == "transfer-settings")
                         {
+                            // The machine name comes first: other devices on the LAN identify this one by it.
+                            var rename = (Button)window.FindName("ShareRenameDeviceButton");
+                            var deviceName = (TextBlock)window.FindName("ShareDeviceNameText");
+                            var firstButton = buttonsInScroll.Where(button => button.ActualWidth > 0 && button.Style != app.FindResource("IconButtonStyle"))
+                                .OrderBy(button => Bounds(button, surface).Top).First();
+                            if (!rename.IsVisible || !ReferenceEquals(firstButton, rename) || Bounds(rename, surface).Right > viewport.Right + 0.5 ||
+                                !deviceName.IsVisible || deviceName.TextTrimming == TextTrimming.None || Bounds(deviceName, surface).Right > Bounds(rename, surface).Left)
+                                throw new InvalidOperationException($"The machine name row must lead transfer settings and fit beside its button ({state}).");
                             var issue = (Button)window.FindName("ShareIssueCodeButton");
                             var firewall = (Button)window.FindName("ShareCopyFirewallButton");
                             if (!issue.IsVisible || Bounds(issue, surface).Right > viewport.Right + 0.5)
@@ -955,10 +1022,13 @@ internal static class Program
                             if (folderText.TextTrimming == TextTrimming.None && folderText.TextWrapping == TextWrapping.NoWrap)
                                 throw new InvalidOperationException($"A long receive folder must be ellipsised or wrapped ({state}).");
                         }
-                        if (segment is "subscribe" or "transfer-match")
+                        if (segment == "subscribe" && Descendants(scroll).OfType<TextBox>().Any(box => box.Name == "ShareManualAddressBox"))
+                            throw new InvalidOperationException($"Manual connect lives in transfer settings, not the subscribe page ({state}).");
+                        if (segment is "transfer-settings" or "transfer-match")
                         {
-                            var address = (TextBox)window.FindName(transfer ? "ShareTransferAddressBox" : "ShareManualAddressBox");
-                            var connect = (Button)window.FindName(transfer ? "ShareTransferMatchButton" : "ShareManualConnectButton");
+                            var match = segment == "transfer-match";
+                            var address = (TextBox)window.FindName(match ? "ShareTransferAddressBox" : "ShareManualAddressBox");
+                            var connect = (Button)window.FindName(match ? "ShareTransferMatchButton" : "ShareManualConnectButton");
                             var addressOverlap = Rect.Intersect(Bounds(address, surface), Bounds(connect, surface));
                             if (address.ActualWidth < 120 || !addressOverlap.IsEmpty && addressOverlap.Width > 0.5 && addressOverlap.Height > 0.5 || !connect.IsVisible)
                                 throw new InvalidOperationException($"Manual address box is too narrow or overlaps its button ({state}): {address.ActualWidth:F0}");
@@ -1300,12 +1370,14 @@ internal static class Program
 
     private static string OfficeFingerprint => SampleFingerprint.ToUpperInvariant();
     private static string HomeFingerprint => ("0F9E8D7C6B5A" + SampleFingerprint[12..]).ToUpperInvariant();
+    private static string MeetingFingerprint => ("7C6B5A0F9E8D" + SampleFingerprint[12..]).ToUpperInvariant();
 
     private static ClipboardManager.Windows.MatchedDeviceRowViewModel[] SampleMatchedDeviceRows() =>
     [
         new(new MatchedDevice(OfficeFingerprint, "办公室电脑", "192.168.100.123:53318", DateTimeOffset.Now.AddDays(-2), true, true, [])),
         new(new MatchedDevice(HomeFingerprint, "一台设备名称非常非常长的家用台式机用来验证省略号", null,
-            DateTimeOffset.Now.AddDays(-9), false, false, []))
+            DateTimeOffset.Now.AddDays(-9), false, false, [])),
+        new(new MatchedDevice(MeetingFingerprint, "会议室", "192.168.100.77:53318", DateTimeOffset.Now.AddHours(-3), false, true, []))
     ];
 
     private static ClipboardManager.Windows.NearbyDeviceRowViewModel[] SampleNearbyDeviceRows() =>

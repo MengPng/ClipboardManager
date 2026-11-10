@@ -102,7 +102,12 @@ public sealed class MatchedDeviceRowViewModel(MatchedDevice device) : System.Com
     public string Detail => $"{(Device.IsOnline ? "在线" : "未在线")} · {Device.Address ?? "地址未知"} · 指纹 {ConfigSyncPolicy.FingerprintPrefix(Device.Fingerprint)}";
     public string AccessibleName => $"{Name}，{StatusText}";
     public Visibility BrowseVisibility => Device.CanBrowse ? Visibility.Visible : Visibility.Collapsed;
-    public string StatusText => _activity ?? (Device.IsOnline ? "在线" : "未在线");
+    public string StatusText => _activity is null ? OnlineText : $"{OnlineText} · {_activity}";
+    /// <summary>名字后的在线标签。</summary>
+    public string OnlineText => Device.IsOnline ? "在线" : "离线";
+    /// <summary>卡片第二行：正在传输或最近一次传输；没有时折叠。</summary>
+    public string ActivityText => _activity ?? string.Empty;
+    public Visibility ActivityVisibility => _activity is null ? Visibility.Collapsed : Visibility.Visible;
     public double ActivePercent => _activePercent;
     public Visibility ActiveProgressVisibility => _hasProgress ? Visibility.Visible : Visibility.Collapsed;
 
@@ -153,7 +158,7 @@ public sealed class MatchedDeviceRowViewModel(MatchedDevice device) : System.Com
                 FileTransferState.Canceled => "已取消",
                 _ => last.Direction == FileTransferDirection.Send ? "发送失败" : "接收失败"
             };
-            activity = $"{(Device.IsOnline ? "在线" : "未在线")} · {verb} {last.FileName}";
+            activity = $"{verb} {last.FileName}";
         }
         else activity = null;
 

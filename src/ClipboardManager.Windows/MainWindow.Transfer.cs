@@ -51,7 +51,45 @@ public partial class MainWindow
         ShareTransferAddressBox.Focus();
     }
 
-    private void ShareOpenTransferSettings_Click(object sender, RoutedEventArgs e) => ShowTransferPage(TransferPage.Settings);
+    /// <summary>第一次进入「传输设置」时，本机名称还没确认过就先要求起名（取消则下次再问），之后再显示设置页。</summary>
+    private async void ShareOpenTransferSettings_Click(object sender, RoutedEventArgs e)
+    {
+        await RunShareActionAsync("本机名称", async () =>
+        {
+            var settings = await _settingsStore.LoadAsync();
+            if (!settings.LanDeviceNameConfirmed) await RenameThisDeviceAsync(firstTime: true);
+        });
+        ShowTransferPage(TransferPage.Settings);
+    }
+
+    private async void ShareRenameDeviceButton_Click(object sender, RoutedEventArgs e) =>
+        await RunShareActionAsync("本机名称", () => RenameThisDeviceAsync(firstTime: false));
+
+    /// <summary>
+    /// 本机名称是局域网里其他电脑看到的名字（广播、匹配、LocalSend 共用 <c>LanDeviceAlias</c>）。
+    /// 保存后重启监听，下一次广播起生效；对方已保存的名字是它自己起的，不会被覆盖。
+    /// </summary>
+    private async Task RenameThisDeviceAsync(bool firstTime)
+    {
+        var settings = await _settingsStore.LoadAsync();
+        var title = firstTime ? "给本机起个名字" : "本机名称";
+        var prompt = firstTime
+            ? "局域网里的其他电脑会看到这个名字，方便认出是哪一台："
+            : "局域网里的其他电脑看到的名字：";
+        var dialog = new SingleInputDialog(this, title, prompt, settings.LanDeviceAlias);
+        if (WithModal(() => dialog.ShowDialog()) != true) return;
+        var name = LanMatchPolicy.CleanDeviceName(dialog.Value);
+        if (name.Length == 0)
+        {
+            Info("名称不能为空。", title);
+            return;
+        }
+        var latest = await _settingsStore.LoadAsync();
+        if (name == latest.LanDeviceAlias && latest.LanDeviceNameConfirmed) return;
+        await _settingsStore.SaveAsync(latest with { LanDeviceAlias = name, LanDeviceNameConfirmed = true });
+        await _configSync.SetKeepOnlineAsync();
+        await RefreshShareAsync();
+    }
 
     private void TransferBack_Click(object sender, RoutedEventArgs e) => ShowTransferPage(TransferPage.Home);
 

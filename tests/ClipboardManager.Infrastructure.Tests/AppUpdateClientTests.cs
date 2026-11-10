@@ -272,6 +272,24 @@ public sealed class AppUpdateSettingsTests : IDisposable
     }
 
     [Fact]
+    public async Task OlderSettingsHaveNotConfirmedTheDeviceNameSoTransferSettingsAsksOnce()
+    {
+        var paths = new AppPaths(_root);
+        paths.EnsureCreated();
+        await File.WriteAllTextAsync(paths.SettingsPath, """{ "lanDeviceAlias": "DESKTOP-1" }""");
+
+        var store = new JsonAppSettingsStore(paths);
+        var loaded = await store.LoadAsync();
+        Assert.Equal("DESKTOP-1", loaded.LanDeviceAlias);
+        Assert.False(loaded.LanDeviceNameConfirmed);
+
+        await store.SaveAsync(loaded with { LanDeviceAlias = "财务部-张三", LanDeviceNameConfirmed = true });
+        var reloaded = await new JsonAppSettingsStore(paths).LoadAsync();
+        Assert.Equal("财务部-张三", reloaded.LanDeviceAlias);
+        Assert.True(reloaded.LanDeviceNameConfirmed);
+    }
+
+    [Fact]
     public async Task SkippedVersionPersistsAndInvalidValueIsRejected()
     {
         var store = new JsonAppSettingsStore(new AppPaths(_root));

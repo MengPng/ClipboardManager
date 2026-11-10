@@ -1465,6 +1465,7 @@
     <Style x:Key="SettingsNavRowStyle" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource LabelPrimaryBrush}" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -1473,7 +1474,7 @@
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Root" Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
                             CornerRadius="{DynamicResource RadiusMedium}" SnapsToDevicePixels="True">
-                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -1511,6 +1512,30 @@
             <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
                 <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource AccentBrandStrongBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- 设备卡片名字后的在线标签：在线用成功色描边与文字，离线用三级文字色。 -->
+    <Style x:Key="TransferOnlineTagStyle" TargetType="Border">
+        <Setter Property="Padding" Value="4,0,4,1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{DynamicResource RadiusSmall}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource LabelTertiaryBrush}" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsOnline}" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="TransferOnlineTagTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
+        <Setter Property="Foreground" Value="{DynamicResource LabelTertiaryBrush}" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsOnline}" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>

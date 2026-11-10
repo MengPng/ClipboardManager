@@ -555,13 +555,27 @@ public sealed class ConfigAutoPublishTests : IAsyncLifetime
             new ClipboardManager.Application.Services.LanTransfer.LanDeviceService(_host.Repository, new NoDiscovery(), _host.Identity,
                 _host.Server, _host.Pairing, _host.Subscriptions,
                 NullLogger<ClipboardManager.Application.Services.LanTransfer.LanDeviceService>.Instance),
-            _host.Settings, _host.Clock, NullLogger<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>.Instance);
+            _host.Identity, _host.Settings, _host.Clock, NullLogger<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>.Instance);
     }
 
     public async Task DisposeAsync()
     {
         _coordinator.Dispose();
         await _host.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task RefreshAppliesTheUserChosenDeviceName()
+    {
+        // 「传输设置 → 本机名称」保存后会刷新协调器；广播与匹配握手都读 identity.DeviceName。
+        _host.Settings.Current = _host.Settings.Current with { LanKeepOnline = false, LanDeviceAlias = "  财务部-张三  " };
+        await _coordinator.RefreshAsync();
+        Assert.Equal("财务部-张三", _host.Identity.DeviceName);
+
+        // 清空后回到计算机名，而不是广播空名字。
+        _host.Settings.Current = _host.Settings.Current with { LanDeviceAlias = "   " };
+        await _coordinator.RefreshAsync();
+        Assert.Equal(string.IsNullOrWhiteSpace(Environment.MachineName) ? "本机" : Environment.MachineName, _host.Identity.DeviceName);
     }
 
     [Fact]

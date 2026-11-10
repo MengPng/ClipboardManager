@@ -144,12 +144,12 @@ public partial class MainWindow
         RebuildPublisherRows();
         SyncTransferRows();
 
-        SharePublishEmptyText.Visibility = VisibleIf(PublishedRows.Count == 0);
         ShareSubscriberEmptyText.Visibility = VisibleIf(SubscriberRows.Count == 0);
-        ShareSubscriptionEmptyText.Visibility = VisibleIf(SubscriptionRows.Count == 0);
         SharePairedEmptyText.Visibility = VisibleIf(PairedPublisherRows.Count == 0);
-        ShareMatchedEmptyText.Visibility = VisibleIf(MatchedDeviceRows.Count == 0);
+        ShareSubscriptionHeader.Visibility = VisibleIf(SubscriptionRows.Count > 0);
+        ShareMatchedEmptyCard.Visibility = VisibleIf(MatchedDeviceRows.Count == 0);
         ShareKeepOnlineCheck.IsChecked = settings.LanKeepOnline;
+        ShareDeviceNameText.Text = settings.LanDeviceAlias;
         ShareReceiveCheck.IsChecked = settings.LanReceiveEnabled;
         ShareAutoAcceptCheck.IsChecked = settings.LanAutoAccept;
         ShareAutoAcceptCheck.IsEnabled = settings.LanReceiveEnabled;

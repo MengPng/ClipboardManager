@@ -16,7 +16,15 @@ public sealed class ConfigSyncIdentity(AppPaths paths, ICredentialVault vault, I
     private const string VaultKey = "ConfigSync/IdentityKey";
     private readonly Lazy<X509Certificate2> certificate = new(() => LoadOrCreate(paths, vault, logger), LazyThreadSafetyMode.ExecutionAndPublication);
 
-    public string DeviceName => string.IsNullOrWhiteSpace(Environment.MachineName) ? "本机" : Environment.MachineName;
+    private volatile string? deviceName;
+
+    public string DeviceName => deviceName ?? (string.IsNullOrWhiteSpace(Environment.MachineName) ? "本机" : Environment.MachineName);
+
+    public void UseDeviceName(string? name)
+    {
+        var cleaned = LanMatchPolicy.CleanDeviceName(name);
+        deviceName = cleaned.Length == 0 ? null : cleaned;
+    }
 
     public X509Certificate2 Certificate => certificate.Value;
 

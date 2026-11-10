@@ -121,7 +121,10 @@ public interface IConfigDiscovery
 
 public interface IConfigSyncIdentity
 {
+    /// <summary>局域网里其他设备看到的本机名称（广播、匹配握手）；未设置时为计算机名。</summary>
     string DeviceName { get; }
+    /// <summary>换用用户起的本机名称（设置里的 <c>LanDeviceAlias</c>）；空白时恢复计算机名。</summary>
+    void UseDeviceName(string? name);
     /// <summary>本机自签证书的 SHA-256 指纹（十六进制，首次访问时生成并持久化）。</summary>
     string Fingerprint { get; }
     /// <summary>本机固定匹配码（只存凭据管理器）；首次读取时生成。</summary>

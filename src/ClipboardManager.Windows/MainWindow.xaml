@@ -859,19 +859,14 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Style="{StaticResource SettingsRowTextStyle}">
+                                        <StackPanel Style="{StaticResource SettingsRowTextStyle}" VerticalAlignment="Center">
                                             <TextBlock TextWrapping="Wrap" Text="新建发布" />
-                                            <TextBlock x:Name="SharePublishEmptyText" Style="{StaticResource SettingsRowDescriptionStyle}"
-                                                       Text="还没有发布。默认一次发布个人的全部配置（可取消勾选部分文件夹），作为同一个版本；订阅方只读，不会改动你的配置。" />
                                         </StackPanel>
                                         <Button x:Name="SharePublishNewButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
                                                 VerticalAlignment="Center" Style="{StaticResource PrimaryButtonStyle}" Content="发布配置…"
                                                 Click="SharePublishNewButton_Click" />
                                     </Grid>
                                 </Border>
-
-                                <TextBlock Style="{StaticResource SettingsNoteStyle}"
-                                           Text="订阅设备要先和本机匹配：对方在“共享 → 传输”输入本机匹配码（本机匹配码也在那里查看）。" />
 
                                 <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="已匹配的订阅设备" />
                                 <Border Style="{StaticResource SettingsGroupStyle}">
@@ -914,7 +909,7 @@
                         <ScrollViewer x:Name="ShareSubscribeScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Margin="0,0,4,8">
-                                <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="我的订阅" />
+                                <TextBlock x:Name="ShareSubscriptionHeader" Style="{StaticResource SettingsGroupHeaderStyle}" Text="我的订阅" />
                                 <ItemsControl x:Name="SubscriptionList" ItemsSource="{Binding SubscriptionRows}" Focusable="False">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
@@ -968,8 +963,6 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <TextBlock x:Name="ShareSubscriptionEmptyText" Style="{StaticResource SettingsNoteStyle}"
-                                           Text="还没有订阅。匹配一台发布设备后，可以订阅它发布的配置。" />
 
                                 <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="附近的发布者" />
                                 <Border Style="{StaticResource SettingsGroupStyle}">
@@ -1001,23 +994,7 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
                                         <TextBlock x:Name="SharePublisherEmptyText" Style="{StaticResource SettingsEmptyRowStyle}"
-                                                   Text="没有发现附近的发布者。网络屏蔽组播时，请在下面手动输入对方的 IP:端口。" />
-                                        <Border Style="{StaticResource SettingsDividerStyle}" />
-                                        <Grid Style="{StaticResource SettingsRowStyle}">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Style="{StaticResource SettingsRowTextStyle}">
-                                                <TextBlock TextWrapping="Wrap" Text="手动连接" />
-                                                <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Text="输入发布设备的 IP:端口，回车或点连接。" />
-                                            </StackPanel>
-                                            <Button x:Name="ShareManualConnectButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
-                                                    VerticalAlignment="Center" Content="连接" Click="ShareManualConnectButton_Click" />
-                                        </Grid>
-                                        <TextBox x:Name="ShareManualAddressBox" Style="{StaticResource SearchTextBoxStyle}" Margin="14,0,14,12"
-                                                 Tag="IP:端口，如 192.168.1.20:53318" AutomationProperties.Name="发布者地址"
-                                                 KeyDown="ShareManualAddressBox_KeyDown" />
+                                                   Text="没有发现附近的发布者" />
                                     </StackPanel>
                                 </Border>
 
@@ -1061,68 +1038,72 @@
                             <Grid Margin="0,0,4,8">
                                 <!-- 一级：匹配码 + 已匹配的设备 + 传输设置入口 -->
                                 <StackPanel x:Name="TransferHomePanel">
+                                    <!-- 匹配码卡片：“匹配设备”与“本机匹配码”同一行、同字号；说明文字占满整行不换行。 -->
                                     <Border Style="{StaticResource SettingsGroupStyle}">
-                                        <Grid Style="{StaticResource SettingsRowStyle}">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Style="{StaticResource SettingsRowTextStyle}">
-                                                <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Margin="0" Text="本机匹配码" />
-                                                <TextBlock x:Name="SharePairingCodeText" Margin="0,2,0,0" FontWeight="SemiBold"
-                                                           FontSize="{DynamicResource FontSizeTitle}" Typography.NumeralAlignment="Tabular"
-                                                           AutomationProperties.Name="本机匹配码" Text="——" />
-                                                <TextBlock x:Name="SharePairingHintText" Style="{StaticResource SettingsRowDescriptionStyle}"
-                                                           Text="在另一台电脑输入这个码，即可互相匹配。" />
-                                            </StackPanel>
-                                            <Button x:Name="ShareOpenMatchPageButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
-                                                    VerticalAlignment="Center" Content="匹配设备…" Style="{StaticResource PrimaryButtonStyle}"
-                                                    Click="ShareOpenMatchPage_Click" AutomationProperties.Name="匹配新设备" />
-                                        </Grid>
+                                        <StackPanel Margin="14,10,14,10">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="SharePairingCodeLabel" Style="{StaticResource SettingsRowDescriptionStyle}" Margin="0"
+                                                           VerticalAlignment="Center" Text="本机匹配码" />
+                                                <Button x:Name="ShareOpenMatchPageButton" Grid.Column="1" Padding="10,2" MinHeight="22"
+                                                        VerticalAlignment="Center" FontSize="{DynamicResource FontSizeCaption}"
+                                                        Content="匹配设备" Style="{StaticResource PrimaryButtonStyle}"
+                                                        Click="ShareOpenMatchPage_Click" AutomationProperties.Name="匹配新设备" />
+                                            </Grid>
+                                            <TextBlock x:Name="SharePairingCodeText" Margin="0,2,0,0" FontWeight="SemiBold"
+                                                       FontSize="{DynamicResource FontSizeTitle}" Typography.NumeralAlignment="Tabular"
+                                                       AutomationProperties.Name="本机匹配码" Text="——" />
+                                            <TextBlock x:Name="SharePairingHintText" Style="{StaticResource SettingsRowDescriptionStyle}"
+                                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"
+                                                       Text="在另一台电脑输入这个码，即可互相匹配。" />
+                                        </StackPanel>
                                     </Border>
 
                                     <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="已匹配的设备" />
-                                    <Border Style="{StaticResource SettingsGroupStyle}">
-                                        <StackPanel>
-                                            <ItemsControl x:Name="MatchedDeviceList" ItemsSource="{Binding MatchedDeviceRows}" Focusable="False"
-                                                          AlternationCount="2147483647">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <StackPanel>
-                                                            <Border Style="{StaticResource SettingsListDividerStyle}" />
-                                                            <Button Style="{StaticResource SettingsNavRowStyle}" Click="OpenMatchedDevice_Click"
-                                                                    AutomationProperties.Name="{Binding AccessibleName}" ToolTip="点击查看；也可以把文件拖到这里发送">
-                                                                <Border x:Name="DropHighlight" Style="{StaticResource TransferDropHighlightStyle}">
-                                                                    <Grid Style="{StaticResource SettingsRowStyle}">
-                                                                        <Grid.ColumnDefinitions>
-                                                                            <ColumnDefinition Width="Auto" />
-                                                                            <ColumnDefinition Width="*" />
-                                                                            <ColumnDefinition Width="Auto" />
-                                                                        </Grid.ColumnDefinitions>
-                                                                        <Ellipse Width="8" Height="8" Margin="14,0,0,0" VerticalAlignment="Center"
-                                                                                 Style="{StaticResource TransferOnlineDotStyle}" />
-                                                                        <StackPanel Grid.Column="1" Margin="10,10,8,10" VerticalAlignment="Center">
-                                                                            <TextBlock TextTrimming="CharacterEllipsis" Text="{Binding Name}" />
-                                                                            <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" TextWrapping="NoWrap"
-                                                                                       TextTrimming="CharacterEllipsis" Text="{Binding StatusText}" />
-                                                                            <ProgressBar Margin="0,5,0,0" Style="{StaticResource TodoProgressBarStyle}"
-                                                                                         Foreground="{DynamicResource AccentBrandStrongBrush}"
-                                                                                         Value="{Binding ActivePercent, Mode=OneWay}" Visibility="{Binding ActiveProgressVisibility}"
-                                                                                         AutomationProperties.Name="传输进度" />
-                                                                        </StackPanel>
-                                                                        <TextBlock Grid.Column="2" Margin="0,0,14,0" VerticalAlignment="Center"
-                                                                                   FontFamily="{DynamicResource IconFontFamily}" FontSize="{DynamicResource FontSizeCaption}"
-                                                                                   Foreground="{DynamicResource LabelTertiaryBrush}" Text="&#xE76C;" />
-                                                                    </Grid>
-                                                                </Border>
-                                                            </Button>
-                                                        </StackPanel>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                            <TextBlock x:Name="ShareMatchedEmptyText" Style="{StaticResource SettingsEmptyRowStyle}"
-                                                       Text="还没有匹配的设备。点“匹配设备…”，输入对方的匹配码。" />
-                                        </StackPanel>
+                                    <!-- 一行两台设备卡片（同一行等高）：名字后跟在线标签；传输中才显示进度文字与进度条。 -->
+                                    <ItemsControl x:Name="MatchedDeviceList" ItemsSource="{Binding MatchedDeviceRows}" Focusable="False"
+                                                  Margin="0,0,0,14">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <services:TwoColumnPanel ColumnGap="8" RowGap="8" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource SettingsGroupStyle}" Margin="0">
+                                                    <Button Style="{StaticResource SettingsNavRowStyle}" VerticalContentAlignment="Stretch"
+                                                            Click="OpenMatchedDevice_Click"
+                                                            AutomationProperties.Name="{Binding AccessibleName}" ToolTip="点击查看；也可以把文件拖到这里发送">
+                                                        <Border x:Name="DropHighlight" Style="{StaticResource TransferDropHighlightStyle}">
+                                                            <StackPanel Margin="11,9,8,9" MinHeight="22">
+                                                                <services:NameTagPanel>
+                                                                    <TextBlock VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                                                               Text="{Binding Name}" />
+                                                                    <Border Margin="5,0,0,0" Style="{StaticResource TransferOnlineTagStyle}">
+                                                                        <TextBlock Style="{StaticResource TransferOnlineTagTextStyle}" Text="{Binding OnlineText}" />
+                                                                    </Border>
+                                                                </services:NameTagPanel>
+                                                                <TextBlock Margin="0,3,0,0" Style="{StaticResource SettingsRowDescriptionStyle}" TextWrapping="NoWrap"
+                                                                           TextTrimming="CharacterEllipsis" Text="{Binding ActivityText}"
+                                                                           Visibility="{Binding ActivityVisibility}" />
+                                                                <ProgressBar Margin="0,5,0,0" Style="{StaticResource TodoProgressBarStyle}"
+                                                                             Foreground="{DynamicResource AccentBrandStrongBrush}"
+                                                                             Value="{Binding ActivePercent, Mode=OneWay}" Visibility="{Binding ActiveProgressVisibility}"
+                                                                             AutomationProperties.Name="传输进度" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </Button>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Border x:Name="ShareMatchedEmptyCard" Style="{StaticResource SettingsGroupStyle}">
+                                        <TextBlock x:Name="ShareMatchedEmptyText" Style="{StaticResource SettingsEmptyRowStyle}"
+                                                   Text="还没有匹配的设备。点“匹配设备”，输入对方的匹配码。" />
                                     </Border>
                                     <TextBlock x:Name="TransferDropHintText" Style="{StaticResource SettingsNoteStyle}"
                                                Text="把文件拖到设备上即可发送；收到的文件不会进入历史。" />
@@ -1322,6 +1303,74 @@
                                                    FontSize="{DynamicResource FontSizeTitle}" Text="传输设置" />
                                     </Grid>
 
+                                    <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="本机" />
+                                    <Border Style="{StaticResource SettingsGroupStyle}">
+                                        <StackPanel>
+                                            <Grid Style="{StaticResource SettingsRowStyle}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Style="{StaticResource SettingsRowTextStyle}">
+                                                    <TextBlock TextWrapping="Wrap" Text="本机名称" />
+                                                    <TextBlock x:Name="ShareDeviceNameText" Style="{StaticResource SettingsRowDescriptionStyle}"
+                                                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Text="本机"
+                                                               ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+                                                </StackPanel>
+                                                <Button x:Name="ShareRenameDeviceButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
+                                                        VerticalAlignment="Center" Content="改名…" Click="ShareRenameDeviceButton_Click"
+                                                        AutomationProperties.Name="修改本机名称" ToolTip="局域网里其他电脑看到的名字" />
+                                            </Grid>
+                                            <Border Style="{StaticResource SettingsDividerStyle}" />
+                                            <Grid Style="{StaticResource SettingsRowStyle}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Style="{StaticResource SettingsRowTextStyle}">
+                                                    <TextBlock TextWrapping="Wrap" Text="更换匹配码" />
+                                                    <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Text="旧码立即失效，已匹配的设备不受影响。" />
+                                                </StackPanel>
+                                                <Button x:Name="ShareIssueCodeButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
+                                                        VerticalAlignment="Center" Content="更换" Click="ShareIssueCodeButton_Click"
+                                                        AutomationProperties.Name="更换本机匹配码" />
+                                            </Grid>
+                                            <Border Style="{StaticResource SettingsDividerStyle}" />
+                                            <Grid Style="{StaticResource SettingsRowStyle}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Style="{StaticResource SettingsRowTextStyle}">
+                                                    <TextBlock TextWrapping="Wrap" Text="保持可被发现" />
+                                                    <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Text="一直监听 53318，已匹配设备随时能发来文件。" />
+                                                </StackPanel>
+                                                <CheckBox x:Name="ShareKeepOnlineCheck" Grid.Column="1" Margin="0,8,14,8" Style="{StaticResource SettingsSwitchStyle}"
+                                                          Click="ShareKeepOnlineCheck_Click" AutomationProperties.Name="保持可被发现" />
+                                            </Grid>
+                                            <Border Style="{StaticResource SettingsDividerStyle}" />
+                                            <Grid Style="{StaticResource SettingsRowStyle}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Style="{StaticResource SettingsRowTextStyle}">
+                                                    <TextBlock TextWrapping="Wrap" Text="防火墙" />
+                                                    <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Text="连不上时在管理员 PowerShell 运行，放行 53318。" />
+                                                </StackPanel>
+                                                <Button x:Name="ShareCopyFirewallButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
+                                                        VerticalAlignment="Center" Content="复制命令" AutomationProperties.Name="复制防火墙放行命令"
+                                                        Click="ShareCopyFirewallButton_Click" ToolTip="复制放行 TCP/UDP 53318 的 netsh 命令" />
+                                            </Grid>
+                                            <Border Style="{StaticResource SettingsDividerStyle}" />
+                                            <StackPanel Style="{StaticResource SettingsRowTextStyle}">
+                                                <TextBlock TextWrapping="Wrap" Text="本机地址" />
+                                                <TextBlock x:Name="ShareLocalAddressText" Style="{StaticResource SettingsRowDescriptionStyle}"
+                                                           Text="本机地址未知" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+
                                     <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="接收" />
                                     <Border Style="{StaticResource SettingsGroupStyle}">
                                         <StackPanel>
@@ -1371,56 +1420,20 @@
                                         </StackPanel>
                                     </Border>
 
-                                    <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="本机" />
+                                    <TextBlock Style="{StaticResource SettingsGroupHeaderStyle}" Text="手动连接发布者" />
                                     <Border Style="{StaticResource SettingsGroupStyle}">
-                                        <StackPanel>
-                                            <Grid Style="{StaticResource SettingsRowStyle}">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel Style="{StaticResource SettingsRowTextStyle}">
-                                                    <TextBlock TextWrapping="Wrap" Text="更换匹配码" />
-                                                    <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Text="旧码立即失效，已匹配的设备不受影响。" />
-                                                </StackPanel>
-                                                <Button x:Name="ShareIssueCodeButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
-                                                        VerticalAlignment="Center" Content="更换" Click="ShareIssueCodeButton_Click"
-                                                        AutomationProperties.Name="更换本机匹配码" />
-                                            </Grid>
-                                            <Border Style="{StaticResource SettingsDividerStyle}" />
-                                            <Grid Style="{StaticResource SettingsRowStyle}">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel Style="{StaticResource SettingsRowTextStyle}">
-                                                    <TextBlock TextWrapping="Wrap" Text="保持可被发现" />
-                                                    <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Text="一直监听 53318，已匹配设备随时能发来文件。" />
-                                                </StackPanel>
-                                                <CheckBox x:Name="ShareKeepOnlineCheck" Grid.Column="1" Margin="0,8,14,8" Style="{StaticResource SettingsSwitchStyle}"
-                                                          Click="ShareKeepOnlineCheck_Click" AutomationProperties.Name="保持可被发现" />
-                                            </Grid>
-                                            <Border Style="{StaticResource SettingsDividerStyle}" />
-                                            <Grid Style="{StaticResource SettingsRowStyle}">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel Style="{StaticResource SettingsRowTextStyle}">
-                                                    <TextBlock TextWrapping="Wrap" Text="防火墙" />
-                                                    <TextBlock Style="{StaticResource SettingsRowDescriptionStyle}" Text="连不上时在管理员 PowerShell 运行，放行 53318。" />
-                                                </StackPanel>
-                                                <Button x:Name="ShareCopyFirewallButton" Grid.Column="1" Margin="0,8,14,8" Padding="12,5"
-                                                        VerticalAlignment="Center" Content="复制命令" AutomationProperties.Name="复制防火墙放行命令"
-                                                        Click="ShareCopyFirewallButton_Click" ToolTip="复制放行 TCP/UDP 53318 的 netsh 命令" />
-                                            </Grid>
-                                            <Border Style="{StaticResource SettingsDividerStyle}" />
-                                            <StackPanel Style="{StaticResource SettingsRowTextStyle}">
-                                                <TextBlock TextWrapping="Wrap" Text="本机地址" />
-                                                <TextBlock x:Name="ShareLocalAddressText" Style="{StaticResource SettingsRowDescriptionStyle}"
-                                                           Text="本机地址未知" />
-                                            </StackPanel>
-                                        </StackPanel>
+                                        <Grid Margin="14,10,14,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="ShareManualAddressBox" Style="{StaticResource SearchTextBoxStyle}"
+                                                     Tag="192.168.1.20:53318" AutomationProperties.Name="发布者地址（IP:端口）"
+                                                     KeyDown="ShareManualAddressBox_KeyDown" />
+                                            <Button x:Name="ShareManualConnectButton" Grid.Column="1" Margin="8,0,0,0" Padding="12,5"
+                                                    VerticalAlignment="Center" Content="连接" Click="ShareManualConnectButton_Click"
+                                                    AutomationProperties.Name="连接发布者并浏览发布" />
+                                        </Grid>
                                     </Border>
                                 </StackPanel>
                             </Grid>
