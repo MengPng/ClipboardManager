@@ -1,6 +1,8 @@
 using ClipboardManager.Application;
 using ClipboardManager.Application.Services;
+using ClipboardManager.Application.Services.Updates;
 using ClipboardManager.Domain.Contracts;
+using ClipboardManager.Domain.Models;
 using ClipboardManager.Infrastructure;
 using ClipboardManager.Infrastructure.Data;
 using ClipboardManager.Infrastructure.Paths;
@@ -24,6 +26,7 @@ public partial class App : System.Windows.Application
 {
     private IHost? _host;
     private SingleInstanceCoordinator? _singleInstance;
+    private UpdateDialog? _updateDialog;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -96,6 +99,7 @@ public partial class App : System.Windows.Application
                 .ConfigureServices(services =>
                 {
                     services.AddApplication();
+                    services.AddSingleton(AppUpdateOptions.For(Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0)));
                     services.AddInfrastructure();
                     services.AddSingleton<MainWindow>();
                     services.AddSingleton<GlobalHotkeyService>();
@@ -171,11 +175,13 @@ public partial class App : System.Windows.Application
                 {
                     mainWindow.AllowClose();
                     Shutdown();
-                });
+                },
+                checkForUpdates: () => Dispatcher.InvokeAsync(async () => await CheckForUpdatesFromTrayAsync(mainWindow, tray)));
 
             StartSelectionSearch(mainWindow, hotkey, tray, context.Settings, log);
             ShowMainWindow();
             StartConfigSync(tray, log);
+            StartAppUpdates(mainWindow, tray, log, e.Args);
             log.LogInformation("Startup complete; main window shown.");
         }
         catch (Exception exception)
@@ -362,6 +368,104 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// 应用内检查更新（ADR-0005）：清理上次更新留下的旧文件，启动后约 30 秒和每 24 小时检查一次；
+    /// 发现新版本时托盘气泡提示（点击打开更新窗口），主窗口页脚保留"新版本"标记直到更新或跳过。
+    /// 失败只记录，不影响剪切板监听与本地功能。
+    /// </summary>
+    private void StartAppUpdates(MainWindow mainWindow, TrayIconService tray, ILogger<App> log, IReadOnlyList<string> arguments)
+    {
+        try
+        {
+            var updates = _host!.Services.GetRequiredService<AppUpdateService>();
+            SelfUpdateInstaller.CleanupPreviousExecutable();
+            updates.CleanupDownloads();
+            if (SelfUpdateInstaller.UpdatedFrom(arguments) is { Length: > 0 } previous)
+            {
+                log.LogInformation("Updated from {Previous} to {Current}.", previous, updates.CurrentVersion);
+                tray.ShowBalloon("更新完成",
+                    $"已从 v{previous} 更新到 v{updates.CurrentVersion.ToString(3)}，历史、收藏和设置都已保留。");
+            }
+
+            mainWindow.UpdateChecker = token => updates.CheckAsync(manual: true, token);
+            mainWindow.UpdatePresenter = manifest => ShowUpdateDialog(mainWindow, updates, manifest);
+            updates.PendingChanged += (_, _) => Dispatcher.InvokeAsync(() => mainWindow.ShowUpdateAvailable(updates.Pending));
+            updates.UpdateAvailable += (_, manifest) => Dispatcher.InvokeAsync(() => tray.ShowBalloon(
+                "剪切板管理工具有新版本",
+                $"v{manifest.Version.ToString(3)} · {manifest.Title}" + Environment.NewLine + "点击这里查看更新内容并更新。",
+                () => Dispatcher.InvokeAsync(() => ShowUpdateDialog(mainWindow, updates, manifest))));
+            updates.Start();
+        }
+        catch (Exception exception)
+        {
+            log.LogError(exception, "Update checks failed to start; local features are unaffected.");
+        }
+    }
+
+    private async Task CheckForUpdatesFromTrayAsync(MainWindow mainWindow, TrayIconService tray)
+    {
+        if (_host?.Services.GetService<AppUpdateService>() is not { } updates) return;
+        try
+        {
+            var result = await updates.CheckAsync(manual: true);
+            switch (result.Status)
+            {
+                case AppUpdateStatus.Available or AppUpdateStatus.Skipped when result.Manifest is { } manifest:
+                    ShowUpdateDialog(mainWindow, updates, manifest);
+                    break;
+                case AppUpdateStatus.UpToDate:
+                    tray.ShowBalloon("已是最新版本", $"当前 v{updates.CurrentVersion.ToString(3)} 就是最新版本。");
+                    break;
+                default:
+                    tray.ShowBalloon("检查更新失败", result.Error ?? "请稍后再试。");
+                    break;
+            }
+        }
+        catch (Exception exception)
+        {
+            tray.ShowBalloon("检查更新失败", exception.Message);
+        }
+    }
+
+    private void ShowUpdateDialog(MainWindow mainWindow, AppUpdateService updates, AppUpdateManifest manifest)
+    {
+        if (_updateDialog is { } open)
+        {
+            if (open.Manifest.Version == manifest.Version)
+            {
+                open.Activate();
+                return;
+            }
+            open.Close();
+        }
+
+        var log = _host!.Services.GetRequiredService<ILogger<App>>();
+        var capability = SelfUpdateInstaller.Evaluate();
+        var dialog = new UpdateDialog(manifest, updates.CurrentVersion, capability.CanReplace, capability.Reason, new UpdateDialogActions(
+            InstallAsync: async (progress, token) =>
+            {
+                // 下载与哈希在后台线程，进度经 Progress<T> 回到界面线程。
+                var downloaded = await Task.Run(() => updates.DownloadAsync(manifest, progress, token), token);
+                SelfUpdateInstaller.ReplaceAndLaunch(downloaded, updates.CurrentVersion);
+                log.LogInformation("Replaced executable with {Version}; restarting.", manifest.Version);
+                mainWindow.AllowClose();
+                Shutdown();
+            },
+            SkipAsync: () => updates.SkipAsync(manifest.Version),
+            OpenPage: () =>
+            {
+                try { SelfUpdateInstaller.OpenPage(manifest.PageUrl); }
+                catch (Exception exception) { log.LogWarning("Opening download page failed: {ExceptionType}", exception.GetType().Name); }
+            }));
+        dialog.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_updateDialog, dialog)) _updateDialog = null;
+        };
+        _updateDialog = dialog;
+        dialog.Show();
+        dialog.Activate();
+    }
+
     protected override async void OnExit(ExitEventArgs e)
     {
         if (_host is not null)
@@ -373,6 +477,7 @@ public partial class App : System.Windows.Application
             _host.Services.GetService<WindowDockingService>()?.Dispose();
             _host.Services.GetService<AutomaticBackupService>()?.Dispose();
             _host.Services.GetService<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>()?.Dispose();
+            _host.Services.GetService<AppUpdateService>()?.Dispose();
             await _host.StopAsync(TimeSpan.FromSeconds(3));
             _host.Dispose();
         }

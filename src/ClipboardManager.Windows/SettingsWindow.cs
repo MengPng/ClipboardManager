@@ -37,7 +37,9 @@ public sealed record SettingsWindowContext(
     ClipboardMonitorService? Monitor = null,
     string? DataFolder = null,
     string? LogFolder = null,
-    Func<bool>? IsFileSearchAvailable = null);
+    Func<bool>? IsFileSearchAvailable = null,
+    Func<CancellationToken, Task<AppUpdateCheck>>? CheckForUpdates = null,
+    Action<AppUpdateManifest>? ShowUpdate = null);
 
 /// <summary>
 /// Settings that save as soon as a control changes. Every change re-reads the stored settings,
@@ -70,6 +72,7 @@ public sealed class SettingsWindow : Window
     private double _usageRatio;
     private readonly TextBlock _fileSearchState = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _lastBackup = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _updateState = new() { TextWrapping = TextWrapping.Wrap };
 
     public SettingsWindow(SettingsWindowContext context, string? initialPage = null)
     {
@@ -565,11 +568,46 @@ public sealed class SettingsWindow : Window
             Row("版本", null, Caption(version)),
             Row("数据库结构", null, Caption($"第 {schema} 版")),
         };
+        var autoCheck = Switch("自动检查更新");
+        autoCheck.Click += async (_, _) => await CommitAsync("自动检查更新", s => s with { AutoCheckForUpdates = autoCheck.IsChecked == true });
+        _binders.Add(s => autoCheck.IsChecked = s.AutoCheckForUpdates);
+        rows.Add(Row("自动检查更新", "启动后和每天读取一次下载服务器上的版本清单，有新版本时在托盘和页脚提示。只下载公开清单，不上传任何剪切板内容。", autoCheck));
+        if (_context.CheckForUpdates is not null)
+        {
+            var check = new Button { Content = "检查更新", Padding = new Thickness(12, 5, 12, 5) };
+            check.Click += async (_, _) => await CheckForUpdatesAsync(check);
+            _updateState.SetResourceReference(TextBlock.ForegroundProperty, "LabelTertiaryBrush");
+            _updateState.SetResourceReference(TextBlock.FontSizeProperty, "FontSizeCaption");
+            _updateState.Text = "点击立即检查是否有新版本。";
+            rows.Add(Row("检查更新", null, check, _updateState));
+        }
         if (_context.DataFolder is { } data) rows.Add(Row("数据目录", data, OpenFolderButton(data)));
         if (_context.LogFolder is { } logs) rows.Add(Row("日志目录", "日志不包含剪切板正文，反馈问题时可以附上。", OpenFolderButton(logs)));
         page.Children.Add(Group("剪切板管理工具", rows.ToArray()));
         page.Children.Add(Note("数据默认只保存在本机。未登录或离线时，所有本地功能都可以正常使用。"));
         return page;
+    }
+
+    private async Task CheckForUpdatesAsync(Button button)
+    {
+        if (_context.CheckForUpdates is not { } check) return;
+        button.IsEnabled = false;
+        _updateState.Text = "正在检查…";
+        try
+        {
+            var result = await check(CancellationToken.None);
+            _updateState.Text = result.Status switch
+            {
+                AppUpdateStatus.UpToDate => "已是最新版本。",
+                AppUpdateStatus.Available or AppUpdateStatus.Skipped when result.Manifest is { } found => $"发现新版本 {found.Version.ToString(3)}：{found.Title}",
+                AppUpdateStatus.Unsupported => "下载服务器上的版本清单暂不支持，请稍后再试或打开下载页。",
+                _ => result.Error ?? "检查更新失败，请稍后再试。",
+            };
+            if (result.Status is AppUpdateStatus.Available or AppUpdateStatus.Skipped && result.Manifest is { } manifest)
+                _context.ShowUpdate?.Invoke(manifest);
+        }
+        catch (Exception exception) { _updateState.Text = "检查更新失败：" + FriendlyError(exception); }
+        finally { button.IsEnabled = true; }
     }
 
     private Button OpenFolderButton(string path)

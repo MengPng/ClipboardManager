@@ -290,6 +290,10 @@ internal static class Program
             var emptyPanel = (FrameworkElement)window.FindName("EmptyStatePanel");
             emptyPanel.Visibility = Visibility.Collapsed;
             ((TextBlock)window.FindName("CountText")).Text = "5 条历史";
+            // 0.9.3: the footer keeps a "新版本" badge between the count and the shortcut hint until the user updates or skips.
+            var updateBadge = (System.Windows.Controls.Button)window.FindName("UpdateAvailableButton");
+            updateBadge.Content = "新版本";
+            updateBadge.Visibility = Visibility.Visible;
             for (var cycle = 0; cycle < 3; cycle++)
             {
                 var hidden = new[] { "WindowTitleText", "ListeningStatusText", "PinButton", "PauseButton", "SettingsButton", "CloseButton" }
@@ -339,6 +343,8 @@ internal static class Program
                     panel.Visibility = panel == active ? Visibility.Visible : Visibility.Collapsed;
                 // The history page shows its count beside the filters; the footer count is for the other pages.
                 count.Visibility = active.Name == "HistoryPanel" ? Visibility.Collapsed : Visibility.Visible;
+                // Mirrors MainWindow.UpdateUpdateBadge: a pending update shows on every page except the calculator.
+                updateBadge.Visibility = active.Name == "CalculatorPanel" ? Visibility.Collapsed : Visibility.Visible;
                 window.Width = size.Width;
                 window.Height = size.Height;
                 surface.Measure(size);
@@ -356,6 +362,13 @@ internal static class Program
                 if (hintBounds.Right > size.Width || hintBounds.Width < 1 ||
                     (count.Visibility == Visibility.Visible && (countBounds.Left < 0 || countBounds.Right > hintBounds.Left)))
                     throw new InvalidOperationException($"Footer count and shortcut overlap: {countBounds}, {hintBounds}");
+                if (updateBadge.Visibility == Visibility.Visible)
+                {
+                    var badgeBounds = Bounds(updateBadge, surface);
+                    if (badgeBounds.Width < 1 || badgeBounds.Right > hintBounds.Left + 0.5 ||
+                        (count.Visibility == Visibility.Visible && badgeBounds.Left < countBounds.Right - 0.5))
+                        throw new InvalidOperationException($"Footer update badge overlaps: count={countBounds}, badge={badgeBounds}, hint={hintBounds}");
+                }
                 // P1: the footer is thinner now that the history count moved up beside the filters.
                 if (((FrameworkElement)footerGrid.Parent).ActualHeight > 30.5)
                     throw new InvalidOperationException($"Footer must be at most 30 DIP tall: {((FrameworkElement)footerGrid.Parent).ActualHeight}");
@@ -1134,7 +1147,9 @@ internal static class Program
                 foreach (var page in ClipboardManager.Windows.SettingsWindow.Pages)
                 {
                     var dialog = new ClipboardManager.Windows.SettingsWindow(new ClipboardManager.Windows.SettingsWindowContext(
-                        settingsStore, DataFolder: @"C:\Data", LogFolder: @"C:\Data\logs", IsFileSearchAvailable: () => false), page)
+                        settingsStore, DataFolder: @"C:\Data", LogFolder: @"C:\Data\logs", IsFileSearchAvailable: () => false,
+                        CheckForUpdates: _ => Task.FromResult(new ClipboardManager.Domain.Models.AppUpdateCheck(ClipboardManager.Domain.Models.AppUpdateStatus.UpToDate)),
+                        ShowUpdate: _ => { }), page)
                     {
                         WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = -20000, ShowActivated = false,
                     };
@@ -1155,6 +1170,8 @@ internal static class Program
                     }
                     var texts = VisualDescendants(settingsRoot).OfType<TextBlock>().Select(text => text.Text).ToArray();
                     if (!texts.Contains(page)) throw new InvalidOperationException($"Settings page {page} did not open.");
+                    if (page == "关于" && !VisualDescendants(settingsRoot).OfType<Button>().Any(button => Equals(button.Content, "检查更新")))
+                        throw new InvalidOperationException("Settings 关于 must offer 检查更新.");
                     if (page == "常规" && !VisualDescendants(settingsRoot).OfType<Button>().Any(button => Equals(button.Content, "Alt + V") || Equals(button.Content, "Alt+V")))
                         throw new InvalidOperationException("Settings did not bind the stored panel hotkey.");
                     Console.WriteLine($"SETTINGS {theme}/{page}: viewport={scroller.ViewportWidth:0}x{scroller.ViewportHeight:0}, extent={scroller.ExtentWidth:0}x{scroller.ExtentHeight:0}");

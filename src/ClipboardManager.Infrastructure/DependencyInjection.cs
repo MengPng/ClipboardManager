@@ -38,6 +38,9 @@ public static class DependencyInjection
         services.AddHttpClient<TencentCloudAccountService>(client => client.Timeout = TimeSpan.FromSeconds(20));
         services.AddHttpClient<TencentCloudWorkspaceService>(client => client.Timeout = TimeSpan.FromSeconds(20));
         services.AddHttpClient<TencentRemoteSyncProvider>(client => client.Timeout = TimeSpan.FromSeconds(30));
+        // 检查更新：超时由每次请求单独控制（清单 10 秒、安装包 30 分钟）。
+        services.AddHttpClient<ClipboardManager.Infrastructure.Updates.HttpAppUpdateClient>(client => client.Timeout = Timeout.InfiniteTimeSpan);
+        services.AddSingleton<IAppUpdateClient>(provider => provider.GetRequiredService<ClipboardManager.Infrastructure.Updates.HttpAppUpdateClient>());
         services.AddSingleton<ICloudAccountService>(provider => provider.GetRequiredService<TencentCloudAccountService>());
         services.AddSingleton<TencentCloudHttpAuthorizer>();
         services.AddSingleton<ICloudWorkspaceService>(provider => provider.GetRequiredService<TencentCloudWorkspaceService>());

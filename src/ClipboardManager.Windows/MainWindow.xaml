@@ -1438,9 +1438,16 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Left">
-                        <TextBlock x:Name="CountText" Style="{StaticResource SecondaryTextStyle}" Text="0 条记录" />
+                    <!-- Stretch (not Left) so a long page hint trims inside its column when the update badge is shown. -->
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="CountText" Style="{StaticResource SecondaryTextStyle}" Text="0 条记录"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                     </StackPanel>
+                    <Button x:Name="UpdateAvailableButton" Grid.Column="1" Margin="6,0,8,0" Padding="8,0" MinHeight="0" Height="20"
+                            Style="{StaticResource PrimaryButtonStyle}" FontSize="{DynamicResource FontSizeCaption}"
+                            VerticalAlignment="Center" Visibility="Collapsed" Focusable="False"
+                            AutomationProperties.Name="有新版本" Click="UpdateAvailableButton_Click" Content="新版本" />
                     <TextBlock x:Name="ShortcutHintText" Grid.Column="2" Margin="0,0,0,0"
                                Style="{StaticResource MetaTextStyle}" VerticalAlignment="Center"
                                Text="Enter 使用" />

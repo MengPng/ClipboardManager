@@ -14,6 +14,8 @@
 
 ## 当前范围
 
+> 0.9.3 补充（2026-11-10，待发布）：客户端应用内检查更新落地（ADR-0005）。启动 30 秒后检查一次，之后每 24 小时检查一次，也可从托盘或设置 → 关于手动检查。提示方式为托盘气泡加页脚「新版本」标记（计算页不显示）。更新时下载 EXE 并校验大小与 SHA-256，以 `*.old` 改名替换，再用 `--restart-after-pid` 重启；MSI 目录与开发构建只打开下载页。检查更新只匿名 GET 公开清单与安装包，不得携带剪切板内容、设备 ID 或令牌，失败不得弹窗或影响监听。数据库仍为 schema 8；版本源 `Directory.Build.targets`（0.9.3 / `0.9.3-update-check`）与 `release/release-contract.json`（appVersion 0.9.3，schema 8）。真实服务器端到端更新、SmartScreen、托盘气泡点击待实机验收。
+>
 > 0.9.2 补充（2026-11-06）：新增「局域网匹配与文件直传」（ADR-0008，见下「扩展能力实现状态」）、Kubai 主题、共享页设置风格重做，主窗口默认 300×640；数据库仍为 schema 8；版本源 `Directory.Build.targets`（0.9.2 / `0.9.2-lan-transfer`）与 `release/release-contract.json`（appVersion 0.9.2，schema 8）。发布前必须先用 `scripts/build-kubai-icons.ps1` 生成 Kubai 图标（18 个 PNG + NOTICE.txt），`release-all.ps1` 缺图标时拒绝发布。
 >
 > 0.9.1 补充（2026-11-05）：新增「划词查找本地文件」（ADR-0007，见下「扩展能力实现状态」）与设置窗口重做；数据库仍为 schema 8；版本源 `Directory.Build.targets`（0.9.1 / `0.9.1-settings-selection-search`）与 `release/release-contract.json`（appVersion 0.9.1，schema 8）。

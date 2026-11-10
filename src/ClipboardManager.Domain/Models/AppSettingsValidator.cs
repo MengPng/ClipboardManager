@@ -40,6 +40,8 @@ public static class AppSettingsValidator
             (!Uri.TryCreate(settings.CloudApiBaseUrl, UriKind.Absolute, out var cloudApiUri) ||
              cloudApiUri.Scheme != Uri.UriSchemeHttps))
             throw new ArgumentException("云端服务地址必须是有效的 HTTPS 地址。");
+        if (settings.SkippedUpdateVersion is { } skipped && !Version.TryParse(skipped, out _))
+            throw new ArgumentException("跳过的更新版本号格式无效。");
     }
 
     /// <summary>Order-insensitive comparison key for "Ctrl+Alt+F" vs "Alt+Control+F".</summary>

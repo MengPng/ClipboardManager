@@ -1,6 +1,7 @@
 using ClipboardManager.Application.Services;
 using ClipboardManager.Application.Services.ConfigSync;
 using ClipboardManager.Application.Services.LanTransfer;
+using ClipboardManager.Application.Services.Updates;
 using ClipboardManager.Domain.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -32,6 +33,8 @@ public static class DependencyInjection
         services.AddSingleton<LanTransferService>();
         services.AddSingleton<LanDeviceService>();
         services.AddSingleton<ConfigSyncCoordinator>();
+        // AppUpdateOptions 由宿主按程序集版本注册（ADR-0005）。
+        services.AddSingleton<AppUpdateService>();
         return services;
     }
 }

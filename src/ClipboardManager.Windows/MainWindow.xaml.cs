@@ -322,6 +322,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CountText.Visibility = HistoryPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         ShortcutHintText.Text = calculator ? "Esc 清空" : todo ? "本机待办" : share ? "仅限局域网" : "Enter 使用";
         if (calculator) UpdateCalculatorStatus();
+        UpdateUpdateBadge();
         ShortcutHintText.ToolTip = "Ctrl+F 搜索 · Delete 删除 · Ctrl+D 存入配置 · Ctrl+P 记录置顶 · Esc 隐藏";
         TodoPanel.Visibility = todo ? Visibility.Visible : Visibility.Collapsed;
         ConfigPanel.Visibility = config ? Visibility.Visible : Visibility.Collapsed;
@@ -754,6 +755,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// <summary>Set by the app host: whether the local file index (Everything) answers right now.</summary>
     public Func<bool>? FileSearchAvailability { get; set; }
 
+    /// <summary>Set by the app host: a manual update check for 设置 → 关于 (ADR-0005).</summary>
+    public Func<CancellationToken, Task<ClipboardManager.Domain.Models.AppUpdateCheck>>? UpdateChecker { get; set; }
+
+    /// <summary>Set by the app host: opens the update window for a found version.</summary>
+    public Action<ClipboardManager.Domain.Models.AppUpdateManifest>? UpdatePresenter { get; set; }
+
+    private ClipboardManager.Domain.Models.AppUpdateManifest? _availableUpdate;
+
+    /// <summary>Shows or hides the footer "有新版本" badge; it stays until the user updates or skips.</summary>
+    public void ShowUpdateAvailable(ClipboardManager.Domain.Models.AppUpdateManifest? manifest)
+    {
+        _availableUpdate = manifest;
+        UpdateUpdateBadge();
+        if (manifest is not null)
+        {
+            UpdateAvailableButton.ToolTip = $"v{manifest.Version.ToString(3)} · {manifest.Title}，点击查看并更新";
+        }
+    }
+
+    /// <summary>The calculator footer carries its keyboard hint at full width, so the badge stays off that page.</summary>
+    private void UpdateUpdateBadge() =>
+        UpdateAvailableButton.Visibility = _availableUpdate is not null && !IsCalculatorTabActive ? Visibility.Visible : Visibility.Collapsed;
+
+    private void UpdateAvailableButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is { } manifest) UpdatePresenter?.Invoke(manifest);
+    }
+
     public void OpenSettings(string? page = null)
     {
         if (OwnedWindows.OfType<SettingsWindow>().FirstOrDefault() is { } open) { open.Activate(); return; }
@@ -767,7 +796,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _monitorService,
             paths.Root,
             paths.LogsPath,
-            FileSearchAvailability), page) { Owner = this };
+            FileSearchAvailability,
+            UpdateChecker,
+            UpdatePresenter), page) { Owner = this };
         WithModal(() => dialog.ShowDialog());
     }
 
