@@ -195,6 +195,15 @@ public sealed class AppUpdateServiceTests
     }
 
     [Fact]
+    public void DefaultScheduleChecksAfterThirtySecondsThenHourly()
+    {
+        var options = AppUpdateOptions.For(new Version(0, 9, 3, 0));
+        Assert.Equal(TimeSpan.FromSeconds(30), options.FirstCheckDelay);
+        Assert.Equal(TimeSpan.FromHours(1), options.CheckInterval);
+        Assert.Equal(new Version(0, 9, 3), options.CurrentVersion);
+    }
+
+    [Fact]
     public async Task AutomaticScheduleHonoursTheSetting()
     {
         client.Json = AppUpdateManifestReaderTests.Manifest(version: "0.9.4");

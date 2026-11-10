@@ -8,7 +8,7 @@ namespace ClipboardManager.Application.Services.Updates;
 public sealed record AppUpdateOptions(Version CurrentVersion, TimeSpan FirstCheckDelay, TimeSpan CheckInterval)
 {
     public static AppUpdateOptions For(Version currentVersion) =>
-        new(AppUpdateManifestReader.Normalize(currentVersion), TimeSpan.FromSeconds(30), TimeSpan.FromHours(24));
+        new(AppUpdateManifestReader.Normalize(currentVersion), TimeSpan.FromSeconds(30), TimeSpan.FromHours(1));
 }
 
 /// <summary>

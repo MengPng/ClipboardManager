@@ -41,7 +41,7 @@ public sealed record AppSettings
     public bool LanAutoAccept { get; init; }
     /// <summary>接收文件的保存目录；空表示“下载\剪切板传输”。</summary>
     public string LanReceiveFolder { get; init; } = string.Empty;
-    /// <summary>0.9.3（ADR-0005）：启动约 30 秒后和每 24 小时读取一次下载服务器的版本清单。</summary>
+    /// <summary>0.9.3（ADR-0005）：启动约 30 秒后和之后每 1 小时读取一次下载服务器的版本清单。</summary>
     public bool AutoCheckForUpdates { get; init; } = true;
     /// <summary>用户选择"跳过此版本"的版本号；自动检查不再提示该版本，手动检查仍会显示。</summary>
     public string? SkippedUpdateVersion { get; init; }
