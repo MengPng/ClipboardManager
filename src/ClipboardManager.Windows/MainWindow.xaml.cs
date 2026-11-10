@@ -58,7 +58,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private System.Windows.Point _dragStart;
     private object? _dragItem;
     private long _historyVersion, _collectionVersion, _foldersVersion, _tabSelectionVersion;
-    /// <summary>配置页当前来源：null 为“我的”（个人文件夹），否则为某个订阅的受管文件夹。</summary>
+    /// <summary>配置页当前来源：null 为“我的”（个人文件夹），否则为某台发布者（PeerId）订阅来的受管文件夹。</summary>
     private Guid? _configSource;
     private string? _configSourceChipsKey;
     private CancellationTokenSource? _historySearch, _collectionSearch;
@@ -380,16 +380,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var version = ++_foldersVersion;
         var workspaceId = ActiveConfigWorkspaceId;
         var result = await _collectionService.GetFoldersAsync(workspaceId, cancellationToken);
-        // 只列出还有受管文件夹的订阅；当前选中的订阅被取消后回到“我的”。
+        // 来源按发布者分组：同一台发布者的多份订阅合成一枚胶囊，名称用发布者的设备名。
+        // 只列出还有受管文件夹的发布者；当前选中的发布者没有订阅后回到“我的”。
         var managedIds = result.Folders.Select(folder => folder.ManagedSubscriptionId).OfType<Guid>().ToHashSet();
-        var sources = (await _configSubscriptions.GetSubscriptionsAsync(cancellationToken))
+        var subscriptionPeer = (await _configSubscriptions.GetSubscriptionsAsync(cancellationToken))
             .Where(subscription => subscription.WorkspaceId == workspaceId && managedIds.Contains(subscription.Id))
+            .ToDictionary(subscription => subscription.Id, subscription => subscription.PeerId);
+        var peers = await _configSubscriptions.GetPublisherPeersAsync(cancellationToken);
+        var sources = subscriptionPeer.Values.Distinct()
+            .Select(peerId => (Id: peerId, Name: peers.FirstOrDefault(peer => peer.Id == peerId)?.Name ?? "未知设备"))
+            .OrderBy(item => item.Name, StringComparer.CurrentCulture)
             .ToList();
         if (version != _foldersVersion || workspaceId != ActiveConfigWorkspaceId) return;
-        if (_configSource is { } current && sources.All(subscription => subscription.Id != current)) _configSource = null;
+        if (_configSource is { } current && sources.All(item => item.Id != current)) _configSource = null;
         var source = _configSource;
+        Guid? SourceOf(CollectionFolder folder) =>
+            folder.ManagedSubscriptionId is not { } id ? null
+            : subscriptionPeer.TryGetValue(id, out var peerId) ? peerId : Guid.Empty;
         var folders = new List<FolderViewModel>();
-        foreach (var folder in result.Folders.Where(folder => folder.ManagedSubscriptionId == source))
+        foreach (var folder in result.Folders.Where(folder => SourceOf(folder) == source))
             folders.Add(new FolderViewModel(folder, (await _collectionService.GetItemsAsync(workspaceId, folder.Id, cancellationToken: cancellationToken)).Count, SpaceName(workspaceId)));
         // A space switch bumps the version and changes the active workspace, so folders
         // loaded for the space the user just left must never replace the current list.
@@ -406,16 +415,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await RefreshCollectionItemsAsync(cancellationToken);
     }
 
-    /// <summary>“我的”+ 每个订阅一枚胶囊；订阅列表没变时只更新选中状态，不重建。</summary>
-    private void UpdateConfigSourceChips(IReadOnlyList<ConfigSubscription> sources)
+    /// <summary>“我的”+ 每台发布者一枚胶囊；发布者列表没变时只更新选中状态，不重建。</summary>
+    private void UpdateConfigSourceChips(IReadOnlyList<(Guid Id, string Name)> sources)
     {
-        var key = string.Join("|", sources.Select(subscription => $"{subscription.Id}:{subscription.Name}"));
+        var key = string.Join("|", sources.Select(item => $"{item.Id}:{item.Name}"));
         if (key != _configSourceChipsKey)
         {
             _configSourceChipsKey = key;
             ConfigSourceChips.Children.Clear();
             ConfigSourceChips.Children.Add(ConfigSourceChip("我的", null));
-            foreach (var subscription in sources) ConfigSourceChips.Children.Add(ConfigSourceChip(subscription.Name, subscription.Id));
+            foreach (var item in sources) ConfigSourceChips.Children.Add(ConfigSourceChip(item.Name, item.Id));
         }
         foreach (var chip in ConfigSourceChips.Children.OfType<RadioButton>()) chip.IsChecked = (Guid?)chip.Tag == _configSource;
         ConfigSourceChips.Visibility = sources.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -431,7 +440,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ToolTip = name,
             Content = new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis },
         };
-        System.Windows.Automation.AutomationProperties.SetName(chip, source is null ? "我的配置" : $"订阅：{name}");
+        System.Windows.Automation.AutomationProperties.SetName(chip, source is null ? "我的配置" : $"发布者：{name}");
         if (TryFindResource("FilterChipStyle") is Style style) chip.Style = style;
         chip.Click += async (_, _) =>
         {
@@ -1676,7 +1685,8 @@ public sealed class FolderViewModel(CollectionFolder folder, int count, string s
     public string CountText => count.ToString();
     /// <summary>订阅得到的受管文件夹：只读，由订阅更新替换。</summary>
     public bool IsManaged => Folder.ManagedSubscriptionId is not null;
-    public Visibility ManagedMarkVisibility => IsManaged ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>订阅来的文件夹不显示条目数：来源已由顶部发布者胶囊标明。</summary>
+    public Visibility CountVisibility => IsManaged ? Visibility.Collapsed : Visibility.Visible;
 }
 public sealed class CollectionItemViewModel(CollectionItem item, bool managed = false)
 {

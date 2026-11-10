@@ -490,8 +490,8 @@
                                    Text="本地团队配置仅保存在本机；切换云端后显示当前云团队的本地镜像。" />
                     </Border>
 
-                    <!-- 配置来源：“我的”与每个订阅（按名称）一枚胶囊，与历史页筛选同款居中；没有订阅时整行隐藏。 -->
-                    <WrapPanel x:Name="ConfigSourceChips" Grid.Row="1" Margin="0,0,0,8" HorizontalAlignment="Center"
+                    <!-- 配置来源：“我的”与每台发布者（设备名）一枚胶囊，靠左；没有订阅时整行隐藏。 -->
+                    <WrapPanel x:Name="ConfigSourceChips" Grid.Row="1" Margin="0,0,0,8" HorizontalAlignment="Left"
                                Visibility="Collapsed" />
 
                     <Grid Grid.Row="2">
@@ -513,10 +513,8 @@
                                         <DataTemplate>
                                             <DockPanel Margin="8,6">
                                                 <TextBlock DockPanel.Dock="Right" Style="{StaticResource MetaTextStyle}"
-                                                           VerticalAlignment="Center" Text="{Binding CountText}" />
-                                                <TextBlock DockPanel.Dock="Right" Margin="6,0" Style="{StaticResource MetaTextStyle}"
-                                                           VerticalAlignment="Center" Text="订阅" ToolTip="订阅得到的文件夹，内容只读"
-                                                           Visibility="{Binding ManagedMarkVisibility}" />
+                                                           VerticalAlignment="Center" Text="{Binding CountText}"
+                                                           Visibility="{Binding CountVisibility}" />
                                                 <!-- 主题图标（Kubai）：选中项换成打开的文件夹。其他主题不可见、无图源。 -->
                                                 <Image x:Name="ThemeFolderIcon" DockPanel.Dock="Left" Width="18" Height="18" Margin="0,0,6,0" VerticalAlignment="Center"
                                                        Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality">
