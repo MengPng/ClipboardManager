@@ -63,7 +63,7 @@
 - 不恢复划词 AI、提示词或模型调用；不对选区做翻译、摘要。
 - 不在白名单之外的应用显示浮动按钮；不默认开启鼠标钩子。
 - 不自动发送文件或自动粘贴到聊天窗口。
-- 不随包分发 Everything，也不代替用户安装或启动它。
+- 不静默安装 Everything，也不在用户点击前安装或启动它（0.9.5 起随包附带官方安装程序，见附录 A）。
 
 ## 风险与待验收
 
@@ -71,4 +71,28 @@
 - 部分应用会拦截模拟按键，或者以管理员权限运行（UIPI 限制），这时取词会失败并提示手动复制。
 - 浮动按钮"不抢焦点、不丢选区"，以及低级鼠标钩子对系统输入延迟的影响，都待实机验证。
 - 多显示器与 100%/125%/150% 缩放下的按钮和弹窗位置待验证。
-- 没有 Everything 的机器上只能看到提示，不提供替代搜索。
+- 没有 Everything 的机器上不提供替代搜索；0.9.5 起可以点「安装 Everything」运行附带的官方安装向导。
+
+## 附录 A：运行时引导安装 Everything（0.9.5，2026-11-10）
+
+### 背景
+
+不少机器没有装 Everything，划词查找只能提示"未检测到 Everything"，用户还要自己去找下载地址。
+
+### 决定
+
+- 0.9.5 起，EXE 内嵌 voidtools 官方的 **Everything 1.4.1.1032 x64 完整版安装程序**（`Everything-1.4.1.1032.x64-Setup.exe`，不是 Lite 版）。文件与 `License.txt`、`NOTICE.txt` 一起放在 `src/ClipboardManager.Windows/Assets/Everything/`，以 EmbeddedResource 打进 EXE。
+- 许可：Everything 采用 MIT 许可（Copyright (C) 2018 David Carpenter），附带 PCRE 的 BSD 许可，允许再分发。许可原文随源码保存；产品内只用于引导安装，不单独分发。
+- 校验：SHA-256 `C42EFAD041D4C0BB4D4AC97AE7CBE89F153EC1FE078772392E749C7F5D5282D3`，与 voidtools 公布的 `Everything-1.4.1.1032.sha256` 一致；Authenticode 签名者为 voidtools PTY LTD。代码常量 `EverythingSetup.InstallerSha256`、`NOTICE.txt` 与文件三者必须一致，`scripts/test-everything-bundle.ps1` 检查哈希、许可证文本和签名者，`release-all.ps1` 在发布前调用，不一致就拒绝发布。
+- 状态与入口（「找本机文件」弹窗、设置 → 划词查找 → 搜索来源）：
+  - Everything 正在运行：正常搜索。
+  - 已安装但没运行：显示「启动 Everything」，点击后以 `-startup` 启动并等待最多 8 秒。
+  - 未安装：显示「安装 Everything」。点击后把安装程序解出到 `%TEMP%\ClipboardManager\Everything\<随机目录>`，再次校验 SHA-256，不一致即拒绝运行；然后运行官方安装向导（不传静默参数，Windows 会请求管理员权限），向导结束后删除临时文件并重新搜索。
+- 已安装的判断：读卸载信息、App Paths 和默认安装目录。便携版无法发现，按未安装处理，用户可以手动启动便携版。
+
+### 约束
+
+- 只在用户点击后安装或启动；不静默安装、不在启动时自动安装、不修改 Everything 的任何设置（索引范围、服务、开机启动等由安装向导和用户决定）。
+- 安装、启动失败或用户取消 UAC 时如实提示，不伪造搜索结果；日志只记异常类型。
+- 不联网下载：安装程序随 EXE 一起分发，升级 Everything 版本时必须同时更新文件、`NOTICE.txt` 与代码常量，并重新核对官方校验值与签名。
+- EXE 体积增加约 2 MB。

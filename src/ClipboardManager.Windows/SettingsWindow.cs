@@ -71,6 +71,7 @@ public sealed class SettingsWindow : Window
     private readonly Border _usageTrack = new() { Height = 6, Margin = new Thickness(0, 8, 0, 0) };
     private double _usageRatio;
     private readonly TextBlock _fileSearchState = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly Button _everythingAction = new() { Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 8, 0), Visibility = Visibility.Collapsed };
     private readonly TextBlock _lastBackup = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _updateState = new() { TextWrapping = TextWrapping.Wrap };
 
@@ -515,7 +516,12 @@ public sealed class SettingsWindow : Window
         var recheck = new Button { Content = "重新检测", Padding = new Thickness(12, 5, 12, 5) };
         recheck.Click += (_, _) => UpdateFileSearchState();
         _fileSearchState.SetResourceReference(TextBlock.FontSizeProperty, "FontSizeCaption");
-        page.Children.Add(Group("搜索来源", Row("Everything", null, recheck, _fileSearchState)));
+        _everythingAction.SetResourceReference(StyleProperty, "PrimaryButtonStyle");
+        _everythingAction.Click += async (_, _) => await FixEverythingAsync();
+        var everythingButtons = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+        everythingButtons.Children.Add(_everythingAction);
+        everythingButtons.Children.Add(recheck);
+        page.Children.Add(Group("搜索来源", Row("Everything", null, everythingButtons, _fileSearchState)));
         page.Children.Add(Note("只在你按快捷键或点按钮时读取选中的文字，用完即丢：不进入历史、不写日志、不联网。优先通过系统辅助功能接口读取；读不到时模拟一次 Ctrl+C 并立即恢复原剪切板。终端窗口里不会模拟 Ctrl+C。"));
         return page;
     }
@@ -647,10 +653,41 @@ public sealed class SettingsWindow : Window
     private void UpdateFileSearchState()
     {
         var available = _context.IsFileSearchAvailable?.Invoke() ?? false;
-        _fileSearchState.Text = available
-            ? "已连接。搜索在本机完成，结果按文件名匹配度和修改时间排序。"
-            : "未检测到正在运行的 Everything。请安装并启动 Everything（voidtools.com）后点重新检测。选中的是完整路径时不需要 Everything。";
-        _fileSearchState.SetResourceReference(TextBlock.ForegroundProperty, available ? "SuccessBrush" : "WarningBrush");
+        var state = available ? EverythingState.Running : EverythingSetup.GetState();
+        _fileSearchState.Text = state switch
+        {
+            EverythingState.Running => "已连接。搜索在本机完成，结果按文件名匹配度和修改时间排序。",
+            EverythingState.InstalledNotRunning => "Everything 已安装但没有运行。选中的是完整路径时不需要 Everything。",
+            _ => "未安装 Everything。选中的是完整路径时不需要 Everything。"
+        };
+        _fileSearchState.SetResourceReference(TextBlock.ForegroundProperty, state == EverythingState.Running ? "SuccessBrush" : "WarningBrush");
+        var canFix = state == EverythingState.InstalledNotRunning || (state == EverythingState.NotInstalled && EverythingSetup.IsBundled);
+        _everythingAction.Content = state == EverythingState.InstalledNotRunning ? "启动 Everything" : "安装 Everything";
+        _everythingAction.Tag = state;
+        _everythingAction.Visibility = canFix ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>只在用户点击后安装（运行官方安装向导）或启动 Everything，完成后重新检测。</summary>
+    private async Task FixEverythingAsync()
+    {
+        if (_everythingAction.Tag is not EverythingState state) return;
+        _everythingAction.IsEnabled = false;
+        try
+        {
+            var result = state == EverythingState.InstalledNotRunning
+                ? await EverythingSetup.StartAsync()
+                : await EverythingSetup.InstallAsync();
+            if (state == EverythingState.NotInstalled && result == EverythingSetupResult.Done &&
+                !await EverythingSetup.WaitUntilRunningAsync(TimeSpan.FromSeconds(3)))
+                result = await EverythingSetup.StartAsync();
+            UpdateFileSearchState();
+            if (result == EverythingSetupResult.Failed)
+            {
+                _fileSearchState.Text = state == EverythingState.InstalledNotRunning ? "没能启动 Everything，请手动打开它。" : "没能完成安装。";
+                _fileSearchState.SetResourceReference(TextBlock.ForegroundProperty, "DangerBrush");
+            }
+        }
+        finally { _everythingAction.IsEnabled = true; }
     }
 
     private async Task RefreshUsageAsync()

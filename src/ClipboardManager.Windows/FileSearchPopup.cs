@@ -39,6 +39,8 @@ public sealed class FileSearchPopup : Window
     private readonly Button _copyPath = ActionButton("复制路径");
     private readonly Button _reveal = ActionButton("打开位置");
     private readonly Button _open = ActionButton("打开");
+    /// <summary>Everything 未安装或没运行时显示「安装 Everything」/「启动 Everything」，只在点击后执行。</summary>
+    private readonly Button _everything = new() { Padding = new Thickness(12, 5, 12, 5), Visibility = Visibility.Collapsed };
     private CancellationTokenSource? _running;
     private bool _closing;
     private bool _busyAction;
@@ -95,8 +97,13 @@ public sealed class FileSearchPopup : Window
         };
         root.Children.Add(_results);
 
-        // 四个按钮一排，不标快捷键（键盘操作照常可用）。
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        // 四个按钮一排，不标快捷键（键盘操作照常可用）；Everything 不可用时左侧多一个安装/启动按钮。
+        var actionRow = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
+        _everything.SetResourceReference(StyleProperty, "PrimaryButtonStyle");
+        _everything.Click += async (_, _) => await FixEverythingAsync();
+        DockPanel.SetDock(_everything, Dock.Left);
+        actionRow.Children.Add(_everything);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         _copyFile.SetResourceReference(StyleProperty, "PrimaryButtonStyle");
         _copyFile.Click += async (_, _) => await CopyFileAsync();
         _copyPath.Click += async (_, _) => await CopyPathAsync();
@@ -106,7 +113,8 @@ public sealed class FileSearchPopup : Window
         actions.Children.Add(_reveal);
         actions.Children.Add(_copyPath);
         actions.Children.Add(_copyFile);
-        root.Children.Add(actions);
+        actionRow.Children.Add(actions);
+        root.Children.Add(actionRow);
 
 
         frame.Child = root;
@@ -123,6 +131,7 @@ public sealed class FileSearchPopup : Window
             _query.Focus();
             _query.SelectAll();
             if (initialProblem is not null && string.IsNullOrWhiteSpace(initialQuery)) SetStatus(initialProblem, "WarningBrush");
+            else if (EverythingSetup.GetState() != EverythingState.Running && FileSearchQuery.Parse(initialQuery).Kind != FileSearchKind.DirectPath) ShowEverythingMissing();
             else await RunSearchAsync();
         };
         UpdateActions();
@@ -184,8 +193,72 @@ public sealed class FileSearchPopup : Window
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (TimeoutException) { SetStatus("Everything 没有及时响应，请稍后重试。", "WarningBrush"); }
+        catch (EverythingUnavailableException exception) when (exception.Status == EverythingStatus.NotRunning) { ShowEverythingMissing(); }
         catch (EverythingUnavailableException exception) { SetStatus(exception.Message, "WarningBrush"); }
         catch (Exception exception) { SetStatus("搜索失败：" + exception.Message, "DangerBrush"); }
+    }
+
+    private void ShowEverythingMissing()
+    {
+        var state = EverythingSetup.GetState();
+        if (state == EverythingState.Running) { SetStatus("Everything 刚刚启动，请再搜一次。", "WarningBrush"); return; }
+        var installed = state == EverythingState.InstalledNotRunning;
+        if (!installed && !EverythingSetup.IsBundled)
+        {
+            SetStatus("未安装 Everything，可以从 voidtools.com 下载安装。", "WarningBrush");
+            return;
+        }
+        SetStatus(installed ? "Everything 没有运行。" : "未安装 Everything。", "WarningBrush");
+        _everything.Content = installed ? "启动 Everything" : "安装 Everything";
+        System.Windows.Automation.AutomationProperties.SetName(_everything, (string)_everything.Content);
+        _everything.Tag = state;
+        _everything.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 用户点击后才安装或启动：安装时运行官方向导（Windows 会请求管理员权限），期间不置顶、失焦不关闭；
+    /// 完成后自动重新搜索。
+    /// </summary>
+    private async Task FixEverythingAsync()
+    {
+        if (_everything.Tag is not EverythingState state) return;
+        _busyAction = true;
+        _everything.IsEnabled = false;
+        try
+        {
+            EverythingSetupResult result;
+            if (state == EverythingState.InstalledNotRunning)
+            {
+                SetStatus("正在启动 Everything");
+                result = await EverythingSetup.StartAsync();
+            }
+            else
+            {
+                SetStatus("请在 Everything 安装向导中完成安装");
+                Topmost = false;
+                result = await EverythingSetup.InstallAsync();
+                Topmost = true;
+                Activate();
+                if (result == EverythingSetupResult.Done && !await EverythingSetup.WaitUntilRunningAsync(TimeSpan.FromSeconds(3)))
+                    result = await EverythingSetup.StartAsync();
+            }
+            if (result == EverythingSetupResult.Done)
+            {
+                _everything.Visibility = Visibility.Collapsed;
+                await RunSearchAsync();
+            }
+            else if (result == EverythingSetupResult.Cancelled) ShowEverythingMissing();
+            else
+            {
+                ShowEverythingMissing();
+                SetStatus(state == EverythingState.InstalledNotRunning ? "没能启动 Everything，请手动打开它。" : "没能完成安装。", "DangerBrush");
+            }
+        }
+        finally
+        {
+            _everything.IsEnabled = true;
+            _busyAction = false;
+        }
     }
 
     private void Show(IReadOnlyList<FileSearchHit> hits, string status)

@@ -1,0 +1,14 @@
+Everything（voidtools）安装程序
+
+本目录的安装程序原样随 ClipboardManager 分发，仅在用户于「划词查找」中点击「安装 Everything」时
+解出到临时目录、校验 SHA-256 后运行官方安装向导（由安装程序自己请求管理员权限）。
+不静默安装、不传入任何安装参数、不修改 Everything 的设置。许可证见同目录 License.txt（MIT，含 PCRE 的 BSD 许可）。
+
+File: Everything-1.4.1.1032.x64-Setup.exe
+Version: 1.4.1.1032
+Size: 1998736
+SHA256: C42EFAD041D4C0BB4D4AC97AE7CBE89F153EC1FE078772392E749C7F5D5282D3
+Source: https://www.voidtools.com/Everything-1.4.1.1032.x64-Setup.exe
+Checksum list: https://www.voidtools.com/Everything-1.4.1.1032.sha256
+License: https://www.voidtools.com/License.txt
+Signer: voidtools PTY LTD（Authenticode，2026-11-10 校验有效）

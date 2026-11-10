@@ -19,7 +19,6 @@ param(
     [string]$SshTarget = $env:CM_DEPLOY_SSH,
     [string]$SshKey = $env:CM_DEPLOY_KEY,
     [string]$RemoteRoot = "/var/www/download",
-    [switch]$IncludeMsi,
     [switch]$PageOnly,
     [switch]$FirstRelease,
     [switch]$DryRun
@@ -56,7 +55,6 @@ $names = [ordered]@{
     exe = "ClipboardManager-$Version-win-x64.exe"
     zip = "ClipboardManager-$Version-win-x64-portable.zip"
 }
-if ($IncludeMsi) { $names.msi = "ClipboardManager-$Version-win-x64.msi" }
 
 $files = @(foreach ($kind in $names.Keys) {
     $name = $names[$kind]

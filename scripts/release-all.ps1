@@ -17,7 +17,7 @@ param(
     [Parameter(Mandatory)][string]$Version,
     [string]$SshTarget = $env:CM_DEPLOY_SSH,
     [string]$SshKey = $env:CM_DEPLOY_KEY,
-    [switch]$IncludeMsi,
+    [switch]$RequireSignature,
     [switch]$SkipBuild,
     [switch]$DryRun
 )
@@ -41,6 +41,8 @@ $kubaiIcons = "src/ClipboardManager.Windows/Assets/Icons/Kubai"
 if (@(Get-ChildItem $kubaiIcons -Filter *.png -ErrorAction SilentlyContinue).Count -ne 18 -or -not (Test-Path "$kubaiIcons/NOTICE.txt")) {
     throw "缺少 Kubai 图标（应有 18 个 PNG 与 NOTICE.txt）。先运行 pwsh ./scripts/build-kubai-icons.ps1，跑 LayoutCheck 后提交。"
 }
+# 内嵌的 Everything 安装程序：哈希、许可证、签名者三项核对（ADR-0007 附录）。
+& ./scripts/test-everything-bundle.ps1
 if ((git rev-parse --abbrev-ref HEAD) -ne "main") { throw "只能从 main 分支发布。" }
 if (git status --porcelain) { throw "工作区有未提交改动。先提交（建议信息：release: $tag），再发布。" }
 if (-not $DryRun -and -not $SshTarget) { throw "缺少下载服务器 SSH 目标：设置环境变量 CM_DEPLOY_SSH（如 ubuntu@1.2.3.4）或传 -SshTarget。" }
@@ -58,18 +60,17 @@ if ($SkipBuild) {
 } else {
     dotnet build ClipboardManager.sln --configuration Release -p:NuGetAudit=false
     dotnet test ClipboardManager.sln --configuration Release --no-build -p:NuGetAudit=false
-    & ./scripts/build-release.ps1 -Version $Version -IncludeMsi:$IncludeMsi
+    & ./scripts/build-release.ps1 -Version $Version -RequireSignature:$RequireSignature
 }
 $assets = @(
     "$releaseDir/ClipboardManager-$Version-win-x64.exe"
     "$releaseDir/ClipboardManager-$Version-win-x64-portable.zip"
     "$releaseDir/SHA256SUMS.txt"
 )
-if ($IncludeMsi) { $assets += "$releaseDir/ClipboardManager-$Version-win-x64.msi" }
 $assets | ForEach-Object { if (-not (Test-Path $_)) { throw "缺少发布文件 $_。" } }
 
 if ($DryRun) {
-    & ./scripts/publish-download.ps1 -Version $Version -IncludeMsi:$IncludeMsi -DryRun
+    & ./scripts/publish-download.ps1 -Version $Version -DryRun
     Write-Output "DryRun 完成：产物 $releaseDir，下载页文件 artifacts/download-site。未推送 GitHub、未上传服务器。"
     return
 }
@@ -86,7 +87,7 @@ if ($existing -contains $tag) {
 }
 
 # 4. 更新下载服务器；latest.json 最后切换，客户端只会看到已完整上传的版本
-& ./scripts/publish-download.ps1 -Version $Version -SshTarget $SshTarget -SshKey $SshKey -IncludeMsi:$IncludeMsi
+& ./scripts/publish-download.ps1 -Version $Version -SshTarget $SshTarget -SshKey $SshKey
 
 $url = gh release view $tag --json url --jq ".url"
 Write-Output "发布完成 $Version"

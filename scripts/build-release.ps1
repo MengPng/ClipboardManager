@@ -1,6 +1,7 @@
+# 0.9.5 起只发布 EXE 与便携 ZIP（不再构建 MSI）。配置了签名证书时先签名再计算 SHA-256（见 sign-files.ps1）。
 param(
     [string]$Version = "0.9.0",
-    [switch]$IncludeMsi = $true
+    [switch]$RequireSignature
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -20,13 +21,14 @@ New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
 & (Join-Path $PSScriptRoot "publish-single-exe.ps1") -OutputPath "artifacts/release/$Version/ClipboardManager-$Version-win-x64/ClipboardManager.exe" -Version $Version
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+$helperTarget = Join-Path $portableDir "ClipboardManager.Maintenance.exe"
+if (-not (Test-Path $helperTarget)) { throw "便携包缺少恢复助手。" }
+& (Join-Path $PSScriptRoot "sign-files.ps1") -Path @((Join-Path $portableDir "ClipboardManager.exe"), $helperTarget) -Require:$RequireSignature
+
 & (Join-Path $PSScriptRoot "test-release-artifact.ps1") `
     -ExecutablePath (Join-Path $portableDir "ClipboardManager.exe") `
     -ExpectedVersion $contract.appVersion `
     -ExpectedSchemaVersion $contract.databaseSchemaVersion
-
-$helperTarget = Join-Path $portableDir "ClipboardManager.Maintenance.exe"
-if (-not (Test-Path $helperTarget)) { throw "便携包缺少恢复助手。" }
 
 $manifest = [ordered]@{
     product = "ClipboardManager"
@@ -47,18 +49,5 @@ $checksums = @(
     "$(Get-FileHash $exePath -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $exePath -Leaf)"
     "$(Get-FileHash $zipPath -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $zipPath -Leaf)"
 )
-if ($IncludeMsi) {
-    & (Join-Path $PSScriptRoot "build-msi.ps1") -PackageVersion $Version
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $builtMsi = Get-ChildItem (Join-Path $root "installer/bin") -Filter "ClipboardManager-$Version-win-x64.msi" -Recurse | Select-Object -First 1
-    if (-not $builtMsi) { throw "未找到版本 $Version 的 MSI。" }
-    $msiTarget = Join-Path $releaseDir $builtMsi.Name
-    Copy-Item $builtMsi.FullName $msiTarget -Force
-    & (Join-Path $PSScriptRoot "test-msi-artifact.ps1") `
-        -MsiPath $msiTarget `
-        -ExpectedVersion $contract.appVersion `
-        -ExpectedSchemaVersion $contract.databaseSchemaVersion
-    $checksums += "$(Get-FileHash $msiTarget -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $msiTarget -Leaf)"
-}
 $checksums | Set-Content (Join-Path $releaseDir "SHA256SUMS.txt") -Encoding ascii
 Write-Output "Release created: $releaseDir"

@@ -2,9 +2,21 @@
 
 一款面向 Windows 的 Local-first（本地优先）剪切板历史工具。它首先提供稳定、快速、隐私友好的本地使用体验，并从架构上为账号系统、个人多设备云同步和团队共享剪切板预留扩展能力。
 
-## 0.9.4 退出修复与共享页精简（当前版本）
+## 0.9.5 文件夹直传、Everything 引导安装与防火墙放行（当前版本）
 
-当前版本号为 **0.9.4**（`0.9.4-share-cleanup`），数据库仍为 **schema 8**，详见 [CHANGELOG](CHANGELOG.md)。
+当前版本号为 **0.9.5**（`0.9.5-everything-guide`），数据库仍为 **schema 8**，详见 [CHANGELOG](CHANGELOG.md)。自本版起只发布单文件 EXE 与便携 ZIP，不再提供 MSI。
+
+- **Everything 引导安装**：EXE 内带官方 Everything 1.4 安装程序。「找本机文件」里未安装时点「安装 Everything」运行官方安装向导，已安装没运行时点「启动 Everything」；只在点击时运行，不静默安装、不改 Everything 设置。依据见 [ADR 0007 附录 A](docs/adr/0007-selection-file-search.md)。
+- **文件夹直传**：文件夹打包成 zip 发给已匹配设备。
+- **传输记录保留**：重启后仍能看到最近 100 条传输记录。
+- **防火墙一键放行**：第一次进入「共享 → 传输」时询问一次，也可在「传输设置 → 防火墙」点「放行」（需要管理员确认）。
+- **发布者胶囊**：订阅有新版本时胶囊出现红点，点「更新」即可更新。
+- **更新修复**：旧版本卡在退出时，新版本约 20 秒后结束它并正常启动。
+- **代码签名（可选）**：发布脚本支持签名，需要自备证书，见「发布与同步」；当前产物未签名。实机验收清单见 [docs/acceptance/0.9.5-real-machine.md](docs/acceptance/0.9.5-real-machine.md)。
+
+## 0.9.4 退出修复与共享页精简（已发布）
+
+版本号为 **0.9.4**（`0.9.4-share-cleanup`），数据库仍为 **schema 8**，详见 [CHANGELOG](CHANGELOG.md)。
 
 - **退出修复**：修复开启「保持可被发现」时退出卡住、之后无法再次启动的问题（0.9.2 起）。
 - **本机名称**：「传输设置 → 本机」可改本机名称，其他设备看到的就是这个名字；首次进入传输设置时会请你起名。
@@ -604,23 +616,17 @@ content_size
 
 当前可复现发布：
 
-1. **正式 ZIP 与 MSI**（主程序和恢复助手均内嵌 .NET 8 与原生依赖）：
+1. **单文件 EXE 与便携 ZIP**（主程序和恢复助手均内嵌 .NET 8 与原生依赖；0.9.5 起不再构建 MSI）：
    ```powershell
-   .\scripts\build-release.ps1 -Version 0.7.6 -IncludeMsi
+   .\scripts\build-release.ps1 -Version 0.9.5
    ```
-   产物位于 `artifacts/release/0.7.6`，同时生成单 EXE、便携 ZIP、MSI 与 `SHA256SUMS.txt`。发布契约位于 `release/release-contract.json`；最终 EXE 或 MSI 内部版本、数据库 schema 不一致时构建直接失败。
+   产物位于 `artifacts/release/0.9.5`，生成单 EXE、便携 ZIP 与 `SHA256SUMS.txt`。发布契约位于 `release/release-contract.json`；最终 EXE 内部版本、数据库 schema 不一致时构建直接失败。配置了 `CM_SIGN_CERT_THUMBPRINT`（或 `CM_SIGN_PFX` + `CM_SIGN_PFX_PASSWORD`）时会先签名，`-RequireSignature` 要求必须签名。
 
 2. **自包含文件夹便携版**：
    ```powershell
    .\scripts\publish-win-x64.ps1
    ```
    输出到 `artifacts/publish/win-x64`，主要用于调试和文件夹发布验证。
-
-3. **WiX MSI 安装包**：
-   ```powershell
-   .\scripts\build-msi.ps1
-   ```
-   产物位于 `installer/bin/x64/Release/ClipboardManager-0.7.6-win-x64.msi`。
 
 0.7.6 单文件 EXE、便携 ZIP 与 MSI 需通过版本/schema 契约、SHA-256、真实页签点击和待办备份恢复点验后发布。当前构建均为 `NotSigned`。
 

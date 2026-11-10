@@ -23,6 +23,8 @@
     <EmbeddedResource Include="Assets\Pet\*.png" />
     <!-- Kubai 主题图标（scripts/build-kubai-icons.ps1 生成）；pack URI 引用，其他主题不加载。 -->
     <Resource Include="Assets\Icons\Kubai\*.png" />
+    <!-- 0.9.5：官方 Everything 安装程序（ADR-0007 附录），只在用户点击「安装 Everything」时解出运行。 -->
+    <EmbeddedResource Include="Assets\Everything\Everything-1.4.1.1032.x64-Setup.exe" LogicalName="ClipboardManager.Embedded.EverythingSetup.exe" />
     <EmbeddedResource Include="$(MaintenanceHelperPath)" LogicalName="ClipboardManager.Embedded.Maintenance.exe" Condition="'$(MaintenanceHelperPath)' != '' and Exists('$(MaintenanceHelperPath)')" />
   </ItemGroup>
   <ItemGroup>
