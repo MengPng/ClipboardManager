@@ -19,6 +19,7 @@ public static class DependencyInjection
     {
         services.AddSingleton(new AppPaths(appDataRoot));
         services.AddSingleton<IAppSettingsStore, JsonAppSettingsStore>();
+        services.AddSingleton<IFileTransferHistoryStore, JsonFileTransferHistoryStore>();
         services.AddSingleton<SqliteConnectionFactory>();
         services.AddSingleton<DatabaseSafetyBackup>();
         services.AddSingleton<IDatabaseInitializer, SqliteDatabaseInitializer>();

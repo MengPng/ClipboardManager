@@ -292,6 +292,16 @@ public partial class MainWindow
         StartSend(row.Device, dialog.FileNames, null);
     }
 
+    /// <summary>文件夹会先打包成“文件夹名.zip”再发送，对方收到的是一个 zip。</summary>
+    private async void SendFolderToDevice_Click(object sender, RoutedEventArgs e)
+    {
+        if (RowOf<MatchedDeviceRowViewModel>(sender) is not { } row) return;
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = $"选择要发给“{row.Name}”的文件夹", Multiselect = true };
+        if (WithModal(() => dialog.ShowDialog(this)) != true || dialog.FolderNames.Length == 0) return;
+        await Task.Yield();
+        StartSend(row.Device, dialog.FolderNames, null);
+    }
+
     /// <summary>历史页右键“发送给已匹配设备…”：文件/图片发原文件，文本与链接存成临时 .txt 发送后删除。</summary>
     private async Task SendHistoryItemToDeviceAsync(ClipboardItem item)
     {
@@ -311,12 +321,11 @@ public partial class MainWindow
         switch (item.ItemType)
         {
             case ClipboardItemType.Files or ClipboardItemType.ImageFile:
-                paths = HistoryItemViewModel.ReadFiles(item);
-                var folders = paths.Count(Directory.Exists);
-                paths = paths.Where(File.Exists).ToList();
+                // 文件夹会先打包成 zip 再发送。
+                paths = HistoryItemViewModel.ReadFiles(item).Where(path => File.Exists(path) || Directory.Exists(path)).ToList();
                 if (paths.Count == 0)
                 {
-                    Info(folders > 0 ? "暂不支持发送文件夹，请选择其中的文件发送。" : "这些文件已不存在，无法发送。", "发送给已匹配设备");
+                    Info("这些文件已不存在，无法发送。", "发送给已匹配设备");
                     return;
                 }
                 break;
@@ -400,12 +409,8 @@ public partial class MainWindow
                 Info("请把文件拖到要发送的那台设备上。", "发送文件");
             return;
         }
-        var files = paths.Where(File.Exists).ToList();
-        if (files.Count == 0)
-        {
-            Info("暂不支持发送文件夹，请拖入文件。", "发送文件");
-            return;
-        }
+        var files = paths.Where(path => File.Exists(path) || Directory.Exists(path)).ToList();
+        if (files.Count == 0) return;
         await Task.Yield();
         StartSend(target.Device, files, null);
         if (_transferPage == TransferPage.Home) ShowTransferPage(TransferPage.Device, target);
@@ -443,7 +448,7 @@ public partial class MainWindow
     {
         var text = $"发给“{deviceName}”：成功 {summary.Sent} 个";
         if (summary.Failed > 0) text += $"，失败 {summary.Failed} 个";
-        if (summary.Skipped > 0) text += $"，跳过 {summary.Skipped} 个（文件夹或已不存在的文件）";
+        if (summary.Skipped > 0) text += $"，跳过 {summary.Skipped} 个（已不存在）";
         text += "。";
         if (summary.LastError is { } reason) text += $"\n\n{reason}";
         return text;

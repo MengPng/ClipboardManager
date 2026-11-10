@@ -1146,9 +1146,13 @@
                                                        Text="&#xE898;" />
                                             <TextBlock Margin="0,8,0,10" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
                                                        Foreground="{DynamicResource LabelSecondaryBrush}" FontSize="{DynamicResource FontSizeCaption}"
-                                                       Text="把文件拖到这里发送" />
-                                            <Button HorizontalAlignment="Center" Padding="14,5" Content="选择文件" Style="{StaticResource PrimaryButtonStyle}"
-                                                    Click="SendFilesToDevice_Click" AutomationProperties.Name="选择文件发送给这台设备" />
+                                                       Text="把文件或文件夹拖到这里发送" />
+                                            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+                                                <Button Padding="14,5" Content="选择文件" Style="{StaticResource PrimaryButtonStyle}"
+                                                        Click="SendFilesToDevice_Click" AutomationProperties.Name="选择文件发送给这台设备" />
+                                                <Button Margin="8,0,0,0" Padding="14,5" Content="选择文件夹"
+                                                        Click="SendFolderToDevice_Click" AutomationProperties.Name="选择文件夹发送给这台设备" />
+                                            </StackPanel>
                                         </StackPanel>
                                     </Border>
 

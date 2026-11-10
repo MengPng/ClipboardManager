@@ -1,18 +1,31 @@
+using ClipboardManager.Domain.Contracts;
 using ClipboardManager.Domain.Models;
 
 namespace ClipboardManager.Application.Services.LanTransfer;
 
 /// <summary>
-/// 发送与接收任务的内存状态（ADR-0008）：只供界面显示与取消，不入库、不入同步 Outbox。
+/// 发送与接收任务的状态（ADR-0008）：进行中的只在内存；已结束的最多 <see cref="MaxFinished"/> 条
+/// 存到 <see cref="IFileTransferHistoryStore"/>，重启后仍能看到。不入库、不入同步 Outbox。
 /// 进度事件做了节流（同一任务 200 ms 内只通知一次，状态变化立即通知）。
 /// </summary>
-public sealed class FileTransferTracker(TimeProvider time)
+public sealed class FileTransferTracker
 {
-    private const int MaxFinished = 30;
+    public const int MaxFinished = 100;
     private static readonly TimeSpan ProgressThrottle = TimeSpan.FromMilliseconds(200);
 
     private readonly object sync = new();
     private readonly Dictionary<Guid, Entry> entries = [];
+    private readonly TimeProvider time;
+    private readonly IFileTransferHistoryStore? history;
+
+    public FileTransferTracker(TimeProvider time, IFileTransferHistoryStore? history = null)
+    {
+        this.time = time;
+        this.history = history;
+        if (history is null) return;
+        foreach (var snapshot in history.Load().OrderByDescending(item => item.UpdatedAt).Take(MaxFinished))
+            entries[snapshot.Id] = new Entry(snapshot, new CancellationTokenSource(), DateTimeOffset.MinValue);
+    }
 
     public event EventHandler? Changed;
 
@@ -58,8 +71,10 @@ public sealed class FileTransferTracker(TimeProvider time)
         if (notify) Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public void SetState(Guid id, FileTransferState state, string? message = null, long? transferred = null, string? savedPath = null)
+    public void SetState(Guid id, FileTransferState state, string? message = null, long? transferred = null, string? savedPath = null,
+        long? size = null)
     {
+        bool finished;
         lock (sync)
         {
             if (!entries.TryGetValue(id, out var entry)) return;
@@ -67,12 +82,16 @@ public sealed class FileTransferTracker(TimeProvider time)
             {
                 State = state,
                 Message = message,
+                Size = size ?? entry.Snapshot.Size,
                 Transferred = transferred ?? entry.Snapshot.Transferred,
                 SavedPath = savedPath ?? entry.Snapshot.SavedPath,
                 UpdatedAt = time.GetUtcNow()
             };
             entry.LastNotified = time.GetUtcNow();
+            finished = entry.Snapshot.IsFinished;
+            if (finished) TrimFinished();
         }
+        if (finished) Persist();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -93,7 +112,18 @@ public sealed class FileTransferTracker(TimeProvider time)
             foreach (var id in entries.Where(pair => pair.Value.Snapshot.IsFinished &&
                          (peerFingerprint is null || pair.Value.Snapshot.PeerFingerprint.Equals(peerFingerprint, StringComparison.OrdinalIgnoreCase))).Select(pair => pair.Key).ToList())
                 entries.Remove(id);
+        Persist();
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Persist()
+    {
+        if (history is null) return;
+        List<FileTransferSnapshot> finished;
+        lock (sync)
+            finished = entries.Values.Select(entry => entry.Snapshot).Where(snapshot => snapshot.IsFinished)
+                .OrderByDescending(snapshot => snapshot.UpdatedAt).ToList();
+        history.Save(finished);
     }
 
     private void TrimFinished()

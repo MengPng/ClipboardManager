@@ -175,16 +175,45 @@ public sealed class LanTransferLoopbackTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MissingPathsAndFolders_AreSkipped()
+    public async Task MissingPaths_AreSkipped()
     {
         await MatchAsync();
         var (path, _) = await SourceFileAsync("ok.txt", 64);
         var folder = Path.GetDirectoryName(path)!;
 
         var summary = await _sender.Transfers.SendFilesAsync(_receiver.Fingerprint,
-            [path, Path.Combine(folder, "gone.txt"), folder]);
+            [path, Path.Combine(folder, "gone.txt")]);
 
-        Assert.Equal(new FileSendSummary(1, 0, 2, null), summary);
+        Assert.Equal(new FileSendSummary(1, 0, 1, null), summary);
+    }
+
+    [Fact]
+    public async Task Folder_IsSentAsOneZip_WithItsStructure_AndTheTemporaryZipIsRemoved()
+    {
+        await MatchAsync();
+        var folder = Path.Combine(_sender.Root, "outbox", Guid.NewGuid().ToString("N"), "项目资料");
+        Directory.CreateDirectory(Path.Combine(folder, "图片"));
+        var top = RandomNumberGenerator.GetBytes(4096);
+        var nested = RandomNumberGenerator.GetBytes(200_000);
+        await File.WriteAllBytesAsync(Path.Combine(folder, "说明.txt"), top);
+        await File.WriteAllBytesAsync(Path.Combine(folder, "图片", "a.png"), nested);
+
+        var summary = await _sender.Transfers.SendFilesAsync(_receiver.Fingerprint, [folder]);
+
+        Assert.Equal(new FileSendSummary(1, 0, 0, null), summary);
+        var saved = Path.Combine(_receiver.ReceiveFolder, "项目资料.zip");
+        using (var archive = System.IO.Compression.ZipFile.OpenRead(saved))
+        {
+            Assert.Equal(["图片/a.png", "说明.txt"], archive.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal));
+            await using var stream = archive.GetEntry("图片/a.png")!.Open();
+            using var copy = new MemoryStream();
+            await stream.CopyToAsync(copy);
+            Assert.Equal(nested, copy.ToArray());
+        }
+        var sent = Assert.Single(_sender.Tracker.GetAll());
+        Assert.Equal("项目资料.zip", sent.FileName);
+        Assert.Equal(FileTransferState.Completed, sent.State);
+        Assert.Equal(new FileInfo(saved).Length, sent.Size);
     }
 
     [Fact]

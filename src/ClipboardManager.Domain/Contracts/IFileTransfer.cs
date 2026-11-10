@@ -16,6 +16,16 @@ public interface IFileTransferInbox
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// 已结束的传输记录（文件名、大小、方向、对方名称与指纹、结果、保存位置），重启后仍可查看。
+/// 不含文件内容；不入 SQLite、不入同步 Outbox。读写失败只影响记录，不影响传输。
+/// </summary>
+public interface IFileTransferHistoryStore
+{
+    IReadOnlyList<FileTransferSnapshot> Load();
+    void Save(IReadOnlyList<FileTransferSnapshot> finished);
+}
+
 /// <summary>由界面实现：弹出“是否接收”确认。返回 false 表示拒绝。</summary>
 public interface IIncomingFilePrompt
 {

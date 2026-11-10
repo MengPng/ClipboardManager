@@ -21,20 +21,25 @@ public sealed class LanTransferService(
 
     public FileTransferTracker Tracker => tracker;
 
-    /// <summary>发送多个文件；目录与不存在的路径会被跳过。单个文件失败不影响其他文件。</summary>
+    /// <summary>
+    /// 发送多个文件或文件夹；文件夹先打包成“文件夹名.zip”再发送，不存在的路径会被跳过。
+    /// 单个文件失败不影响其他文件。
+    /// </summary>
     public async Task<FileSendSummary> SendFilesAsync(string fingerprint, IReadOnlyList<string> paths,
         CancellationToken cancellationToken = default)
     {
         var peer = await FindPeerAsync(fingerprint, cancellationToken)
                    ?? throw new FileTransferException(FileTransferError.NotMatched, "这台设备已不在“已匹配的设备”中。");
-        var files = paths.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var skipped = paths.Count - files.Count;
+        var items = paths.Where(path => File.Exists(path) || Directory.Exists(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var skipped = paths.Count - items.Count;
         int sent = 0, failed = 0;
         string? lastError = null;
-        foreach (var path in files)
+        foreach (var path in items)
         {
             if (cancellationToken.IsCancellationRequested) break;
-            var result = await SendOneAsync(peer, path, cancellationToken);
+            var result = Directory.Exists(path)
+                ? await SendFolderAsync(peer, path, cancellationToken)
+                : await SendOneAsync(peer, path, ConfigSyncPolicy.SanitizeFileName(Path.GetFileName(path)), null, cancellationToken);
             if (result is null) sent++;
             else
             {
@@ -45,19 +50,62 @@ public sealed class LanTransferService(
         return new FileSendSummary(sent, failed, skipped, lastError);
     }
 
-    /// <summary>发送一个文件；成功返回 null，否则返回给用户看的原因。</summary>
-    private async Task<string?> SendOneAsync(PairedPeer peer, string path, CancellationToken cancellationToken)
+    /// <summary>
+    /// 把文件夹打包到临时目录再发送，发送结束（无论成败）删除临时 zip。
+    /// 打包与发送共用同一条传输记录，用户看到的是“文件夹名.zip”从准备到完成。
+    /// </summary>
+    private async Task<string?> SendFolderAsync(PairedPeer peer, string folder, CancellationToken cancellationToken)
+    {
+        var name = ConfigSyncPolicy.SanitizeFileName(FolderArchive.ArchiveName(folder));
+        var tracked = tracker.Begin(FileTransferDirection.Send, peer.Name, peer.Fingerprint, name, 0, FileTransferState.Preparing,
+            linked: cancellationToken);
+        var temporary = Path.Combine(Path.GetTempPath(), "ClipboardManager", "LanSend", Guid.NewGuid().ToString("N"));
+        try
+        {
+            tracker.SetState(tracked.Id, FileTransferState.Preparing, "正在打包文件夹", 0);
+            Directory.CreateDirectory(temporary);
+            var zip = Path.Combine(temporary, name);
+            var skipped = await Task.Run(() => FolderArchive.Create(folder, zip, value => tracker.Progress(tracked.Id, value), tracked.Token),
+                tracked.Token);
+            if (skipped > 0) logger.LogInformation("打包文件夹 {TransferId} 时跳过 {Count} 个无法读取的文件", tracked.Id, skipped);
+            return await SendOneAsync(peer, zip, name, tracked, cancellationToken);
+        }
+        catch (OperationCanceledException) when (tracked.Token.IsCancellationRequested)
+        {
+            const string message = "已取消。";
+            tracker.SetState(tracked.Id, FileTransferState.Canceled, message);
+            return message;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning("打包文件夹失败：{Type}", ex.GetType().Name);
+            const string message = "无法打包这个文件夹，可能磁盘空间不足或文件夹已被移动。";
+            tracker.SetState(tracked.Id, FileTransferState.Failed, message);
+            return message;
+        }
+        finally
+        {
+            try { if (Directory.Exists(temporary)) Directory.Delete(temporary, true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogInformation("删除临时打包目录失败：{Type}", ex.GetType().Name);
+            }
+        }
+    }
+
+    /// <summary>发送一个文件；成功返回 null，否则返回给用户看的原因。<paramref name="existing"/> 为打包时已登记的记录。</summary>
+    private async Task<string?> SendOneAsync(PairedPeer peer, string path, string name, TrackedTransfer? existing,
+        CancellationToken cancellationToken)
     {
         var info = new FileInfo(path);
-        var name = ConfigSyncPolicy.SanitizeFileName(info.Name);
-        var tracked = tracker.Begin(FileTransferDirection.Send, peer.Name, peer.Fingerprint, name, info.Length, FileTransferState.Preparing,
-            linked: cancellationToken);
+        var tracked = existing ?? tracker.Begin(FileTransferDirection.Send, peer.Name, peer.Fingerprint, name, info.Length,
+            FileTransferState.Preparing, linked: cancellationToken);
         var id = tracked.Id;
         var token = tracked.Token;
         long transferred = 0;
         try
         {
-            tracker.SetState(id, FileTransferState.Preparing, "正在计算校验值…", 0);
+            tracker.SetState(id, FileTransferState.Preparing, "正在计算校验值…", 0, size: info.Length);
             var hash = await HashAsync(path, value => tracker.Progress(id, value), token);
             var size = new FileInfo(path).Length;
             var offer = new FileOffer(name, size, hash);

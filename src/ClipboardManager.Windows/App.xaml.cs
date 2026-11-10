@@ -299,11 +299,22 @@ public partial class App : System.Windows.Application
             try
             {
                 using var parent = Process.GetProcessById(processId);
-                parent.WaitForExit(30_000);
+                if (parent.WaitForExit(20_000)) return;
+                // 旧版本卡在退出（0.9.2–0.9.3 开启“保持可被发现”时的已知问题）会一直占着单实例锁，
+                // 新版本随后无法启动。确认它是本程序且早于本进程启动后结束它；PID 被复用时不动别的进程。
+                using var self = Process.GetCurrentProcess();
+                if (!string.Equals(parent.ProcessName, self.ProcessName, StringComparison.OrdinalIgnoreCase)
+                    || parent.StartTime >= self.StartTime) return;
+                parent.Kill(entireProcessTree: false);
+                parent.WaitForExit(5_000);
             }
             catch (ArgumentException)
             {
                 // The previous process already exited before the replacement started.
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+            {
+                // 结束不了（已退出或权限不足）时照常继续，后面的单实例逻辑会提示。
             }
         });
     }
