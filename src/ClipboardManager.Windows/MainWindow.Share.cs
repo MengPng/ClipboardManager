@@ -17,7 +17,6 @@ namespace ClipboardManager.Windows;
 /// </summary>
 public partial class MainWindow
 {
-    private const string MatchHintDefault = "在另一台电脑输入这个码，即可互相匹配。";
 
     private enum ShareSegment { Publish, Subscribe, Transfer }
 
@@ -153,8 +152,6 @@ public partial class MainWindow
         ShareReceiveCheck.IsChecked = settings.LanReceiveEnabled;
         ShareAutoAcceptCheck.IsChecked = settings.LanAutoAccept;
         ShareAutoAcceptCheck.IsEnabled = settings.LanReceiveEnabled;
-        TransferSettingsSummaryText.Text =
-            $"{(!settings.LanReceiveEnabled ? "不接收文件" : settings.LanAutoAccept ? "直接接收" : "接收前询问")} · {(settings.LanKeepOnline ? "保持可被发现" : "不常驻监听")}";
         var receiveFolder = LanTransferPaths.ResolveReceiveFolder(settings);
         ShareReceiveFolderText.Text = receiveFolder;
         ShareReceiveFolderText.ToolTip = receiveFolder;
@@ -207,9 +204,12 @@ public partial class MainWindow
     {
         var status = _configSync.ServerStatus;
         ShareStatusText.ToolTip = status.LastError;
-        SharePairingHintText.Text = !status.IsRunning && status.LastError is not null
+        // 只在出问题时显示原因（码停用 / 锁定 / 监听失败），平时匹配码卡片只有一行。
+        var problem = !status.IsRunning && status.LastError is not null
             ? $"无法启动本机监听：{status.LastError}。{ConfigSyncPolicy.FirewallHint}"
-            : MatchCodeHint();
+            : MatchCodeProblem();
+        SharePairingHintText.Text = problem ?? string.Empty;
+        SharePairingHintText.Visibility = VisibleIf(problem is not null);
         switch (_shareSegment)
         {
             case ShareSegment.Subscribe:
@@ -240,8 +240,8 @@ public partial class MainWindow
         var port = _configSync.ServerStatus.IsRunning ? _configSync.ServerStatus.Port : ConfigSyncPolicy.DefaultPort;
         var addresses = LocalIPv4Addresses();
         ShareLocalAddressText.Text = addresses.Count == 0
-            ? "未检测到可用的局域网地址，请检查网络连接。"
-            : $"本机地址（对方手动输入）：{string.Join(" 或 ", addresses.Select(address => $"{address}:{port}"))}\n证书指纹 {_shareFingerprintPrefix}（匹配时请与对方屏幕上的指纹核对）";
+            ? "未检测到局域网地址"
+            : $"{string.Join(" · ", addresses.Select(address => $"{address}:{port}"))}\n指纹 {_shareFingerprintPrefix}";
     }
 
     private static IReadOnlyList<string> LocalIPv4Addresses()
@@ -419,14 +419,14 @@ public partial class MainWindow
         UpdateShareStatus();
     }
 
-    private string MatchCodeHint()
+    private string? MatchCodeProblem()
     {
         var status = _lanDevices.MatchCode;
         if (status.Disabled)
             return "输错次数过多，这个码已停用，防止被人反复猜测。点“生成新码”换一个；已匹配的设备不受影响。";
         if (status.LockedUntil is { } until && until > DateTimeOffset.UtcNow)
             return $"连续输错多次，暂时锁定到 {until.LocalDateTime:HH:mm}，期间无法用它匹配。";
-        return MatchHintDefault;
+        return null;
     }
 
     private async void ShareCopyFirewallButton_Click(object sender, RoutedEventArgs e) =>

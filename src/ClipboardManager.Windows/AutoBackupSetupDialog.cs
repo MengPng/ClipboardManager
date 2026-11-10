@@ -14,7 +14,7 @@ internal sealed class AutoBackupSetupDialog : Window
     public AutoBackupSetupDialog(Window owner)
     {
         if (owner.IsLoaded) Owner = owner;
-        Title = "自动备份"; Width = 420; Height = 245;
+        Title = "自动备份"; Width = 420; SizeToContent = SizeToContent.Height;
         WindowStartupLocation = owner.IsLoaded ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen;
         ResizeMode = ResizeMode.NoResize;
         if (TryFindResource("DialogWindowStyle") is Style style) Style = style;

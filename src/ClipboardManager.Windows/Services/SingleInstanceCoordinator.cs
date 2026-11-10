@@ -8,6 +8,9 @@ public sealed class SingleInstanceCoordinator(string name) : IDisposable
     private static readonly TimeSpan ActivationBudget = TimeSpan.FromSeconds(5);
     private const int ConnectAttemptMilliseconds = 500;
     private const int RetryPauseMilliseconds = 200;
+    private const int WriteBudgetMilliseconds = 1000;
+
+    private static readonly byte[] ActivationMessage = [1];
 
     private readonly string _pipeName = name + ".Pipe";
     private Mutex? _mutex;
@@ -35,11 +38,12 @@ public sealed class SingleInstanceCoordinator(string name) : IDisposable
         {
             try
             {
-                using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out);
+                using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.Out, PipeOptions.Asynchronous);
                 client.Connect(ConnectAttemptMilliseconds);
-                client.WriteByte(1);
-                client.Flush();
-                return true;
+                // A synchronous write to an unbuffered pipe blocks until the server reads. A wedged
+                // primary that still owns the pipe would hang this launch forever, so bound it.
+                var write = client.WriteAsync(ActivationMessage, 0, ActivationMessage.Length);
+                return write.Wait(WriteBudgetMilliseconds);
             }
             catch (TimeoutException)
             {
@@ -72,11 +76,25 @@ public sealed class SingleInstanceCoordinator(string name) : IDisposable
         }
 
         _listenerCancellation = new CancellationTokenSource();
-        // Create the first server synchronously. Exceptions thrown before the first await in an
-        // async method are otherwise stored in its Task and can leave a healthy-looking window
-        // holding the mutex without any activation pipe.
-        var firstServer = CreateServer();
-        _listenerTask = ListenAsync(activated, firstServer, _listenerCancellation.Token);
+        // Try to create the first server synchronously so activation works as soon as this returns.
+        // A previous instance that is still exiting can own the pipe for a moment ("all pipe
+        // instances are busy"); that must not crash startup, so the listener keeps retrying.
+        NamedPipeServerStream? firstServer = null;
+        try
+        {
+            firstServer = CreateServer();
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        var token = _listenerCancellation.Token;
+        // Task.Run: no captured UI context, so reading activation requests never depends on the
+        // UI thread being free.
+        _listenerTask = Task.Run(() => ListenAsync(activated, firstServer, token));
     }
 
     public void Dispose()
@@ -103,7 +121,7 @@ public sealed class SingleInstanceCoordinator(string name) : IDisposable
 
     private async Task ListenAsync(
         Action activated,
-        NamedPipeServerStream firstServer,
+        NamedPipeServerStream? firstServer,
         CancellationToken cancellationToken)
     {
         NamedPipeServerStream? nextServer = firstServer;

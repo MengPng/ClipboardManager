@@ -35,7 +35,7 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(_pauseItem);
         menu.Opening += (_, _) => UpdatePauseText();
         menu.Items.Add(new ToolStripSeparator());
-        if (checkForUpdates is not null) menu.Items.Add("检查更新…", null, (_, _) => checkForUpdates());
+        if (checkForUpdates is not null) menu.Items.Add("检查更新", null, (_, _) => checkForUpdates());
         menu.Items.Add("重启", null, (_, _) => restartApplication());
         menu.Items.Add("退出", null, (_, _) => exitApplication());
 

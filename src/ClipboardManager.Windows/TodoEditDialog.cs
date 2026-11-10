@@ -26,9 +26,8 @@ internal sealed class TodoEditDialog : Window
         Topmost = owner.Topmost;
         Title = "编辑待办";
         Width = 400;
-        Height = 300;
+        SizeToContent = SizeToContent.Height;
         MinWidth = 340;
-        MinHeight = 260;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;

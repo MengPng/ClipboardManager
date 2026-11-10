@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using TextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
+using RadioButton = System.Windows.Controls.RadioButton;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -57,6 +58,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private System.Windows.Point _dragStart;
     private object? _dragItem;
     private long _historyVersion, _collectionVersion, _foldersVersion, _tabSelectionVersion;
+    /// <summary>配置页当前来源：null 为“我的”（个人文件夹），否则为某个订阅的受管文件夹。</summary>
+    private Guid? _configSource;
+    private string? _configSourceChipsKey;
     private CancellationTokenSource? _historySearch, _collectionSearch;
     private bool _compactList;
     private string _lanSessionPin = string.Empty;
@@ -376,12 +380,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var version = ++_foldersVersion;
         var workspaceId = ActiveConfigWorkspaceId;
         var result = await _collectionService.GetFoldersAsync(workspaceId, cancellationToken);
+        // 只列出还有受管文件夹的订阅；当前选中的订阅被取消后回到“我的”。
+        var managedIds = result.Folders.Select(folder => folder.ManagedSubscriptionId).OfType<Guid>().ToHashSet();
+        var sources = (await _configSubscriptions.GetSubscriptionsAsync(cancellationToken))
+            .Where(subscription => subscription.WorkspaceId == workspaceId && managedIds.Contains(subscription.Id))
+            .ToList();
+        if (version != _foldersVersion || workspaceId != ActiveConfigWorkspaceId) return;
+        if (_configSource is { } current && sources.All(subscription => subscription.Id != current)) _configSource = null;
+        var source = _configSource;
         var folders = new List<FolderViewModel>();
-        foreach (var folder in result.Folders)
+        foreach (var folder in result.Folders.Where(folder => folder.ManagedSubscriptionId == source))
             folders.Add(new FolderViewModel(folder, (await _collectionService.GetItemsAsync(workspaceId, folder.Id, cancellationToken: cancellationToken)).Count, SpaceName(workspaceId)));
         // A space switch bumps the version and changes the active workspace, so folders
         // loaded for the space the user just left must never replace the current list.
-        if (version != _foldersVersion || workspaceId != ActiveConfigWorkspaceId) return;
+        if (version != _foldersVersion || workspaceId != ActiveConfigWorkspaceId || source != _configSource) return;
+        UpdateConfigSourceChips(sources);
         var selectedId = SelectedFolder?.Folder.Id;
         _refreshingFolders = true;
         try
@@ -391,6 +404,42 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally { _refreshingFolders = false; }
         await RefreshCollectionItemsAsync(cancellationToken);
+    }
+
+    /// <summary>“我的”+ 每个订阅一枚胶囊；订阅列表没变时只更新选中状态，不重建。</summary>
+    private void UpdateConfigSourceChips(IReadOnlyList<ConfigSubscription> sources)
+    {
+        var key = string.Join("|", sources.Select(subscription => $"{subscription.Id}:{subscription.Name}"));
+        if (key != _configSourceChipsKey)
+        {
+            _configSourceChipsKey = key;
+            ConfigSourceChips.Children.Clear();
+            ConfigSourceChips.Children.Add(ConfigSourceChip("我的", null));
+            foreach (var subscription in sources) ConfigSourceChips.Children.Add(ConfigSourceChip(subscription.Name, subscription.Id));
+        }
+        foreach (var chip in ConfigSourceChips.Children.OfType<RadioButton>()) chip.IsChecked = (Guid?)chip.Tag == _configSource;
+        ConfigSourceChips.Visibility = sources.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private RadioButton ConfigSourceChip(string name, Guid? source)
+    {
+        var chip = new RadioButton
+        {
+            GroupName = "ConfigSource",
+            Tag = source,
+            MaxWidth = 150,
+            ToolTip = name,
+            Content = new TextBlock { Text = name, TextTrimming = TextTrimming.CharacterEllipsis },
+        };
+        System.Windows.Automation.AutomationProperties.SetName(chip, source is null ? "我的配置" : $"订阅：{name}");
+        if (TryFindResource("FilterChipStyle") is Style style) chip.Style = style;
+        chip.Click += async (_, _) =>
+        {
+            if (_configSource == source) return;
+            _configSource = source;
+            await RunActionAsync("切换配置来源", () => RefreshFoldersAsync());
+        };
+        return chip;
     }
 
     private async Task RefreshCollectionItemsAsync(CancellationToken cancellationToken = default)
@@ -942,9 +991,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var hit = FindItem<FolderViewModel>(e.OriginalSource as DependencyObject);
         if (hit is not null) SelectedFolder = hit;
         var menu = new ContextMenu();
-        AddMenu(menu, "新建文件夹…", () => CreateFolderAsync());
+        AddMenu(menu, "新建文件夹", () => CreateFolderAsync());
         menu.Items.Add(new Separator());
-        var rename = AddMenu(menu, "重命名…", () => RenameSelectedFolderAsync());
+        var rename = AddMenu(menu, "重命名", () => RenameSelectedFolderAsync());
         var delete = AddMenu(menu, "删除文件夹", () => DeleteSelectedFolderAsync());
         var editable = SelectedFolder is { Folder.IsSystem: false, IsManaged: false };
         rename.IsEnabled = editable;
@@ -965,7 +1014,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var dialog = new SingleInputDialog(this, "新建文件夹", "请输入文件夹名称：");
             return dialog.ShowDialog() == true ? dialog.Value : null;
         });
-        if (!string.IsNullOrWhiteSpace(name)) { await _collectionService.CreateFolderAsync(ActiveConfigWorkspaceId, name); await RefreshFoldersAsync(); }
+        // 新文件夹总是个人文件夹，正在看订阅时先切回“我的”，否则新建的文件夹看不到。
+        if (!string.IsNullOrWhiteSpace(name)) { await _collectionService.CreateFolderAsync(ActiveConfigWorkspaceId, name); _configSource = null; await RefreshFoldersAsync(); }
     }
     private async void RenameFolderButton_Click(object sender, RoutedEventArgs e) => await RunActionAsync("重命名", RenameSelectedFolderAsync);
     private async Task RenameSelectedFolderAsync()
@@ -1107,9 +1157,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
         if (item.ItemType is CollectionItemType.Text or CollectionItemType.Link)
-            AddMenu(menu, "编辑…", () => EditContentAsync(item.WorkspaceId, item.FolderId, item.ItemType, item));
+            AddMenu(menu, "编辑", () => EditContentAsync(item.WorkspaceId, item.FolderId, item.ItemType, item));
         else
-            AddMenu(menu, "修改名称…", () => RenameCollectionItemAsync(item));
+            AddMenu(menu, "修改名称", () => RenameCollectionItemAsync(item));
         if (item.ItemType == CollectionItemType.Link)
             AddMenu(menu, "在浏览器打开", () => { _collectionRestoreService.OpenLink(item); return Task.CompletedTask; });
         var position = _folderItemOrder?.IndexOf(item.Id) ?? -1;
@@ -1121,8 +1171,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         move.IsEnabled = move.Items.Count > 0; menu.Items.Add(move);
         if (item.ItemType == CollectionItemType.Image)
         {
-            AddMenu(menu, "打开图片所在位置…", () => ChooseFileActionAsync(null, item.LocalPath, true));
-            AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.LocalPath));
+            AddMenu(menu, "打开图片所在位置", () => ChooseFileActionAsync(null, item.LocalPath, true));
+            AddMenu(menu, "图片另存为", () => SaveImageAsync(item.LocalPath));
         }
         if (item.ItemType == CollectionItemType.File)
         {
@@ -1163,7 +1213,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _collectionService.CollectToUncategorizedAsync(_personalWorkspaceId, item);
             await RefreshFoldersAsync();
         }, "Ctrl+D");
-        AddMenu(menu, "选择配置文件夹…", async () =>
+        AddMenu(menu, "选择配置文件夹", async () =>
         {
             var folder = await ChooseFolderAsync();
             if (folder is null) return;
@@ -1175,13 +1225,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await _historyService.SetPinnedAsync(item.Id, !item.IsPinned);
             await RefreshHistoryAsync();
         }, "Ctrl+P");
-        AddMenu(menu, "发送给已匹配设备…", () => SendHistoryItemToDeviceAsync(item));
+        AddMenu(menu, "发送给已匹配设备", () => SendHistoryItemToDeviceAsync(item));
         menu.Items.Add(new Separator());
-        if (item.ItemType == ClipboardItemType.Image) AddMenu(menu, "图片另存为…", () => SaveImageAsync(item.ImagePath));
+        if (item.ItemType == ClipboardItemType.Image) AddMenu(menu, "图片另存为", () => SaveImageAsync(item.ImagePath));
         if (item.ItemType == ClipboardItemType.ImageFile)
         {
             var imageFile = HistoryItemViewModel.ReadFiles(item).FirstOrDefault();
-            AddMenu(menu, "图片另存为…", () => SaveImageAsync(imageFile));
+            AddMenu(menu, "图片另存为", () => SaveImageAsync(imageFile));
             AddFileMenus(menu, item.FileManifest, null);
         }
         if (item.ItemType == ClipboardItemType.Files) AddFileMenus(menu, item.FileManifest, null);
@@ -1227,8 +1277,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (paths.Length == 0) throw new InvalidOperationException("记录不包含可用文件路径。");
             await _restoreService.CopyTextAsync(string.Join(Environment.NewLine, paths));
         });
-        AddMenu(menu, "打开文件…", () => ChooseFileActionAsync(manifest, localPath, false));
-        AddMenu(menu, "打开文件位置…", () => ChooseFileActionAsync(manifest, localPath, true));
+        AddMenu(menu, "打开文件", () => ChooseFileActionAsync(manifest, localPath, false));
+        AddMenu(menu, "打开文件位置", () => ChooseFileActionAsync(manifest, localPath, true));
     }
     private Task ChooseFileActionAsync(string? manifest, string? localPath, bool location)
     {

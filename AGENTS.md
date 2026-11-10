@@ -50,7 +50,7 @@
   - **导入限制**：网络接收包 ≤ 200 MB、清单 ≤ 4 MB、单文件 ≤ 50 MB、仅 http/https 链接、图片须为 PNG/JPEG；条目名与路径必须通过 `IsSafeEntryName`；本地导入保持 20 GB。可执行类扩展名标记高风险，导入需单独确认，永不自动打开，自动更新不得应用含高风险文件的版本。
   - **防火墙**：MSI 仍为 perUser，不写防火墙规则；运行时只提示放行 TCP/UDP 53318 并提供可复制的 `netsh` 命令。"安装程序加规则"是待办，不得标为已完成。
   - **验收状态**：0.9.0 以真实 TLS 的进程内环回集成测试代替两台机器验证；两台真实设备、防火墙、组播真实网络、真实 UI 点击均待验收。
-- 局域网匹配与文件直传（0.9.2 起，ADR-0008，schema 仍为 8）：「共享 → 传输」一级页只放本机匹配码、已匹配设备（一排两张卡片，名字后跟「在线/离线」标签，最近传输另起一行、没有则不显示）和「传输设置」入口；「匹配设备」按钮与「本机匹配码」同行同字号，提示小字单行省略；设备页（拖放区、选择文件、该设备的传输记录、移除/重命名/浏览发布）、「匹配设备」「传输设置」为二级页，返回按钮或 Esc 回一级页；历史页右键「发送给已匹配设备…」。约束如下：
+- 局域网匹配与文件直传（0.9.2 起，ADR-0008，schema 仍为 8）：「共享 → 传输」一级页只放本机匹配码、已匹配设备（一排两张卡片，名字后跟「在线/离线」标签并在卡片内居中，卡片不放小字，传输中只显示进度条）和「传输设置」入口；「本机匹配码 · 码 · 匹配设备」一行，只有码停用/锁定或监听失败时才在下方显示原因；设备页（拖放区、选择文件、该设备的传输记录、移除/重命名/浏览发布）、「匹配设备」「传输设置」为二级页，返回按钮或 Esc 回一级页；历史页右键「发送给已匹配设备…」。约束如下：
   - **固定匹配码**：6 位数字，首次需要时生成，只存凭据管理器（`ConfigSync/MatchCode`）；成功不作废，「更换」后旧码立即失效、已匹配设备不受影响。连续错 5 次锁定 1 分钟并逐次翻倍（最长 60 分钟），累计错 20 次停用直到更换；成功只清零连续错误数。待定握手最多 16 个、各 60 秒。
   - **双向匹配**：一次匹配后两边都同时记录对方为发布者与订阅者；订阅仍只读。重命名只改本机显示、同一指纹的记录一起改，重新匹配不得覆盖本地名字。
   - **本机名称**（Unreleased）：「传输设置 → 本机」第一行，存 `LanDeviceAlias`（与 LocalSend 共用，1–40 字符），经 `IConfigSyncIdentity.UseDeviceName` 用于组播广播与匹配握手，空白回退计算机名；`LanDeviceNameConfirmed` 为 false 时首次进入「传输设置」强制弹出改名框（取消则下次再弹，旧设置视为未确认）。「手动连接发布者」（IP:端口）在「传输设置」末组，不在订阅页。
@@ -91,7 +91,7 @@
   - 列表选中规则统一：历史、配置条目、文件夹栏在同一主题下选中底色相同（`SelectionBrush`）；左缘条由 `SelectionEdgeThickness` / `SelectionEdgeBrush` 控制（标准 2、夹夹 0、Kami 2、Kubai 0），不得写死；夹子、折角等装饰只加在卡片行（历史、配置条目，`SelectionDecorVisibility`），文件夹栏只用同色底。选中态必须在该主题底色上清晰可辨。
   - 空状态宠物沿用宠物约束：112×80 为 56×40 的精确 2 倍，不可聚焦、不可命中，不得伪造状态。
   - 主题图标（0.9.2 起，仅 Kubai）：`ThemeIconVisibility` 与 `IconNavHistory/Config/Todo/Calc/Share`、`IconRowText/Link/File`、`IconFolder` 及各自的 `…Hover` 键；`Palette.xaml` 中为 `Collapsed` / `x:Null`，夹夹与 Kami 不写这些键，因此其他主题外观不变。Kubai 用 96×96 PNG（`Assets/Icons/Kubai/`，`scripts/build-kubai-icons.ps1` 生成，来源与许可见同目录 `NOTICE.txt`，只在产品内使用，不得单独作为图标包分发）；图片历史行保留缩略图；页签悬停/选中 160 ms 淡入悬停图，选中行与选中文件夹换悬停图。LayoutCheck 断言 Kubai 每个图标键为 96×96 位图、其他主题图标不可见且无图源。
-  - 共享页（0.9.2 起）与设置窗口同一风格：组标题 + `SettingsGroupStyle` 卡片，卡内行左侧标题与说明、右侧控件，行间 `SettingsDividerStyle` 细线；行样式在 `Controls.xaml` 的 `Settings*` 系列中，新增共享页内容须沿用，不得再引入独立卡片样式。发布/订阅页不放说明小字；两列卡片用 `Services/TwoColumnPanel`（每排按自身内容等高），名字 + 标签用 `Services/NameTagPanel`，标签样式 `TransferOnlineTagStyle` / `TransferOnlineTagTextStyle`。
+  - 共享页（0.9.2 起）与设置窗口同一风格：组标题 + `SettingsGroupStyle` 卡片，卡内行左侧标题与说明、右侧控件，行间 `SettingsDividerStyle` 细线；行样式在 `Controls.xaml` 的 `Settings*` 系列中，新增共享页内容须沿用，不得再引入独立卡片样式。共享页（发布、订阅、传输及其二级页）不放说明小字，只保留标题和真实数值（地址、指纹、匹配码），必要提示放 ToolTip 或出错时再显示；按钮与菜单项不加省略号；对话框高度随内容（`SizeToContent.Height`），不得写死高度；配置页顶部「我的 / 各订阅」来源胶囊按 `ManagedSubscriptionId` 过滤文件夹，没有订阅时隐藏；两列卡片用 `Services/TwoColumnPanel`（每排按自身内容等高），名字 + 标签用 `Services/NameTagPanel`，标签样式 `TransferOnlineTagStyle` / `TransferOnlineTagTextStyle`。
 
 不得为了展示进度而提供不可用的假入口。未实现的团队界面默认隐藏。
 

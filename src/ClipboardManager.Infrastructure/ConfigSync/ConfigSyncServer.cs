@@ -87,13 +87,15 @@ public sealed class ConfigSyncServer(
         }
         if (loop is not null)
         {
-            try { await loop.WaitAsync(TimeSpan.FromSeconds(5)); }
+            // ConfigureAwait(false)：退出时 Host.Dispose 在 UI 线程上同步等待 DisposeAsync，
+            // 续体若排回 UI 线程就会永久死锁（进程挂在退出、占着单实例锁）。
+            try { await loop.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
             catch (Exception ex) when (ex is TimeoutException or OperationCanceledException) { }
         }
         logger.LogInformation("配置共享监听已停止");
     }
 
-    public async ValueTask DisposeAsync() => await StopAsync();
+    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 
     private static TcpListener CreateListener(int port)
     {

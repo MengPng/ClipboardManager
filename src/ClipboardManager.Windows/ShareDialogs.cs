@@ -23,7 +23,9 @@ internal abstract class ShareDialogBase : Window
         Topmost = owner.Topmost;
         Title = title;
         Width = width;
-        Height = height;
+        // 高度随内容，避免字体放大或 DPI 缩放时裁掉底部按钮；列表与长正文由 MaxHeight 限高后在内部滚动。
+        SizeToContent = SizeToContent.Height;
+        MaxHeight = height + 200;
         MinWidth = 300;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false;
@@ -311,7 +313,7 @@ internal sealed class SubscriptionSettingsDialog : ShareDialogBase
         options.Children.Add(note);
         grid.Children.Add(options);
 
-        var unsubscribe = new Button { Content = "取消订阅…", Padding = new Thickness(16, 5, 16, 5), Margin = new Thickness(0, 0, 24, 0) };
+        var unsubscribe = new Button { Content = "取消订阅", Padding = new Thickness(16, 5, 16, 5), Margin = new Thickness(0, 0, 24, 0) };
         unsubscribe.Click += (_, _) => { UnsubscribeRequested = true; DialogResult = true; };
         var save = OkButton("保存");
         save.Click += (_, _) => DialogResult = true;

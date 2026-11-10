@@ -30,9 +30,8 @@ internal sealed class TodoTagDialog : Window
         Title = existing is null ? "自定义标签" : "编辑标签";
         if (existing is not null) _color = TodoTagCatalog.NormalizeColor(existing.Color);
         Width = 380;
-        Height = 250;
+        SizeToContent = SizeToContent.Height;
         MinWidth = 320;
-        MinHeight = 230;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;

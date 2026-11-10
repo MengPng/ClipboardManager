@@ -21,9 +21,9 @@ internal sealed class SingleInputDialog : Window
         Topmost = owner.Topmost;
         Title = title;
         Width = 380;
-        Height = 175;
+        // 高度随内容：固定高度在系统字体放大或 DPI 缩放时会把底部按钮裁掉。
+        SizeToContent = SizeToContent.Height;
         MinWidth = 300;
-        MinHeight = 160;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;

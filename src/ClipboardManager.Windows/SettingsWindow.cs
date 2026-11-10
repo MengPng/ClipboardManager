@@ -421,7 +421,7 @@ public sealed class SettingsWindow : Window
             usage.Children.Add(new TextBlock { Text = "本地占用" });
             usage.Children.Add(_usageTrack);
             usage.Children.Add(_usageText);
-            var cleanup = new Button { Content = "清理无用缓存…", Padding = new Thickness(12, 5, 12, 5) };
+            var cleanup = new Button { Content = "清理无用缓存", Padding = new Thickness(12, 5, 12, 5) };
             cleanup.Click += async (_, _) => await CleanupAssetsAsync();
             var group = GroupBorder();
             var stack = new StackPanel();
@@ -544,9 +544,9 @@ public sealed class SettingsWindow : Window
 
         if (_context.Storage is not null)
         {
-            var export = new Button { Content = "导出备份…", Padding = new Thickness(12, 5, 12, 5) };
+            var export = new Button { Content = "导出备份", Padding = new Thickness(12, 5, 12, 5) };
             export.Click += async (_, _) => await CreateBackupAsync();
-            var import = new Button { Content = "从备份恢复…", Padding = new Thickness(12, 5, 12, 5), IsEnabled = _context.RestoreBackup is not null };
+            var import = new Button { Content = "从备份恢复", Padding = new Thickness(12, 5, 12, 5), IsEnabled = _context.RestoreBackup is not null };
             import.Click += async (_, _) => await RestoreBackupAsync();
             page.Children.Add(Group("手动备份",
                 Row("导出完整备份", "生成一个 .clipbackup 文件，换电脑或重装后可以恢复。", export),

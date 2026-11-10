@@ -71,7 +71,7 @@ public partial class App : System.Windows.Application
             {
                 System.Windows.MessageBox.Show(
                     "剪切板管理工具已在运行，但没有响应唤出请求，可能已卡住。\n\n"
-                        + "请在任务管理器中结束 ClipboardManager.exe 进程后重新启动。",
+                        + $"请在任务管理器中结束所有 {(Environment.ProcessPath is { } exe ? Path.GetFileName(exe) : "ClipboardManager")} 进程后重新启动。",
                     "无法唤出已运行的实例",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -84,7 +84,9 @@ public partial class App : System.Windows.Application
         // Listen as soon as the mutex is acquired. Startup may still be loading the database,
         // cloud state, or the main window; a second launch during that work must not mistake a
         // healthy primary instance for a wedged one.
-        _singleInstance.StartListening(() => Dispatcher.Invoke(() =>
+        // InvokeAsync: the pipe listener must never wait on the UI thread, or a busy/blocked UI
+        // thread leaves the next launch stuck writing to a pipe nobody reads.
+        _singleInstance.StartListening(() => Dispatcher.InvokeAsync(() =>
         {
             if (MainWindow is not null)
             {
@@ -479,11 +481,33 @@ public partial class App : System.Windows.Application
             _host.Services.GetService<ClipboardManager.Application.Services.ConfigSync.ConfigSyncCoordinator>()?.Dispose();
             _host.Services.GetService<AppUpdateService>()?.Dispose();
             await _host.StopAsync(TimeSpan.FromSeconds(3));
-            _host.Dispose();
+            DisposeHostWithoutUiContext(_host);
         }
 
         _singleInstance?.Dispose();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Host.Dispose blocks on the container's DisposeAsync. Run on the UI thread with the
+    /// dispatcher's context installed, any service whose disposal awaits without
+    /// ConfigureAwait(false) posts its continuation to the thread that is blocked waiting for it,
+    /// and the process hangs in OnExit forever while still holding the single-instance mutex.
+    /// Clearing the context keeps the synchronous parts on this thread (UI-bound Dispose calls
+    /// stay safe) but lets every continuation finish on the thread pool.
+    /// </summary>
+    private static void DisposeHostWithoutUiContext(IHost host)
+    {
+        var context = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(null);
+        try
+        {
+            host.Dispose();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+        }
     }
 
     /// <summary>

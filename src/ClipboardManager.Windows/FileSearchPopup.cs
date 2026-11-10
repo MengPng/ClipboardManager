@@ -35,10 +35,10 @@ public sealed class FileSearchPopup : Window
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 2, 6) };
     private readonly ListBox _results = new() { MaxHeight = 330, BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent };
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(280) };
-    private readonly Button _copyFile = ActionButton("复制文件  Enter");
-    private readonly Button _copyPath = ActionButton("复制路径  Ctrl+C");
-    private readonly Button _reveal = ActionButton("打开位置  Shift+Enter");
-    private readonly Button _open = ActionButton("打开  Ctrl+Enter");
+    private readonly Button _copyFile = ActionButton("复制文件");
+    private readonly Button _copyPath = ActionButton("复制路径");
+    private readonly Button _reveal = ActionButton("打开位置");
+    private readonly Button _open = ActionButton("打开");
     private CancellationTokenSource? _running;
     private bool _closing;
     private bool _busyAction;
@@ -64,7 +64,7 @@ public sealed class FileSearchPopup : Window
         var root = new StackPanel();
 
         var header = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
-        var close = new Button { Content = "", ToolTip = "关闭（Esc）" };
+        var close = new Button { Content = "", ToolTip = "关闭" };
         close.SetResourceReference(StyleProperty, "IconButtonStyle");
         System.Windows.Automation.AutomationProperties.SetName(close, "关闭");
         close.Click += (_, _) => CloseAndReturn();
@@ -95,7 +95,8 @@ public sealed class FileSearchPopup : Window
         };
         root.Children.Add(_results);
 
-        var actions = new WrapPanel { Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        // 四个按钮一排，不标快捷键（键盘操作照常可用）。
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
         _copyFile.SetResourceReference(StyleProperty, "PrimaryButtonStyle");
         _copyFile.Click += async (_, _) => await CopyFileAsync();
         _copyPath.Click += async (_, _) => await CopyPathAsync();
@@ -107,9 +108,6 @@ public sealed class FileSearchPopup : Window
         actions.Children.Add(_copyFile);
         root.Children.Add(actions);
 
-        var hint = new TextBlock { Text = "双击或 Ctrl+Enter 用默认应用打开；复制文件后，在聊天窗口按 Ctrl+V 即可发送文件。", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 0, 0) };
-        hint.SetResourceReference(StyleProperty, "MetaTextStyle");
-        root.Children.Add(hint);
 
         frame.Child = root;
         Content = frame;
@@ -195,7 +193,7 @@ public sealed class FileSearchPopup : Window
         _results.Items.Clear();
         foreach (var hit in hits) _results.Items.Add(ResultItem(hit));
         _results.SelectedIndex = 0;
-        SetStatus(status + "，↑↓ 选择。");
+        SetStatus(status);
         UpdateActions();
     }
 

@@ -733,7 +733,7 @@ internal static class Program
                     shareStatus.Text = "监听中 · 端口 53318";
                     ((TextBlock)window.FindName("SharePairingCodeText")).Text = "482 916";
                     ((TextBlock)window.FindName("ShareReceiveFolderText")).Text = @"C:\Users\同事\Downloads\剪切板传输\一个很长很长的子目录名称用来验证省略号";
-                    ((TextBlock)window.FindName("ShareLocalAddressText")).Text = "本机地址：192.168.100.123:53318、10.0.0.5:53318";
+                    ((TextBlock)window.FindName("ShareLocalAddressText")).Text = "192.168.100.123:53318 · 10.0.0.5:53318" + "\n" + "指纹 3F2A9C1D";
                     ((TextBlock)window.FindName("ShareDeviceNameText")).Text = "财务部-张三的笔记本电脑（三楼东侧工位）";
                     footerHint.Text = "仅限局域网";
                     foreach (var segment in new[] { "publish", "subscribe", "transfer", "transfer-device", "transfer-match", "transfer-settings" })
@@ -857,7 +857,7 @@ internal static class Program
                                         throw new InvalidOperationException($"Device card is not half the list width ({state}): {navRects[i].Width:F0} of {listRect.Width:F0}");
                                 }
                                 // Rows size to their own cards: a lone idle card is not stretched to the busy first row.
-                                if (navRects.Length % 2 == 1 && navRects[^1].Height > navRects[0].Height - 10)
+                                if (navRects.Length % 2 == 1 && navRects[^1].Height > navRects[0].Height - 0.5)
                                     throw new InvalidOperationException($"A lone idle device card must stay compact ({state}): {navRects[^1].Height:F0} vs {navRects[0].Height:F0}");
                                 var busy = previewContext.MatchedDeviceRows.Count(row => row.ActiveProgressVisibility == Visibility.Visible);
                                 var bars = shown.OfType<ProgressBar>().ToArray();
@@ -884,17 +884,17 @@ internal static class Program
                                         throw new InvalidOperationException($"A long device name must be ellipsised ({state}).");
                                     if (((SolidColorBrush)tag.Foreground).Color != (row.IsOnline ? onlineColor : offlineColor))
                                         throw new InvalidOperationException($"Online tag colour must come from the {(row.IsOnline ? "success" : "tertiary")} token ({state}).");
-                                    var activity = row.ActivityText.Length == 0 ? null : texts.FirstOrDefault(block => block.Text == row.ActivityText);
-                                    if ((row.ActivityText.Length > 0) != (activity is not null) ||
-                                        activity is not null && Bounds(activity, surface).Right > navRects[i].Right + 0.5)
-                                        throw new InvalidOperationException($"Device activity {row.ActivityText} is missing or clipped ({state}).");
-                                    if (row.ActivityText.Length == 0 && texts.Length != 2)
-                                        throw new InvalidOperationException($"An idle device card shows only its name and tag ({state}): {texts.Length} texts");
+                                    // No small text on the card: only the name and its tag, centred as a pair.
+                                    if (texts.Length != 2)
+                                        throw new InvalidOperationException($"A device card shows only its name and tag ({state}): {texts.Length} texts");
+                                    var pairRect = Bounds((FrameworkElement)VisualTreeHelper.GetParent(name), surface);
+                                    if (Math.Abs((pairRect.Left + pairRect.Right) / 2 - (navRects[i].Left + navRects[i].Right) / 2) > 2)
+                                        throw new InvalidOperationException($"Name and tag must be centred in the card ({state}): pair={pairRect} card={navRects[i]}");
                                 }
                                 if (!previewContext.MatchedDeviceRows.Any(row => row.IsOnline) || previewContext.MatchedDeviceRows.All(row => row.IsOnline) ||
-                                    !previewContext.MatchedDeviceRows.Any(row => row.ActivityText.Length == 0))
+                                    !previewContext.MatchedDeviceRows.Any(row => row.ActiveProgressVisibility != Visibility.Visible))
                                     throw new InvalidOperationException($"The device sample must mix online, offline and idle devices ({state}).");
-                                if (shown.OfType<Button>().Any(button => Equals(button.Content, "发送文件…") || Equals(button.Content, "取消")))
+                                if (shown.OfType<Button>().Any(button => Equals(button.Content, "发送文件") || Equals(button.Content, "取消")))
                                     throw new InvalidOperationException($"Send and cancel belong on the device page, not the home list ({state}).");
                             }
                             else if (segment == "transfer-device")
@@ -969,19 +969,19 @@ internal static class Program
                             var matchPage = (Button)window.FindName("ShareOpenMatchPageButton");
                             var settingsRow = (Button)window.FindName("ShareOpenTransferSettingsButton");
                             var labelRect = Bounds(codeLabel, surface);
+                            var codeRect = Bounds(code, surface);
                             var matchRect = Bounds(matchPage, surface);
-                            // The match button shares the match-code label line: same font size, centred on it, above the code.
-                            if (!Equals(matchPage.Content, "匹配设备") || Math.Abs(matchPage.FontSize - codeLabel.FontSize) > 0.01 ||
-                                Math.Abs((matchRect.Top + matchRect.Bottom) / 2 - (labelRect.Top + labelRect.Bottom) / 2) > 1 ||
-                                matchRect.Bottom > Bounds(code, surface).Top + 4 || matchRect.Height > 26 || labelRect.Right > matchRect.Left)
-                                throw new InvalidOperationException($"The match button must sit on the match-code label line at the same size ({state}): label={labelRect} button={matchRect}");
+                            // Label, code and the match button on one line, in that order, inside the viewport.
+                            static double Middle(Rect rect) => (rect.Top + rect.Bottom) / 2;
+                            if (!Equals(matchPage.Content, "匹配设备") || !Equals(codeLabel.Text, "本机匹配码") ||
+                                Math.Abs(Middle(codeRect) - Middle(labelRect)) > 2 || Math.Abs(Middle(matchRect) - Middle(labelRect)) > 2 ||
+                                labelRect.Right > codeRect.Left || codeRect.Right > matchRect.Left || matchRect.Right > viewport.Right + 0.5)
+                                throw new InvalidOperationException($"Match-code label, code and button must share one line ({state}): label={labelRect} code={codeRect} button={matchRect}");
                             if (code.ActualWidth + 0.5 < DisplayWidth(code))
                                 throw new InvalidOperationException($"Match code is trimmed ({state}).");
-                            // The hint spans the card width on one line.
-                            var hintRect = Bounds(codeHint, surface);
-                            if (codeHint.TextWrapping != TextWrapping.NoWrap || hintRect.Right < matchRect.Left || hintRect.Right > viewport.Right + 0.5 ||
-                                codeHint.ActualWidth + 0.5 < DisplayWidth(codeHint))
-                                throw new InvalidOperationException($"The match hint must fit on one line across the card ({state}): {hintRect}");
+                            // No explanatory line under the code unless something is wrong.
+                            if (codeHint.IsVisible)
+                                throw new InvalidOperationException($"The match hint is only for problems ({state}): {codeHint.Text}");
                             if (!settingsRow.IsVisible || Bounds(settingsRow, surface).Right > viewport.Right + 0.5)
                                 throw new InvalidOperationException($"Transfer settings must stay reachable from the home page ({state}).");
                         }

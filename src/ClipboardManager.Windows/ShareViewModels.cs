@@ -105,9 +105,6 @@ public sealed class MatchedDeviceRowViewModel(MatchedDevice device) : System.Com
     public string StatusText => _activity is null ? OnlineText : $"{OnlineText} · {_activity}";
     /// <summary>名字后的在线标签。</summary>
     public string OnlineText => Device.IsOnline ? "在线" : "离线";
-    /// <summary>卡片第二行：正在传输或最近一次传输；没有时折叠。</summary>
-    public string ActivityText => _activity ?? string.Empty;
-    public Visibility ActivityVisibility => _activity is null ? Visibility.Collapsed : Visibility.Visible;
     public double ActivePercent => _activePercent;
     public Visibility ActiveProgressVisibility => _hasProgress ? Visibility.Visible : Visibility.Collapsed;
 
