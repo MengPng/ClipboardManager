@@ -82,6 +82,34 @@ internal static class Program
             var kamiDisplayFont = ((FontFamily)kami["AppDisplayFontFamily"]).Source;
             if (!kamiDisplayFont.StartsWith("Georgia") || kami.Contains("AppFontFamily"))
                 throw new InvalidOperationException("Kami overrides only AppDisplayFontFamily; the body font stays Microsoft YaHei.");
+            // 活页动效与装饰（2026-11-19）：标准调色板为「无效果」值，只有夹夹改写；Kami 与 Kubai 一律继承，
+            // 所以 PaperMotion 在其他主题里不挂变换、不创建动画，空状态与页脚像素不变。
+            var paperTokens = new (string Key, object Standard, object Jiajia)[]
+            {
+                ("SelectionShadowOffset", 2.0, 3.0),
+                ("RowHoverLift", 0.0, -1.0),
+                ("RowPressSink", 0.0, 1.0),
+                ("RowDropDistance", 0.0, 10.0),
+                ("SelectionPop", false, true),
+                ("NavSelectWipe", false, true),
+                ("EmptyNoteVisibility", Visibility.Collapsed, Visibility.Visible),
+                ("EmptyNoteAngle", 0.0, -1.5),
+                ("EmptyNoteMargin", new Thickness(0), new Thickness(0, 14, 0, 0)),
+                ("EmptyNotePadding", new Thickness(0), new Thickness(16, 12, 16, 14)),
+                ("PaperGrainVisibility", Visibility.Collapsed, Visibility.Visible),
+                ("KeycapVisibility", Visibility.Collapsed, Visibility.Visible),
+            };
+            foreach (var (key, standardValue, jiajiaValue) in paperTokens)
+            {
+                if (!Equals(standardRow[key], standardValue) || !Equals(jiajia[key], jiajiaValue) || kami.Contains(key) || kubai.Contains(key))
+                    throw new InvalidOperationException($"Paper token {key} must be {standardValue} in Palette.xaml, {jiajiaValue} in jiajia and untouched by kami/kubai.");
+            }
+            foreach (var key in new[] { "RowHoverShadowBrush", "EmptyNoteBrush", "EmptyNoteShadowBrush", "EmptyNoteTapeBrush", "EmptyNoteTapeBorderBrush" })
+            {
+                if (standardRow[key] is not SolidColorBrush { Color.A: 0 } || jiajia[key] is not SolidColorBrush { Color.A: > 0 } ||
+                    kami.Contains(key) || kubai.Contains(key))
+                    throw new InvalidOperationException($"Paper brush {key} must be transparent in Palette.xaml, visible in jiajia and untouched by kami/kubai.");
+            }
 
             var document = XDocument.Load(Path.Combine(root, "src/ClipboardManager.Windows/MainWindow.xaml"));
             XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
@@ -512,6 +540,17 @@ internal static class Program
                             throw new InvalidOperationException($"Selection decor '{part}' must show in jiajia only ({theme}, visible={element.IsVisible}).");
                         if (realized.Length > 1 && ((FrameworkElement)realized[1].Template.FindName(part, realized[1])).IsVisible)
                             throw new InvalidOperationException($"Unselected rows must not show selection decor '{part}'.");
+                    }
+                    // 墨影偏移读 SelectionShadowOffset（标准 2、夹夹 3）；静止时悬停影收起、卡片没有位移变换。
+                    var inkOffset = (double)app.FindResource("SelectionShadowOffset");
+                    if (((FrameworkElement)selectedRow.Template.FindName("Shadow", selectedRow)).RenderTransform is not TranslateTransform ink ||
+                        ink.X != inkOffset || ink.Y != inkOffset)
+                        throw new InvalidOperationException($"Selection shadow must sit {inkOffset},{inkOffset} from the card ({theme}).");
+                    foreach (var row in realized)
+                    {
+                        if (((FrameworkElement)row.Template.FindName("HoverShadow", row)).IsVisible ||
+                            !((FrameworkElement)row.Template.FindName("Card", row)).RenderTransform.Value.IsIdentity)
+                            throw new InvalidOperationException($"Resting rows must not show the hover shadow or a card offset ({theme}).");
                     }
 
                     if (size.Width == 300 && size.Height == 640 && historyBox.ActualHeight / 56 < 5.4)
@@ -1088,6 +1127,16 @@ internal static class Program
                 var list = (ListBox)window.FindName("HistoryList");
                 if (active.Name == "HistoryPanel") list.SelectedIndex = 0;
                 surface.UpdateLayout();
+                // 键帽版「Enter 使用」只在夹夹主题、且提示正是「Enter 使用」时出现，并替代纯文字提示；纸纹同样只在夹夹显示。
+                var keycapHint = (FrameworkElement)window.FindName("EnterKeycapHint");
+                var plainHint = (FrameworkElement)window.FindName("ShortcutHintText");
+                var wantsKeycap = themed && ((TextBlock)plainHint).Text == "Enter 使用";
+                if (keycapHint.IsVisible != wantsKeycap || plainHint.IsVisible == wantsKeycap)
+                    throw new InvalidOperationException($"Footer keycap must replace 'Enter 使用' in jiajia only ({theme} {active.Name}, keycap={keycapHint.IsVisible}, text={plainHint.IsVisible}).");
+                if (wantsKeycap && Bounds(keycapHint, surface).Right > size.Width - 9.5)
+                    throw new InvalidOperationException($"Footer keycap is clipped at {size}: {Bounds(keycapHint, surface)}");
+                if (((FrameworkElement)window.FindName("PaperGrainLayer")).IsVisible != themed)
+                    throw new InvalidOperationException($"Paper grain must show in jiajia only ({theme}).");
                 // Theme icons: invisible without a source outside kubai; in kubai every tab, text/link/file
                 // history row and folder row shows a bitmap, while image rows keep their thumbnail.
                 foreach (var tab in navigation.Items.Cast<TabItem>().Where(tab => tab.Visibility == Visibility.Visible))
@@ -1144,6 +1193,11 @@ internal static class Program
                         if (emptyBounds.Left < 0 || emptyBounds.Right > size.Width || emptyBounds.Top < emptyArea.Top - 1 ||
                             emptyBounds.Bottom > emptyArea.Bottom + 1 || emptyTextBounds.Width < 1)
                             throw new InvalidOperationException($"Empty state is clipped at {size} ({variant}): panel={emptyBounds}, list={emptyArea}");
+                        // 便签：夹夹里文案外包淡荧光便签，便签与夹夹之间留 26 DIP；其他主题文案外层没有底色。
+                        var note = (Border)VisualTreeHelper.GetParent(emptyText);
+                        var noteFill = ((SolidColorBrush)note.Background).Color;
+                        if (themed ? noteFill.A == 0 || ((FrameworkElement)note.Parent).Margin.Top + emptyHost.Margin.Bottom < 25.5 : noteFill.A != 0 || note.Padding != new Thickness(0))
+                            throw new InvalidOperationException($"Empty-state note must wrap the copy in jiajia only ({theme} {variant}): fill={noteFill}, padding={note.Padding}");
                         SaveRender(surface, size, Path.Combine(renderDir, $"HistoryPanel-{variant}-{size.Width}x{size.Height}.png"));
                     }
                     emptyPanel.Visibility = Visibility.Collapsed;

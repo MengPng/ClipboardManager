@@ -67,6 +67,15 @@
 
             <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom" Background="{DynamicResource SeparatorBrush}" />
 
+            <!-- 纸纹：只有 PaperGrainVisibility = Visible 的主题（夹夹）显示；冻结的平铺位图，位图缓存，不参与命中。 -->
+            <Border x:Name="PaperGrainLayer" Grid.Row="2" IsHitTestVisible="False"
+                    Visibility="{DynamicResource PaperGrainVisibility}"
+                    Background="{x:Static services:PaperGrain.Brush}">
+                <Border.CacheMode>
+                    <BitmapCache SnapsToDevicePixels="True" />
+                </Border.CacheMode>
+            </Border>
+
             <Grid Grid.Row="2" Margin="12,8,12,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -278,9 +287,33 @@
                             <StackPanel x:Name="EmptyStatePanel" HorizontalAlignment="Center" VerticalAlignment="Center"
                                         IsHitTestVisible="False" Visibility="Collapsed">
                                 <Grid x:Name="EmptyPetHost" Width="112" Height="80" Margin="0,0,0,12" />
-                                <TextBlock x:Name="EmptyStateText" Text="还没有历史，复制内容试试" TextAlignment="Center"
-                                           TextWrapping="Wrap" MaxWidth="260"
-                                           Foreground="{DynamicResource LabelSecondaryBrush}" />
+                                <!-- 便签：只有 EmptyNoteVisibility = Visible 的主题（夹夹）有底色、淡影与纸胶带；
+                                     其他主题内边距、留白、倾角都是 0，文案位置与以前一致。 -->
+                                <Grid HorizontalAlignment="Center" Margin="{DynamicResource EmptyNoteMargin}" RenderTransformOrigin="0.5,0.5">
+                                    <Grid.RenderTransform>
+                                        <RotateTransform Angle="{DynamicResource EmptyNoteAngle}" />
+                                    </Grid.RenderTransform>
+                                    <Border Visibility="{DynamicResource EmptyNoteVisibility}" CornerRadius="2"
+                                            Background="{DynamicResource EmptyNoteShadowBrush}">
+                                        <Border.RenderTransform>
+                                            <TranslateTransform X="2" Y="3" />
+                                        </Border.RenderTransform>
+                                    </Border>
+                                    <Border Background="{DynamicResource EmptyNoteBrush}" CornerRadius="2"
+                                            Padding="{DynamicResource EmptyNotePadding}">
+                                        <TextBlock x:Name="EmptyStateText" Text="还没有历史，复制内容试试" TextAlignment="Center"
+                                                   TextWrapping="Wrap" MaxWidth="260"
+                                                   Foreground="{DynamicResource LabelSecondaryBrush}" />
+                                    </Border>
+                                    <Border Visibility="{DynamicResource EmptyNoteVisibility}" Width="54" Height="16" Margin="0,-8,0,0"
+                                            HorizontalAlignment="Center" VerticalAlignment="Top" RenderTransformOrigin="0.5,0.5"
+                                            Background="{DynamicResource EmptyNoteTapeBrush}"
+                                            BorderBrush="{DynamicResource EmptyNoteTapeBorderBrush}" BorderThickness="1">
+                                        <Border.RenderTransform>
+                                            <RotateTransform Angle="2" />
+                                        </Border.RenderTransform>
+                                    </Border>
+                                </Grid>
                             </StackPanel>
                         </Grid>
                     </Grid>
@@ -1463,9 +1496,37 @@
                             Style="{StaticResource PrimaryButtonStyle}" FontSize="{DynamicResource FontSizeCaption}"
                             VerticalAlignment="Center" Visibility="Collapsed" Focusable="False"
                             AutomationProperties.Name="有新版本" Click="UpdateAvailableButton_Click" Content="新版本" />
-                    <TextBlock x:Name="ShortcutHintText" Grid.Column="2" Margin="0,0,0,0"
-                               Style="{StaticResource MetaTextStyle}" VerticalAlignment="Center"
-                               Text="Enter 使用" />
+                    <TextBlock x:Name="ShortcutHintText" Grid.Column="2" Margin="0,0,0,0" VerticalAlignment="Center"
+                               Text="Enter 使用">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource MetaTextStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsVisible, ElementName=EnterKeycapHint}" Value="True">
+                                        <Setter Property="Visibility" Value="Hidden" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <!-- 「Enter 使用」的键帽版：只在 KeycapVisibility = Visible 的主题（夹夹）且提示正是「Enter 使用」时出现。 -->
+                    <StackPanel x:Name="EnterKeycapHint" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"
+                                HorizontalAlignment="Right" IsHitTestVisible="False">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=ShortcutHintText}" Value="Enter 使用">
+                                        <Setter Property="Visibility" Value="{DynamicResource KeycapVisibility}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <Border Background="{DynamicResource ControlFillBrush}" BorderBrush="{DynamicResource BorderStrongBrush}"
+                                BorderThickness="1.25,1.25,1.25,2.5" CornerRadius="3" Padding="4,0,4,0" VerticalAlignment="Center">
+                            <TextBlock Style="{StaticResource MetaTextStyle}" Text="Enter" />
+                        </Border>
+                        <TextBlock Margin="4,0,0,0" Style="{StaticResource MetaTextStyle}" VerticalAlignment="Center" Text="使用" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>

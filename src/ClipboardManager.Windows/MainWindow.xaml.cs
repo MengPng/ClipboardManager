@@ -146,8 +146,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _searchTimer.Stop();
             await RunActionAsync("刷新", () => IsTodoTabActive ? RefreshTodosAsync() : IsCollectionTabActive ? RefreshCollectionItemsAsync() : RefreshHistoryAsync());
         };
-        _captureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); _collapsedPet?.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync()); });
-        _payloadCaptureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); _collapsedPet?.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync()); });
+        _captureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); _collapsedPet?.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync(dropNewTop: true)); });
+        _payloadCaptureService.ItemCaptured += (_, _) => Dispatcher.InvokeAsync(async () => { _panelPet.NotifyCopied(); _collapsedPet?.NotifyCopied(); await RunActionAsync("刷新历史", () => RefreshHistoryAsync(dropNewTop: true)); });
         _monitorService.PauseChanged += (_, paused) => Dispatcher.Invoke(() => UpdatePauseState(paused));
         SizeChanged += (_, _) =>
         {
@@ -350,7 +350,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         WindowBackdrop.TryApplyRoundedCorners(this);
     }
 
-    public async Task RefreshHistoryAsync(CancellationToken cancellationToken = default)
+    /// <param name="dropNewTop">只由捕获事件传 true：刷新后若顶部换成了新记录，让这一条按主题落下（夹夹，PaperMotion.PlayDrop）。</param>
+    public async Task RefreshHistoryAsync(CancellationToken cancellationToken = default, bool dropNewTop = false)
     {
         var version = ++_historyVersion;
         _historySearch?.Cancel();
@@ -367,14 +368,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             var records = await _historyService.SearchAsync(search, _favoritesOnly, _pinnedOnly, _itemType, cancellationToken: request.Token, linksOnly: _linksOnly);
             if (request.IsCancellationRequested || version != _historyVersion) return;
+            var previousTopId = Items.FirstOrDefault()?.Item.Id;
             Items.Clear(); foreach (var item in records) Items.Add(new HistoryItemViewModel(item, _calculatorMode == ClipboardCalculatorMode.Hint));
             SelectedItem = Items.FirstOrDefault(x => x.Item.Id == selectedId) ?? Items.FirstOrDefault();
             _emptyPaused = _monitorService.IsPaused;
             UpdateEmptyState();
+            if (dropNewTop && Items.Count > 0 && Items[0].Item.Id != previousTopId) PlayTopRowDrop();
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }
         catch (Exception) when (version != _historyVersion) { /* A superseded query must not show stale errors. */ }
         finally { if (ReferenceEquals(_historySearch, request)) _historySearch = null; }
+    }
+
+    /// <summary>容器在布局后才生成，所以等到 Loaded 优先级再取顶部那一行；行不在视口（已滚动）时不播放。</summary>
+    private void PlayTopRowDrop()
+    {
+        if (!HistoryList.IsVisible) return;
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            if (HistoryList.ItemContainerGenerator.ContainerFromIndex(0) is ListBoxItem row && row.IsVisible) PaperMotion.PlayDrop(row);
+        });
     }
 
     private async Task RefreshFoldersAsync(CancellationToken cancellationToken = default)

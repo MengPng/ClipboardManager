@@ -528,7 +528,7 @@
 
     <!-- 历史行容器：形状全部取自主题 token（RowCornerRadius / RowBorderThickness / RowCardBrush …）。
          标准主题的 token 值复现 0.8.5 的"透明底 + 左缘选中条"；夹夹主题为白卡片描边，选中时
-         显示偏移阴影、赤陶夹子与折角（由 SelectionDecorVisibility 控制，标准为 Collapsed）。
+         显示偏移墨影（SelectionShadowOffset）、品牌色夹子与折角（由 SelectionDecorVisibility 控制，标准为 Collapsed）。
          行高由 DataTemplate 决定，卡片内缩（RowCardInset）在行高之内，所以两套主题行距一致。 -->
     <Style x:Key="CardRowItemStyle" TargetType="ListBoxItem">
         <Setter Property="Margin" Value="2,0" />
@@ -536,6 +536,8 @@
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="VerticalContentAlignment" Value="Stretch" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
+        <!-- 纸感动效（悬停上浮、按下下沉、选中回弹、夹子弹入）：代码里读主题键，取「无效果」值的主题不创建任何动画。 -->
+        <Setter Property="services:PaperMotion.CardRow" Value="True" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
@@ -545,9 +547,19 @@
                                     Background="{DynamicResource SelectionDecorBrush}"
                                     CornerRadius="{DynamicResource RowCornerRadius}">
                                 <Border.RenderTransform>
+                                    <TranslateTransform X="{DynamicResource SelectionShadowOffset}" Y="{DynamicResource SelectionShadowOffset}" />
+                                </Border.RenderTransform>
+                            </Border>
+                            <!-- 悬停影：只由 PaperMotion 在 RowHoverLift ≠ 0 的主题（夹夹）里显示，其他主题始终 Collapsed。 -->
+                            <Border x:Name="HoverShadow" Visibility="Collapsed" Opacity="0" IsHitTestVisible="False"
+                                    Background="{DynamicResource RowHoverShadowBrush}"
+                                    CornerRadius="{DynamicResource RowCornerRadius}">
+                                <Border.RenderTransform>
                                     <TranslateTransform X="2" Y="2" />
                                 </Border.RenderTransform>
                             </Border>
+                            <!-- Card：卡片与夹子、折角一起上浮/下沉；位移变换只由 PaperMotion 在夹夹主题里挂上。 -->
+                            <Grid x:Name="Card">
                             <Border x:Name="Root"
                                     Background="{DynamicResource RowCardBrush}"
                                     BorderBrush="{DynamicResource RowBorderBrush}"
@@ -563,7 +575,8 @@
                                     HorizontalAlignment="Left" VerticalAlignment="Top"
                                     Background="{DynamicResource AccentBrandBrush}"
                                     BorderBrush="{DynamicResource SelectionDecorBrush}"
-                                    BorderThickness="1.5" CornerRadius="3" />
+                                    BorderThickness="1.5" CornerRadius="3"
+                                    RenderTransformOrigin="0.5,0.5" />
                             <Canvas x:Name="Fold" Visibility="Collapsed" Width="16" Height="16"
                                     HorizontalAlignment="Right" VerticalAlignment="Top" IsHitTestVisible="False">
                                 <Polygon Points="0,0 16,0 16,16" Fill="{DynamicResource WindowSurfaceBrush}" />
@@ -572,6 +585,7 @@
                                          Stroke="{DynamicResource SelectionDecorBrush}" StrokeThickness="1.5"
                                          StrokeLineJoin="Round" />
                             </Canvas>
+                            </Grid>
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -617,10 +631,16 @@
         <Setter Property="MinHeight" Value="34" />
         <Setter Property="Padding" Value="{DynamicResource NavTabPadding}" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="services:PaperMotion.NavTab" Value="True" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
                     <Grid Background="Transparent">
+                        <!-- 选中底色块与 Root 同位同形，单独一层好让夹夹主题从左向右划过（PaperMotion.NavTab，NavSelectWipe）。 -->
+                        <Border x:Name="Highlight" Margin="2,2,2,3" Visibility="Collapsed"
+                                CornerRadius="{DynamicResource NavPillRadius}"
+                                Background="{DynamicResource NavSelectedBackgroundBrush}"
+                                RenderTransformOrigin="0,0.5" IsHitTestVisible="False" />
                         <Border x:Name="Root" Margin="2,2,2,3" Padding="{TemplateBinding Padding}"
                                 CornerRadius="{DynamicResource NavPillRadius}" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="{DynamicResource NavPillBorderThickness}">
@@ -645,7 +665,8 @@
                         <Trigger Property="IsSelected" Value="True">
                             <Setter Property="Foreground" Value="{DynamicResource NavSelectedForegroundBrush}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
-                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource NavSelectedBackgroundBrush}" />
+                            <Setter TargetName="Highlight" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="Root" Property="Background" Value="Transparent" />
                             <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource NavPillBorderBrush}" />
                             <Setter TargetName="Mark" Property="Background" Value="{DynamicResource NavMarkBrush}" />
                         </Trigger>

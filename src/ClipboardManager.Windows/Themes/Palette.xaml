@@ -106,6 +106,33 @@
     <!-- 历史页空状态里的夹夹（还需"显示小宠物"开启）。 -->
     <Visibility x:Key="EmptyPetVisibility">Collapsed</Visibility>
 
+    <!-- 活页动效与装饰：只有夹夹主题开启。这里全部取「无效果」值，其他主题像素与行为不变；
+         动效由 Services/PaperMotion 读这些键启动，取 0 / False 时不创建任何动画。 -->
+    <!-- 选中行墨影的偏移（标准 2，与 0.8.5 起的夹夹选中影一致）。 -->
+    <sys:Double x:Key="SelectionShadowOffset">2</sys:Double>
+    <!-- 卡片行悬停上浮、按下下沉（DIP，负数向上），悬停影；新记录从上方落下的距离。 -->
+    <sys:Double x:Key="RowHoverLift">0</sys:Double>
+    <sys:Double x:Key="RowPressSink">0</sys:Double>
+    <SolidColorBrush x:Key="RowHoverShadowBrush" Color="#00000000" />
+    <sys:Double x:Key="RowDropDistance">0</sys:Double>
+    <!-- 选中时卡片回弹到位、夹子弹入（缩放 0.4→1、旋转 −14°→0）。 -->
+    <sys:Boolean x:Key="SelectionPop">False</sys:Boolean>
+    <!-- 选中页签的底色块从左向右划过。 -->
+    <sys:Boolean x:Key="NavSelectWipe">False</sys:Boolean>
+    <!-- 历史空状态的便签：底色、淡影、纸胶带、倾角与上方留白。 -->
+    <Visibility x:Key="EmptyNoteVisibility">Collapsed</Visibility>
+    <SolidColorBrush x:Key="EmptyNoteBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="EmptyNoteShadowBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="EmptyNoteTapeBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="EmptyNoteTapeBorderBrush" Color="#00000000" />
+    <sys:Double x:Key="EmptyNoteAngle">0</sys:Double>
+    <Thickness x:Key="EmptyNoteMargin">0</Thickness>
+    <Thickness x:Key="EmptyNotePadding">0</Thickness>
+    <!-- 内容区纸纹（Themes/PaperTexture 生成的平铺颗粒）。 -->
+    <Visibility x:Key="PaperGrainVisibility">Collapsed</Visibility>
+    <!-- 页脚「Enter 使用」的 Enter 画成键帽。 -->
+    <Visibility x:Key="KeycapVisibility">Collapsed</Visibility>
+
     <!-- 顶部页签：标准 = 沙色圆角块 + 赤陶下划线 + 底部发线；夹夹 = 描边胶囊，无下划线。 -->
     <CornerRadius x:Key="NavPillRadius">6</CornerRadius>
     <Thickness x:Key="NavPillBorderThickness">0</Thickness>
