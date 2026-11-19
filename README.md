@@ -2,9 +2,18 @@
 
 一款面向 Windows 的 Local-first（本地优先）剪切板历史工具。它首先提供稳定、快速、隐私友好的本地使用体验，并从架构上为账号系统、个人多设备云同步和团队共享剪切板预留扩展能力。
 
-## 0.9.5 文件夹直传、Everything 引导安装与防火墙放行（当前版本）
+## 0.9.6 夹夹主题 · 活页版（当前版本）
 
-当前版本号为 **0.9.5**（`0.9.5-everything-guide`），数据库仍为 **schema 8**，详见 [CHANGELOG](CHANGELOG.md)。自本版起只发布单文件 EXE 与便携 ZIP，不再提供 MSI。
+当前版本号为 **0.9.6**（`0.9.6-jiajia-looseleaf`），数据库仍为 **schema 8**，详见 [CHANGELOG](CHANGELOG.md)。
+
+- **夹夹主题换成活页版**：青灰桌面、活页纸、铅笔描边；荧光笔标记当前页签与选中行，品牌青用于夹子、主按钮与焦点。设计依据见 [docs/design/2026-11-19-jiajia-looseleaf/](docs/design/2026-11-19-jiajia-looseleaf/)。
+- **纸感动效**（仅夹夹主题）：悬停上浮、按下下沉、选中回弹与夹子弹入、页签荧光笔划过、新记录从上方落下；系统关闭动画时不播放。
+- **空状态便签、纸纹与 Enter 键帽**（仅夹夹主题）。标准、Kami、Kubai 三套主题外观与行为不变。
+- 产物未签名；动效尚待实机验收。
+
+## 0.9.5 文件夹直传、Everything 引导安装与防火墙放行（已发布）
+
+版本号为 **0.9.5**（`0.9.5-everything-guide`），数据库仍为 **schema 8**，详见 [CHANGELOG](CHANGELOG.md)。自本版起只发布单文件 EXE 与便携 ZIP，不再提供 MSI。
 
 - **Everything 引导安装**：EXE 内带官方 Everything 1.4 安装程序。「找本机文件」里未安装时点「安装 Everything」运行官方安装向导，已安装没运行时点「启动 Everything」；只在点击时运行，不静默安装、不改 Everything 设置。依据见 [ADR 0007 附录 A](docs/adr/0007-selection-file-search.md)。
 - **文件夹直传**：文件夹打包成 zip 发给已匹配设备。

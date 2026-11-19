@@ -14,6 +14,8 @@
 
 ## 当前范围
 
+> 0.9.6 补充（2026-11-19）：夹夹主题换成「活页版」（品牌青 `#10736B`、荧光笔选中、铅笔描边），新增纸感动效（`Services/PaperMotion`）、空状态便签、纸纹与页脚 Enter 键帽，规则见下「界面主题」；新增主题键在 `Palette.xaml` 为「无效果」值，标准 / Kami / Kubai 逐像素不变。数据库仍为 schema 8；版本源 `Directory.Build.targets`（0.9.6 / `0.9.6-jiajia-looseleaf`）与 `release/release-contract.json`（appVersion 0.9.6，schema 8）。产物未签名；动效、纸纹滚动性能待实机验收。
+>
 > 0.9.5 补充（2026-11-10）：只发布 EXE 与便携 ZIP，移除 MSI（`installer/`、`build-msi.ps1`、`-IncludeMsi`）；EXE 内嵌官方 Everything 1.4.1.1032 安装程序，用户点击「安装 Everything」/「启动 Everything」时才运行（ADR-0007 附录 A）；文件夹打包为 zip 直传；传输记录持久化到 `transfers.json`（最多 100 条）；防火墙一键放行（UAC + `netsh`，首次进入「传输」询问一次）；发布者胶囊在有新版本时显示红点与「更新」；应用内更新时新版本等待 20 秒后结束卡住的旧进程；发布脚本支持可选代码签名（`CM_SIGN_*`，`-RequireSignature`）。数据库仍为 schema 8；版本源 `Directory.Build.targets`（0.9.5 / `0.9.5-everything-guide`）与 `release/release-contract.json`（appVersion 0.9.5，schema 8）。产物未签名；实机验收清单见 `docs/acceptance/0.9.5-real-machine.md`。
 >
 > 0.9.4 补充（2026-11-10）：修复开启「保持可被发现」时退出卡死、导致无法再次启动的问题（Host 释放不在 UI 同步上下文上等待，ConfigSyncServer 全程 `ConfigureAwait(false)`，单实例唤醒写入限时 1 秒）；新增本机名称、配置页「我的 / 各订阅」来源胶囊；共享页与找本机文件弹窗去掉说明小字，按钮菜单去掉省略号，对话框随内容自适应高度。数据库仍为 schema 8；版本源 `Directory.Build.targets`（0.9.4 / `0.9.4-share-cleanup`）与 `release/release-contract.json`（appVersion 0.9.4，schema 8）。从 0.9.3 应用内更新时旧进程仍可能卡在退出；来源胶囊、对话框缩放与两台真实设备待实机验收。
