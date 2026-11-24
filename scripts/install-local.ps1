@@ -69,11 +69,24 @@ $link.IconLocation = "$target,0"
 $link.Save()
 Write-Output "开始菜单快捷方式已指向 $target"
 
-$runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-if ((Get-Item $runKey).GetValueNames() -contains "ClipboardManager") {
-    Set-ItemProperty $runKey -Name "ClipboardManager" -Value "`"$target`""
-    Write-Output "开机启动已改为 $target"
+# 开机启动值经 WMI（StdRegProv）读写：代理沙箱里的 HKCU 是隔离视图，直接 Set-ItemProperty 不会进入真实注册表，
+# Explorer 开机时仍会启动旧路径。HKEY_USERS\<SID> 就是当前用户的真实 HKCU。
+$hku = [uint32]2147483651
+$runKey = "$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)\Software\Microsoft\Windows\CurrentVersion\Run"
+function Get-RealRunValue {
+    $result = Invoke-CimMethod -Namespace root/default -ClassName StdRegProv -MethodName GetStringValue -Arguments @{ hDefKey = $hku; sSubKeyName = $runKey; sValueName = 'ClipboardManager' }
+    if ($result.ReturnValue -eq 0) { $result.sValue } else { $null }
+}
+$runValue = "`"$target`""
+$current = Get-RealRunValue
+if ($null -ne $current -and $current -ne $runValue) {
+    $set = Invoke-CimMethod -Namespace root/default -ClassName StdRegProv -MethodName SetStringValue -Arguments @{ hDefKey = $hku; sSubKeyName = $runKey; sValueName = 'ClipboardManager'; sValue = $runValue }
+    if ($set.ReturnValue -ne 0 -or (Get-RealRunValue) -ne $runValue) { throw "开机启动值写入失败（StdRegProv 返回 $($set.ReturnValue)），仍为 $current。" }
+    Write-Output "开机启动已从 $current 改为 $target"
+} elseif ($null -ne $current) {
+    Write-Output "开机启动已指向 $target"
 }
 
-if (-not $NoStart) { Start-Process $target -WorkingDirectory $InstallDir }
+# 经 Explorer 启动，新进程不继承代理沙箱，用户在设置里改开机启动时写的是真实注册表。
+if (-not $NoStart) { Start-Process explorer.exe -ArgumentList "`"$target`"" }
 Write-Output "已替换为 $Version：$target"

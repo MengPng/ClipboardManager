@@ -486,7 +486,7 @@ content_size
 4. 更新 README / 本文件的版本状态行，提交：`release: vx.y.z`。
 5. 先 `pwsh ./scripts/release-all.ps1 -Version x.y.z -DryRun`，检查 `artifacts/release/x.y.z/` 与 `artifacts/download-site/latest.json`。
 6. 再 `pwsh ./scripts/release-all.ps1 -Version x.y.z`。脚本依次：检查版本/工作区/分支 → 构建测试打包 → 推送 `main` 与标签 `vx.y.z` → 创建 GitHub Release（上传 EXE、便携 ZIP、`SHA256SUMS.txt`）→ 上传下载服务器，最后切换 `latest.json`。
-7. 发布成功后替换用户本机正在用的程序：在主仓库根目录运行 `pwsh ./scripts/install-local.ps1 -Version x.y.z`（校验 SHA-256，装到 `%LOCALAPPDATA%\Programs\ClipboardManager`，结束旧进程，开机启动已开时改指向新位置，开始菜单快捷方式指向新位置，再启动）。脚本警告仍装有旧 MSI 版本时，告知用户；用户同意后加 `-RemoveLegacyMsi` 重跑卸载（旧版保存设置会把开机启动项改回它自己）。
+7. 发布成功后替换用户本机正在用的程序：在主仓库根目录运行 `pwsh ./scripts/install-local.ps1 -Version x.y.z`（校验 SHA-256，装到 `%LOCALAPPDATA%\Programs\ClipboardManager`，结束旧进程，开机启动已开时改指向新位置，开始菜单快捷方式指向新位置，再启动）。脚本警告仍装有旧 MSI 版本时，告知用户；用户同意后加 `-RemoveLegacyMsi` 重跑卸载（旧版保存设置会把开机启动项改回它自己）。代理沙箱里的 HKCU 是隔离视图，直接读写注册表看到的不是真实值；核对开机启动项须经 WMI `StdRegProv` 读 `HKEY_USERS\<SID>\…\Run`，脚本已这样写入。
 8. 向用户报告：GitHub Release 链接、`https://clipboard.netkaize.com/download/latest.json` 中的版本号、SHA-256，以及未验证事项。
 
 规则：
